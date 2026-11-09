@@ -8,7 +8,7 @@ The build is the official EspoCRM image, pinned by digest, plus Estate Research'
 
 | Path in repo | Contents |
 |---|---|
-| `deploy/compose.json` | Three services, all with images pinned by digest: `app` (EspoCRM), `daemon` (the same image with entrypoint `docker-daemon.sh`) and `db` (MariaDB). JSON is valid Compose YAML; it was chosen so the policy tests need only the Python standard library. |
+| `deploy/compose.json` | Three services, all with images pinned by digest: `crm-app` (EspoCRM), `crm-daemon` (the same image with entrypoint `docker-daemon.sh`) and `crm-db` (MariaDB). JSON is valid Compose YAML; it was chosen so the policy tests need only the Python standard library. |
 | `deploy/env.example` | Names of the variables the stack needs. **No values.** |
 | `custom/` | ER metadata and code, mounted into the app as EspoCRM's `custom/` directory |
 | `scripts/` | Synthetic data seeder, backup, restore, export |
@@ -19,6 +19,8 @@ Images (see `security/EXTERNAL_CODE_REGISTER.yaml`):
 - `espocrm/espocrm:10.0.12@sha256:b50245d1e291b2636116b0396ce0d06018ffcded6a6c61c7af2420443a20f3ec`
 - `mariadb:11.4.13@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620`
 
+**Dev versus release.** CRM-001's dev stack mounts `custom/` from the checkout. The customer release (CRM-PBI-016) bakes the customisations into an ER image built from the pinned upstream digest, and installs from a release bundle with no Git checkout, ForgeV2, Claude or development-host paths (CRM-D017).
+
 ## 2. Where it runs
 
 The dev environment lives in `DOCKER1:/srv/CRM/runtime/dev/`, which is root-owned, mode `0700` and outside Git. It contains:
@@ -28,8 +30,12 @@ The dev environment lives in `DOCKER1:/srv/CRM/runtime/dev/`, which is root-owne
 
 ## 3. Isolation boundary (CRM-D012)
 
-- **Compose project:** `crm-dev`, on its own network with subnet `172.16.10.0/24`. On 2026-11-06 Docker on the host had no 172.16.x network; confirm the subnet is also unused on the LAN.
-- **Published ports:** `app` publishes `127.0.0.1:8180` only. The database publishes nothing. Access is through an SSH tunnel until CRM-PBI-008 adds TLS and LAN binding.
+- **Naming (CRM-D018):**
+  - Services, networks, named volumes and ER images carry the `crm-` prefix.
+  - Each environment has its own project name (`crm-dev`, later `crm-beta` and `crm-prod`).
+  - No `container_name` is set: Compose generates instance names, e.g. `crm-dev-crm-app-1` and network `crm-dev_crm-net`.
+- **Compose project:** `crm-dev`, on its own network `crm-net` with subnet `172.16.10.0/24`. On 2026-11-06 Docker on the host had no 172.16.x network; confirm the subnet is also unused on the LAN.
+- **Published ports:** `crm-app` publishes `127.0.0.1:8180` only. The database publishes nothing. Access is through an SSH tunnel until CRM-PBI-008 adds TLS and LAN binding.
 - **Nothing shared:** no volumes, networks, databases or credentials with any other application on the host.
 - **Firewall:** no firewall rules (standing policy). Exposure is controlled by the bind address.
 - **Resources:** about 2–3 GB RAM and 10 GB disk.
@@ -43,7 +49,7 @@ docker compose -p crm-dev -f deploy/compose.json --env-file /srv/CRM/runtime/dev
 python3 scripts/seed_synthetic.py --base-url http://127.0.0.1:8180
 python3 -m unittest discover -s tests/acceptance -v
 scripts/backup.sh dev && scripts/restore.sh dev <backup>
-docker compose -p crm-dev -f deploy/compose.json ps; docker network inspect crm-dev_default   # AC9: own resources only
+docker compose -p crm-dev -f deploy/compose.json ps; docker network inspect crm-dev_crm-net   # AC9: own resources only
 docker compose -p crm-dev -f deploy/compose.json down    # data stays in runtime/dev
 ```
 
