@@ -19,8 +19,12 @@ Nothing in this file is approved yet. Each row records its status. Approval goes
 | CRM-D014 | Salesforce stays the system of record, read-only to this project, until cutover (PBI-015). The beta holds a copy: beta entries are trial entries, and staff keep working in Salesforce. | PROPOSED | Beta direction, 2026-11-09 |
 | CRM-D015 | The import is repeatable and idempotent. Every migrated record stores its Salesforce id as an external key. Each run produces a reconciliation report and a rejects list. Mapping and clean-up rules are code and documentation in this repository; the extracted data lives only in the restricted runtime. | PROPOSED | PoC G5-3; usage assessment §7 |
 | CRM-D016 | Beta acceptance is not cutover approval. The beta does not require live Outlook filing; cutover does (PBI-014). | PROPOSED | Beta direction, 2026-11-09 |
+| CRM-D017 | Delivery is fully containerised. Customers install from a versioned release bundle plus images pinned by digest, needing only Docker Engine and Compose. The production image bakes ER customisations into an image built from the pinned upstream image; the core is not forked (CRM-D001). Dev stacks may bind-mount `custom/`. Beta and production use the same release. | PROPOSED | Product Owner, 2026-11-09 |
+| CRM-D018 | Lowercase `crm-` prefix on Compose services, networks, named volumes and ER images (e.g. `crm-app`, `crm-net`, `crm-espocrm`). Each environment has a distinct project name (`crm-dev`, `crm-beta`, `crm-prod`). No hard-coded `container_name` unless an operational need is recorded; Compose generates instance names from project and service. Lowercase because Docker requires it for project and image names. | PROPOSED | Product Owner, 2026-11-09 |
 
 PoC D7 (Microsoft 365 test mailbox and app registration) is a prerequisite for CRM-PBI-006, not a decision.
+
+Open decision for PBI-016: how the ER image reaches a customer host, either as a registry package or as an offline image archive in the release bundle.
 
 Business decisions needed before PBI-005 can close:
 - whether to archive firms with no recorded activity;
