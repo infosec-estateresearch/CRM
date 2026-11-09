@@ -1,0 +1,25 @@
+# External software register — Estate Research CRM
+# Coverage: the repository holds no incorporated code at bootstrap.
+# The entries below are CANDIDATES, not approvals. Approval of CRM-001 approves their use
+# in the dev environment only (FOUNDRY secure-engineering).
+coverage:
+  status: no-incorporated-code
+  basis: "Bootstrap commit contains documentation only."
+  assessed: 2026-11-09
+candidates:
+  - name: espocrm
+    origin: https://github.com/espocrm/espocrm   # image: docker.io/espocrm/espocrm
+    version: "10.0.12"
+    released: 2026-11-09   # bug fixes only; previous 10.0.11 digest sha256:8e1c7e97e0a1a08953a86af89c3808cb95410b6a5eb487d1e3475d2c7289357d
+    digest: "sha256:b50245d1e291b2636116b0396ce0d06018ffcded6a6c61c7af2420443a20f3ec"   # multi-arch index, registry lookup 2026-11-09
+    licence: AGPL-3.0
+    usage: CRM application and job daemon (same image), dev environment, CRM-001
+    approval: none
+    notes: "Bus factor ~1 upstream; regular security advisories; patch routine required (CRM-PBI-002/008)."
+  - name: mariadb
+    origin: https://hub.docker.com/_/mariadb   # image: docker.io/library/mariadb
+    version: "11.4.13 (11.4 LTS)"
+    digest: "sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620"   # multi-arch index, registry lookup 2026-11-09
+    licence: GPL-2.0
+    usage: CRM database, dev environment, CRM-001
+    approval: none

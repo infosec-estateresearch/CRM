@@ -1,0 +1,9 @@
+# Runtime state and secrets live outside the repo (/srv/CRM/runtime)
+.env
+*.env
+env
+!deploy/env.example
+runtime/
+backups/
+__pycache__/
+*.pyc
