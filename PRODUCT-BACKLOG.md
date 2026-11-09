@@ -2,15 +2,24 @@
 
 - **Status:** DRAFT. This needs Matt's explicit approval. Backlog items are not Work Orders and grant no authority (FND-009, FND-012).
 - **Ordering:** smallest useful increment first. Each later item depends on the ones above it unless it says otherwise.
+- **Traceability:** requirement IDs (R*, M*) are listed in `docs/REQUIREMENTS-TRACEABILITY.md`.
+- **Release path:** CRM-001 dev instance → pseudonymised sample → **customer beta on approved Salesforce data** → cutover. Salesforce remains the system of record until cutover (CRM-D014).
 
 | ID | State | Item | Value / acceptance outline | Depends on |
 |---|---|---|---|---|
-| CRM-PBI-001 | DEFINED | **Firms, branches and contacts baseline** on a pinned EspoCRM. Synthetic data only. | Firms with a head office and branches; same-name branches kept distinct; contacts linked to firms; search by name, postcode, phone and email; CSV export; backup and restore. WO draft: `work-orders/CRM-001.md`. | ForgeV2 sandbox acceptance on the development host |
-| CRM-PBI-002 | DEFINED | **Users, roles and audit** | Named users; everyone reads all records; edit rules per team; protected deletion; field history on key fields | 001 |
-| CRM-PBI-003 | DEFINED | **Activities:** calls, meetings, tasks, follow-ups, calendar | The 6 timed staff scenarios that touch activities | 001 |
-| CRM-PBI-004 | PROVISIONAL | **Enquiries:** stages Enquiry → Quoted → Instructed / Lost (with a loss reason), a service-type reference list (60+ values), quoted fee | The PoC G2 tests. The CRM-versus-Case-Manager decision is needed first. | 001, 002 |
-| CRM-PBI-005 | PROVISIONAL | **Pseudonymised sample import** from Salesforce (read-only), with reconciliation | Counts match per object and per parent firm; no live personal data | 001, 004; Matt's approval of the sample and pseudonymisation |
-| CRM-PBI-006 | PROVISIONAL | **Email filing spike:** an ER filing service and an Outlook task pane | The PoC G3 tests | 004; test mailbox and app registration |
-| CRM-PBI-007 | PROVISIONAL | **ERic read-only API adapter** | ERic reads firms and contacts through a read-only token; write attempts fail | 001, 002 |
-| CRM-PBI-008 | PROVISIONAL | **TLS, LAN exposure and staff pilot** | Staff reach the CRM over TLS with a named login; timed scenarios are at least as fast as Salesforce | 002, 003; security readiness for real personal data, assessed under that item |
-| CRM-PBI-009 | PLACEHOLDER | **Full migration and Salesforce switch-off** | Record-by-record reconciliation; a parallel run; switch-off before summer 2027 | All of the above |
+| CRM-PBI-001 | DEFINED | **Firms, branches and contacts baseline** on a pinned EspoCRM. Synthetic data only. | Firms with a head office and branches; same-name branches kept distinct; firm fields; contacts linked to firms; search by name, postcode, phone and email; CSV export; backup and restore. R1–R5, R16. WO: `work-orders/CRM-001.md`. | ForgeV2 sandbox acceptance on the development host |
+| CRM-PBI-002 | DEFINED | **Users, roles, audit and lists** | Named users; everyone reads all records; edit rules per team; protected deletion; field history on key fields; filtered list views with CSV export (R12, R13) | 001 |
+| CRM-PBI-003 | DEFINED | **Activities:** calls, meetings, tasks, follow-ups, calendar | R9; the timed scenarios that touch activities | 001 |
+| CRM-PBI-004 | DEFINED | **Enquiries** | Fields per R7: stages Enquiry → Quoted → Instructed / Lost (loss reason required); quoted fee; service-type reference list (60+, admin-editable); introduced-by and channel; client reference, deceased name, case number; new or existing business; category; enquiry contacts. Enquiry search (R6) and a phone-call enquiry created in under 60 s (R8). | 001, 002; CRM-D003 confirmed |
+| CRM-PBI-005 | DEFINED | **Salesforce mapping, import and reconciliation tooling**, proven on a pseudonymised sample | Mapping specification, object by object and value by value (M1), including shipping address → firm address and legacy fields. Read-only extractor; transform with the clean-up rules (M4); idempotent loader keyed on the Salesforce id, with a rejects list (M2); reconciliation report (M3). Proven end to end on the pseudonymised sample (PoC §5). Extracted data stays in the restricted runtime and never enters Git. | 001–004; Matt's approval of the sample extraction (PoC P2) |
+| CRM-PBI-006 | PROVISIONAL | **Email filing spike:** an ER filing service and an Outlook task pane | PoC G3-1 to G3-6, on a test mailbox | 004; test mailbox and app registration |
+| CRM-PBI-007 | PROVISIONAL | **ERic read-only API adapter** | ERic reads firms and contacts through a read-only token; write attempts fail; firm id mapped to ERic's company key (R14) | 001, 002 |
+| CRM-PBI-010 | DEFINED | **Upgrade and rebuild proof** | An upstream patch release applies with ER customisations installed; a clean rebuild from image plus extension gives the same result; smoke tests pass (R15) | 001–004 |
+| CRM-PBI-011 | DEFINED | **Beta environment readiness** | A separate beta environment; TLS; reachable only by named beta users on the LAN; named logins; daily backup with a tested restore; documented access and disposal rules; Matt's data-protection approval for loading real data | 002, 010 |
+| CRM-PBI-012 | DEFINED | **Beta data load**, using approved Salesforce data | The PBI-005 tooling is run against the objects Matt approves: firms, contacts, enquiries, activities and historic emails (R11). Reconciliation is 100%, with every mismatch explained. Full-volume search is p95 < 1.5 s (R6). The load can be re-run. | 005, 011 |
+| CRM-PBI-013 | DEFINED | **Customer beta: user acceptance and feedback** | Estate Research staff use the beta against the beta acceptance criteria. Feedback is recorded and triaged. Blocking items are fixed and retested (R17). | 012, 003, 004 |
+| CRM-PBI-014 | PROVISIONAL | **Production email filing** (Outlook "File to CRM") | Production authorisation, de-duplication, audit, deployment to staff mailboxes (R10). **Required for cutover, not for the beta.** | 006, 011 |
+| CRM-PBI-008 | PROVISIONAL | **Staff rollout:** training and all users | Every user on a named login, trained; timed scenarios confirmed across teams | 013, 014 |
+| CRM-PBI-015 | PLACEHOLDER | **Cutover and Salesforce switch-off** | Rehearsed full reload and reconciliation; final delta; parallel run with Salesforce read-only; ERic switched to the CRM adapter (007); switch-off before summer 2027, timed to the contract renewal (M6) | 007, 008, 013, 014 |
+
+CRM-PBI-009 (full migration and switch-off) is replaced by PBI-005, PBI-012 and PBI-015.
