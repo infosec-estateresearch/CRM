@@ -1,0 +1,9 @@
+{
+    "relationshipPanels": {
+        "branches": {
+            "layout": "listForBranches",
+            "create": true,
+            "select": true
+        }
+    }
+}

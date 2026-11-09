@@ -18,3 +18,11 @@ Rules:
 - GitHub is the authoritative record.
 - This repository is public, so it must not contain secrets, host addresses, staff names, customer or firm names, or Salesforce identifiers.
 - Salesforce is read-only and is never written to.
+
+## Usage
+
+The CRM-001 dev stack is EspoCRM 10.0.12 plus MariaDB 11.4.13, both pinned by digest, with Estate Research's customisations in `custom/`. It runs only on the development host, as Compose project `crm-dev`, at `127.0.0.1:8180`. All of its data is synthetic.
+
+- Deploy, seed, back up, restore and export: see [docs/BUILD.md §7](docs/BUILD.md#7-usage-crm-001-dev-stack).
+- Checks that need no stack: `python3 -m unittest discover -s tests/unit -v`.
+- Checks against the running stack (operator stage): `python3 -m unittest discover -s tests/acceptance -v`. These need `CRM_BASE_URL`, `CRM_ADMIN_USERNAME` and `CRM_ADMIN_PASSWORD` in the environment.

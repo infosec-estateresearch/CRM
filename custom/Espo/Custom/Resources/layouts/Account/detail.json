@@ -1,0 +1,14 @@
+[
+    {
+        "label": "Overview",
+        "rows": [
+            [{"name": "name"}, {"name": "website"}],
+            [{"name": "emailAddress"}, {"name": "phoneNumber"}],
+            [{"name": "billingAddress"}, {"name": "parent"}],
+            [{"name": "type"}, {"name": "industry"}],
+            [{"name": "practiceManagementSystem"}, {"name": "learningPlatformAccess"}],
+            [{"name": "shippingAddress"}, false],
+            [{"name": "description", "fullWidth": true}]
+        ]
+    }
+]

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Back up the crm-dev stack: a MariaDB dump plus the EspoCRM data directory,
+# into $CRM_RUNTIME_DIR/backups/crm-dev-<UTC stamp>/.
+# Usage: scripts/backup.sh dev
+set -euo pipefail
+# shellcheck source=lib/common.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+
+require_dev "${1:-}"
+require_env_file
+[ -d "$CRM_RUNTIME_DIR/data" ] || die "data directory missing: $CRM_RUNTIME_DIR/data"
+
+umask 077
+name="crm-dev-$(utc_stamp)"
+dest="$CRM_BACKUP_DIR/$name"
+partial="$dest.partial"
+[ ! -e "$dest" ] && [ ! -e "$partial" ] || die "backup already exists: $dest"
+mkdir -p "$partial"
+trap 'rm -rf -- "$partial"' EXIT
+
+# The dump runs inside crm-db with the container's own credentials, so no
+# secret is passed on the host command line.
+compose exec -T crm-db sh -c \
+    'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb-dump -uroot --single-transaction --routines --triggers --events "$MARIADB_DATABASE"' \
+    | gzip -c > "$partial/db.sql.gz"
+tar -C "$CRM_RUNTIME_DIR" -czf "$partial/data.tar.gz" data
+(cd "$partial" && sha256sum db.sql.gz data.tar.gz > SHA256SUMS)
+
+mv "$partial" "$dest"
+trap - EXIT
+echo "backup written: $dest"

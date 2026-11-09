@@ -2,6 +2,8 @@
 # Coverage: the repository holds no incorporated code at bootstrap.
 # The entries below are CANDIDATES, not approvals. Approval of CRM-001 approves their use
 # in the dev environment only (FOUNDRY secure-engineering).
+# CRM-001 adds no other dependency: scripts and tests use the Python standard library only,
+# and custom/ is Estate Research's own EspoCRM metadata and PHP (no third-party code).
 coverage:
   status: no-incorporated-code
   basis: "Bootstrap commit contains documentation only."
@@ -14,6 +16,7 @@ candidates:
     digest: "sha256:b50245d1e291b2636116b0396ce0d06018ffcded6a6c61c7af2420443a20f3ec"   # multi-arch index, registry lookup 2026-11-09
     licence: AGPL-3.0
     usage: CRM application and job daemon (same image), dev environment, CRM-001
+    usage_confirmed: "deploy/compose.json services crm-app and crm-daemon (entrypoint docker-daemon.sh), pinned to this exact tag and digest; checked by tests/unit/test_compose_policy.py (CRM-001)."
     approval: none
     notes: "Bus factor ~1 upstream; regular security advisories; patch routine required (CRM-PBI-002/008)."
   - name: mariadb
@@ -22,4 +25,5 @@ candidates:
     digest: "sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620"   # multi-arch index, registry lookup 2026-11-09
     licence: GPL-2.0
     usage: CRM database, dev environment, CRM-001
+    usage_confirmed: "deploy/compose.json service crm-db, pinned to this exact tag and digest, no published port; checked by tests/unit/test_compose_policy.py (CRM-001)."
     approval: none
