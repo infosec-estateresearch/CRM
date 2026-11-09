@@ -1,0 +1,195 @@
+{
+  "base": "main",
+  "base_sha": "096748c8b4dfdab22070e1e802c6614fdf54465c",
+  "branch": "forge/CRM-001",
+  "candidate": "46e0a1852080faa94d5c0d9332d5d5c14d0cf6c5",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-09T17:49:04Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-09T17:49:43Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-09T18:02:06Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r1: items 1-7 implemented; 62 unit tests OK; non-vacuity shown for all policy rules and the dev guard; custom/ 238 lines",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-09T18:02:27Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "46e0a1852080faa94d5c0d9332d5d5c14d0cf6c5",
+      "t": "2026-11-09T18:02:41Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "46e0a1852080faa94d5c0d9332d5d5c14d0cf6c5",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-09T18:03:04Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "46e0a1852080faa94d5c0d9332d5d5c14d0cf6c5",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-09T18:03:04Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "46e0a1852080faa94d5c0d9332d5d5c14d0cf6c5",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-09T18:03:04Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-09T18:07:05Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "inconclusive",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-09T18:07:05Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-09T18:07:05Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "46e0a1852080faa94d5c0d9332d5d5c14d0cf6c5",
+      "findings": [
+        {
+          "key": "ro-custom-under-docroot",
+          "severity": "advisory"
+        },
+        {
+          "key": "espo-conventions-unverified",
+          "severity": "advisory"
+        },
+        {
+          "key": "restore-leaves-new-tables",
+          "severity": "advisory"
+        }
+      ],
+      "note": "r1 PASS; advisories deferred to operator stage",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-09T18:07:39Z",
+      "type": "result"
+    },
+    {
+      "candidate": "46e0a1852080faa94d5c0d9332d5d5c14d0cf6c5",
+      "findings": [
+        {
+          "key": "browser-unavailable",
+          "severity": "advisory"
+        },
+        {
+          "key": "custom-ro-nested-mount",
+          "severity": "advisory"
+        }
+      ],
+      "note": "r1: unit 62 OK, 21 mutations all fail, seeder independently verified; browser unavailable on host (WO expects this)",
+      "outcome": "inconclusive",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-09T18:07:39Z",
+      "type": "result"
+    },
+    {
+      "candidate": "46e0a1852080faa94d5c0d9332d5d5c14d0cf6c5",
+      "findings": [
+        {
+          "key": "csv-formula-injection",
+          "severity": "advisory"
+        },
+        {
+          "key": "restore-arbitrary-source",
+          "severity": "advisory"
+        },
+        {
+          "key": "plaintext-base-url",
+          "severity": "advisory"
+        }
+      ],
+      "note": "r1 PASS; spot-checked restore-arbitrary-source in scripts/restore.sh:13-18 (confirmed, operator-only)",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-09T18:07:39Z",
+      "type": "result"
+    },
+    {
+      "note": "Browser-only (CRM-D013): Auditor PASS, DevSecOps PASS, Tester INCONCLUSIVE solely because no browser exists on the host; unit 62 OK, 21 mutations fail as required, gitleaks clean. Not acceptance; operator stage and Matt walkthrough (AC3-AC10) remain.",
+      "outcome": "ESCALATED",
+      "t": "2026-11-09T18:07:50Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-001",
+  "host": "docker1",
+  "known_commit": "096748c8b4dfdab22070e1e802c6614fdf54465c",
+  "limit": 4,
+  "outcome": "ESCALATED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-001",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-001",
+  "wo": "CRM-001",
+  "worktree": "/srv/CRM/worktrees/CRM-001"
+}
