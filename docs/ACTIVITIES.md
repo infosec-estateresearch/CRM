@@ -18,6 +18,7 @@ Legacy fields, all `isCustom`, unaudited, and kept out of list and mass-update l
 |---|---|---|
 | `sfId` | Call, Meeting, Task, Email | varchar 18, `readOnlyAfterCreate`, unique index `sfId`. Hidden from the human roles. |
 | `sfOwnerId`, `sfCreatedAt` | Call, Meeting, Task, Email | The original owner and creation date. People can read them but not edit them (role `fieldData`). |
+| `sfCompletedAt` | Task | "Completed in Salesforce" (datetime, CRM-008-G). The Salesforce completion time, which the Task hook below copies to `dateCompleted`. People can read it but not edit it (role `fieldData`). |
 | `sfEmailMessageId` | Email | The Salesforce EmailMessage id. The RFC message id goes in the core `messageId`. |
 | `sfThreadIdentifier` | Email | The Salesforce ThreadIdentifier (varchar 255) |
 | `sfActivityId` | Email | The Salesforce Task id of a logged email |
@@ -26,7 +27,7 @@ As in CRM-004 Amendment v1.1, none of these fields is `readOnly`, because that w
 
 `Meeting.meetingType` is an editable enum with the options Meeting (the default), Presentation, Bag Drop, Call, Other, Email and Unspecified (legacy). It is shown on the Meeting list and detail views.
 
-The detail views of Call, Meeting and Task keep every core field (Task keeps `dateCompleted`, under `dateEnd`) and end with a collapsed **Legacy** panel. Admins see `sfId` there; the human roles see the owner and created date. The Email layouts stay core, so the Email legacy fields are reachable only by admins and through the API.
+The detail views of Call, Meeting and Task keep every core field (Task keeps `dateCompleted`, under `dateEnd`) and end with a collapsed **Legacy** panel. Admins see `sfId` there; the human roles see the owner and created date (and, on a Task, `sfCompletedAt`). The Email layouts stay core, so the Email legacy fields are reachable only by admins and through the API.
 
 ## 2. Archived email is read-only history
 
@@ -46,6 +47,18 @@ The detail views of Call, Meeting and Task keep every core field (Task keeps `da
 - **The plain-text body.** The importer writes archived emails with `isHtml = false` and the text in `body` (and `bodyPlain`), so the core Email detail view shows it as plain text. The core Email layouts are not overridden.
 - **The decision table** is mirrored in `tests/unit/activity_policy.py` (`archived_save_allowed`) and checked statically against the hook.
 
+## 2a. The Salesforce completion date of a Task (CRM-008-G)
+
+Core `Task.dateCompleted` is `readOnly`: the API discards it on create and update. The core hook `Espo\Modules\Crm\Hooks\Task\DateCompleted` sets it whenever the status changes: null for any status other than Completed, and **now** for Completed (the REST API does not set the IMPORT option that would skip this). Without a custom rule, every imported completed Task would show the import time.
+
+- **The field.** The importer sends the Salesforce value in `Task.sfCompletedAt` (a datetime, not `readOnly`, so the API accepts it).
+- **The hook.** `custom/Espo/Custom/Hooks/Task/PreserveSalesforceCompletedDate.php` is a `beforeSave` hook with `$order = 20`, so it runs after the core hook. When the status is `Completed`, `sfCompletedAt` is set, **and** the Task is new or `sfCompletedAt` changed in this save, it sets `dateCompleted = sfCompletedAt`. Every other save is left to core:
+  - an unrelated edit leaves `dateCompleted` unchanged;
+  - reopening a Task sets it to null (core);
+  - a staff member re-completing a reopened Task gets core's "now", because `sfCompletedAt` did not change;
+  - a Task that is not Completed keeps a null `dateCompleted`, even with `sfCompletedAt` set.
+- **The decision table** is mirrored in `tests/unit/activity_policy.py` (`completed_date_after_save`), checked statically against the hook, and run against the real hook file under `php` with stubs when `php` is installed.
+
 ## 3. No email sending or receiving (D5)
 
 There are no email accounts, no SMTP, no sending and no inbound mail. **Operator setting:** in Administration > Outbound Emails, leave the SMTP server unset, so nothing can be sent. Check this at the operator stage; the exact labels are not verified in this repository. Do not create Group or Personal Email Accounts. The roles keep `EmailAccountScope` and `ExternalAccount` false.
@@ -62,7 +75,7 @@ The core clientDefs of Opportunity (the Enquiry), Account and Contact already ha
 
 ## 6. Tests
 
-- `tests/unit/test_activities.py` covers metadata consistency, the unique indexes, the meeting type, the layouts, the dashboard template and the archived-email hook. Each rule fails against a mutated (broken) copy of the repository.
-- `tests/unit/test_access_policy.py` covers the role changes: Email edit, and the activity `sf*` `fieldData`.
+- `tests/unit/test_activities.py` covers metadata consistency, the unique indexes, the meeting type, the layouts, the dashboard template, the archived-email hook and the Task completion-date hook. Each rule fails against a mutated (broken) copy of the repository.
+- `tests/unit/test_access_policy.py` covers the role changes: Email edit, and the activity `sf*` `fieldData` (including `Task.sfCompletedAt`).
 - `tests/unit/test_provision.py` covers the dashboard provisioning against the fake EspoCRM.
 - AC3 to AC7 run at the operator stage on `crm-dev`.

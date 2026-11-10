@@ -138,7 +138,8 @@ The full mapping is in `load/contract/mapping.json`. The decisions are in `MIGRA
   - Status: Open becomes `Not Started` and Completed becomes `Completed`.
   - Priority: Normal and High map to themselves.
   - The parent is resolved from `WhatId` by key prefix, falling back to `AccountId`.
-  - **`dateCompleted` only when Completed (CRM-008-F).** EspoCRM keeps `dateCompleted` only for status `Completed`; for any other status a sent value reads back null. It is sent (from `CompletedDateTime`, or null) only when the mapped status is `Completed`. Otherwise it is neither sent nor compared, and a set `CompletedDateTime` is recorded as `date_completed_not_storable`. In the real extract no row has this combination.
+  - **The completion date goes to `sfCompletedAt` (CRM-008-G).** Core `dateCompleted` is `readOnly` (the API discards it) and the core hook sets it to the save time whenever a Task becomes Completed. The importer therefore never sends or compares `dateCompleted`. It sends `CompletedDateTime` (or null) as `sfCompletedAt` when the mapped status is `Completed`, and the `PreserveSalesforceCompletedDate` hook copies it to `dateCompleted` (see [ACTIVITIES.md §2a](ACTIVITIES.md)). A re-run compares `sfCompletedAt` only, so a staff re-completion (core "now") is not overwritten.
+  - **Only when Completed (CRM-008-F).** For any other status, `sfCompletedAt` is not sent and a set `CompletedDateTime` is recorded as `date_completed_not_storable`. In the real extract no row has this combination.
 - **Call.**
   - Status is `Held`.
   - `CallType` `Inbound` and `Outbound` map exactly to `direction`. For a blank `CallType`, **no direction is sent** and `call_direction_unknown` is recorded; EspoCRM then shows its core default (`Outbound`), which is not a Salesforce value. Any other (unmapped, non-blank) `CallType` is treated the same way: no direction is sent, with `call_direction_unknown` plus `enum_unmapped`.
@@ -161,7 +162,7 @@ The full mapping is in `load/contract/mapping.json`. The decisions are in `MIGRA
   **No Bcc and no attachments.**
 
   **No recipient: a Task (CRM-008-F).** `Email.to` is required (`400 to required`). An EmailMessage whose To list is empty after validation (a blank `ToAddress`, or every address in it dropped as `email_address_invalid`) is imported as a **Task**, following the CRM-008 Task-Email rule, with the code `email_without_recipient_imported_as_task`:
-  - Subject is the name; the plain body (`TextBody`) is the description, as-is; status is `Completed`; `dateCompleted` comes from `MessageDate`; `dateEndDate` is null; the parent is resolved as for the Email.
+  - Subject is the name; the plain body (`TextBody`) is the description, as-is; status is `Completed`; `sfCompletedAt` (and so, through the hook, `dateCompleted`) comes from `MessageDate`; `dateEndDate` is null; the parent is resolved as for the Email.
   - The HTML body is not in contract v4 (D5 excludes `HtmlBody`), so a message with only an HTML body has a null description. No HTML is converted.
   - The owner (required on a Task) is, in this order:
     1. the owner of the linked Task (`ActivityId`), resolved as usual;
@@ -169,6 +170,8 @@ The full mapping is in `load/contract/mapping.json`. The decisions are in `MIGRA
     3. otherwise the record is refused with `owner_required_unresolved`, never guessed and never sent.
   - `priority` has no source and is not sent, so EspoCRM stores its core default (`Normal`). This is recorded once per such record as `priority_server_default`, the same treatment as `call_direction_unknown`.
   - It is counted under `EmailMessage` → `targets.Task`; on a re-run it is found in the Task index (not flagged as `exists_not_in_snapshot`).
+  - The codes `email_without_recipient_imported_as_task` and `priority_server_default` (and `email_kept_as_task`) are recorded only for a record that was actually sent and stored. A record refused before sending (for example `owner_required_unresolved`) or rejected by the server gets neither (CRM-008-G).
+  - An EmailMessage already created as a **Task** by an earlier run **stays a Task**, even once it has a valid recipient: it is never moved and never also POSTed as an Email. This is recorded as `email_kept_as_task` (CRM-008-G).
   - An EmailMessage already created as an Email by an earlier run **stays an Email**. Its `to` is then left out of the update (a null `to` would be refused), so EspoCRM keeps the stored recipients.
 
   EmailMessageRelation rows hidden through a soft-deleted EmailMessage or Contact (contract v4 `visibleVia`) are **skipped** and counted as `parent_soft_deleted`.
@@ -228,9 +231,10 @@ There is one line per `{object, sfId, reason}`. It holds ids and codes only; a `
 | `email_address_invalid` | An invalid To or Cc address was dropped from the list. |
 | `email_without_recipient_imported_as_task` | (EmailMessage) The To list is empty after validation; `Email.to` is required, so the message was imported as a Task. |
 | `owner_from_created_by` | (EmailMessage imported as a Task) No linked Task, or its owner is unresolved; the owner is the provisioned user in the EmailMessage's `CreatedById`. |
+| `email_kept_as_task` | (EmailMessage) An earlier run imported the message as a Task (no recipient then); it now has a recipient but stays a Task and no Email is created. |
 | `priority_server_default` | (EmailMessage imported as a Task) `priority` has no source and was not sent; EspoCRM stores its core default (`Normal`). |
 | `title_unstorable_without_account` | (Contact) The Contact has a Title but no resolved account; EspoCRM stores no title without an account, so it was not sent. |
-| `date_completed_not_storable` | (Task) `CompletedDateTime` is set but the mapped status isn't `Completed`; EspoCRM keeps no `dateCompleted` then, so it was not sent. |
+| `date_completed_not_storable` | (Task) `CompletedDateTime` is set but the mapped status isn't `Completed`; EspoCRM keeps no `dateCompleted` then, so `sfCompletedAt` was not sent. |
 | `email_from_invalid` | The EmailMessage `from` is blank or invalid: the record is not written. |
 | `service_type_refused` | (Opportunity) The ServiceType this Opportunity names was refused (`value_too_long` on ServiceType `name`). The Opportunity is written with `serviceTypeId` null. The line carries the record id only. |
 | `account_unresolved` | `AccountId` doesn't resolve, for example because the account is soft-deleted. |

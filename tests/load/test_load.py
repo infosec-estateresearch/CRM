@@ -2191,11 +2191,12 @@ class TestCrm008F(Base):
         self.assertEqual(f.db["Contact"][b["id"]]["title"], "T")
         f.send("PUT", f"Contact/{a['id']}", body={"title": "T2"})
         self.assertIsNone(f.db["Contact"][a["id"]]["title"])
+        # CRM-008-G: dateCompleted is readOnly; core stamps now on Completed, null otherwise.
         task = {"assignedUserId": "u", "priority": "Normal", "dateCompleted": "2025-01-01 00:00:00"}
         _st, t1 = f.send("POST", "Task", body=dict(task, sfId="t1", status="Not Started"))
         _st, t2 = f.send("POST", "Task", body=dict(task, sfId="t2", status="Completed"))
         self.assertIsNone(f.db["Task"][t1["id"]]["dateCompleted"])
-        self.assertEqual(f.db["Task"][t2["id"]]["dateCompleted"], "2025-01-01 00:00:00")
+        self.assertEqual(f.db["Task"][t2["id"]]["dateCompleted"], f.NOW)
 
     def test_fake_email_to_required(self):
         f = FakeEspo()
@@ -2294,6 +2295,7 @@ class TestCrm008F(Base):
         self.assertIsNone(tasks[fx.T[5]].get("dateCompleted"))
         sent = [b for m, e, b in espo.writes if e == "Task" and b.get("sfId") == fx.T[5]]
         self.assertNotIn("dateCompleted", sent[0])
+        self.assertNotIn("sfCompletedAt", sent[0])
         self.assertIn("date_completed_not_storable", self.codes(fx.T[5]))
         self.assertNotIn("date_completed_not_storable", self.codes(fx.T[0]))
         self.assertEqual(self.rerun_writes(snap, espo), [])
@@ -2302,6 +2304,7 @@ class TestCrm008F(Base):
         attrs, exc = self.mapper().task(dict(Id=fx.T[5], Status="Open", CompletedDateTime=None, OwnerId=fx.U1),
                                         _NullCtx())[1:]
         self.assertNotIn("dateCompleted", attrs)
+        self.assertNotIn("sfCompletedAt", attrs)
         self.assertNotIn("date_completed_not_storable", exc)
 
     # ------------------------------------------------------------ 4 email without recipient
@@ -2406,6 +2409,150 @@ class TestCrm008F(Base):
         self.assertNotIn(fx.M[1], espo.by_sf("Task"))
         self.assertEqual(espo.by_sf("Email")[fx.M[1]]["to"], "y@example.test")
         self.assertNotIn("email_without_recipient_imported_as_task", self.codes(fx.M[1]))
+
+
+class TestCrm008G(Base):
+    """CRM-008-G: the Salesforce completion date (sfCompletedAt and the Task hook), plus the
+    CRM-008-F advisories (all data synthetic)."""
+
+    load, codes, rerun_writes = TestCrm008F.load, TestCrm008F.codes, TestCrm008F.rerun_writes
+
+    # ------------------------------------------------------------ the fake (facts 1-3)
+    def test_fake_models_core_and_the_hook(self):
+        f = FakeEspo()
+        sf = "2025-01-01 00:00:00"
+        base = {"assignedUserId": "u", "priority": "Normal"}
+        _st, a = f.send("POST", "Task", body=dict(base, sfId="a", status="Completed", sfCompletedAt=sf))
+        _st, b = f.send("POST", "Task", body=dict(base, sfId="b", status="Not Started", sfCompletedAt=sf))
+        _st, c = f.send("POST", "Task", body=dict(base, sfId="c", status="Completed", sfCompletedAt=None))
+        rec = f.db["Task"]
+        self.assertEqual(rec[a["id"]]["dateCompleted"], sf)                    # the hook
+        self.assertIsNone(rec[b["id"]]["dateCompleted"])                      # not Completed
+        self.assertEqual(rec[c["id"]]["dateCompleted"], f.NOW)                # core, no sf date
+        f.send("PUT", f"Task/{a['id']}", body={"name": "n", "dateCompleted": "2020-01-01 00:00:00"})
+        self.assertEqual(rec[a["id"]]["dateCompleted"], sf)                    # unrelated, readOnly
+        f.send("PUT", f"Task/{a['id']}", body={"status": "Not Started"})
+        self.assertIsNone(rec[a["id"]]["dateCompleted"])                      # reopen: core null
+        f.send("PUT", f"Task/{a['id']}", body={"status": "Completed"})
+        self.assertEqual(rec[a["id"]]["dateCompleted"], f.NOW)                # staff re-completes
+        f.send("PUT", f"Task/{a['id']}", body={"sfCompletedAt": "2025-02-02 00:00:00"})
+        self.assertEqual(rec[a["id"]]["dateCompleted"], "2025-02-02 00:00:00")   # importer corrects
+
+    def test_fake_without_the_hook_stamps_now(self):
+        f = FakeEspo()
+        f.disabled_checks = {"completed_hook"}
+        _st, a = f.send("POST", "Task", body={"sfId": "a", "assignedUserId": "u", "status": "Completed",
+                                             "sfCompletedAt": "2025-01-01 00:00:00"})
+        self.assertEqual(f.db["Task"][a["id"]]["dateCompleted"], f.NOW)
+
+    # ------------------------------------------------------------ 3 importer
+    def completed_sources(self, data):
+        """sfId -> the source completion time (EspoCRM format) of every Completed Task."""
+        out = {}
+        for r in data["Task"]:
+            if r.get("IsDeleted") is not True and r.get("Status") == "Completed" and \
+                    r.get("TaskSubtype") in (None, "Task") and r.get("CompletedDateTime"):
+                out[r["Id"]] = r["CompletedDateTime"][:19].replace("T", " ")
+        return out
+
+    def test_completed_task_keeps_the_salesforce_date(self):
+        data = fx.org()
+        snap, espo = self.load(data)
+        tasks = espo.by_sf("Task")
+        expected = self.completed_sources(data)
+        self.assertTrue(expected)
+        for sf_id, when in expected.items():
+            self.assertEqual((tasks[sf_id]["sfCompletedAt"], tasks[sf_id]["dateCompleted"]), (when, when))
+        for m, e, body in espo.writes:
+            if e == "Task":
+                self.assertNotIn("dateCompleted", body)
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+
+    def test_contract_reads_sf_completed_at_not_date_completed(self):
+        with open(os.path.join(fx.ROOT, "load", "contract", "mapping.json"), encoding="utf-8") as fh:
+            attrs = json.load(fh)["entities"]["Task"]["attributes"]
+        self.assertIn("sfCompletedAt", attrs)
+        self.assertNotIn("dateCompleted", attrs)
+
+    def test_compares_sf_completed_at_never_date_completed(self):
+        snap, espo = self.load()
+        rec = espo.by_sf("Task")[fx.T[0]]
+        rec["dateCompleted"] = espo.NOW              # e.g. a staff re-completion: not the importer's
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+        rec["sfCompletedAt"] = "2020-01-01 00:00:00"     # the stored Salesforce value differs
+        writes = self.rerun_writes(snap, espo)
+        self.assertEqual(writes, [("PUT", "Task", {"sfCompletedAt": "2025-05-05 10:00:00"})])
+        self.assertEqual(rec["dateCompleted"], "2025-05-05 10:00:00")
+
+    def test_email_without_recipient_task_keeps_message_date(self):
+        data = fx.org()
+        data["EmailMessage"][1]["ToAddress"] = None
+        snap, espo = self.load(data)
+        t = espo.by_sf("Task")[fx.M[1]]
+        self.assertEqual((t["sfCompletedAt"], t["dateCompleted"]), ("2025-07-02 12:00:00",) * 2)
+        sent = [b for m, e, b in espo.writes if e == "Task" and b.get("sfId") == fx.M[1]]
+        self.assertNotIn("dateCompleted", sent[0])
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+
+    # ------------------------------------------------------------ 4 advisories
+    def test_task_from_email_stays_a_task_once_it_has_a_recipient(self):
+        data = fx.org()
+        data["EmailMessage"][1]["ToAddress"] = None
+        snap, espo = self.load(data)
+        snap2 = write_snapshot(os.path.join(self.tmp, "g2"), data=fx.org())   # now has a recipient
+        n = len(espo.writes)
+        self.assertEqual(self.run_load(snap=snap2, espo=espo), 0, self.last_err)
+        self.assertEqual(espo.writes[n:], [])                       # no Email POST, no Task write
+        self.assertNotIn(fx.M[1], espo.by_sf("Email"))
+        self.assertIn(fx.M[1], espo.by_sf("Task"))
+        codes = self.codes(fx.M[1])
+        self.assertIn("email_kept_as_task", codes)
+        self.assertNotIn("email_without_recipient_imported_as_task", codes)
+        self.assertEqual(self.report()["objects"]["EmailMessage"]["targets"]["Task"]["unchanged"], 1)
+
+    def test_refused_email_task_records_no_sent_only_codes(self):
+        data = fx.org()
+        data["EmailMessage"][0].update(ToAddress=None, ActivityId=None)     # owner unresolved
+        snap, espo = self.load(data)
+        codes = self.codes(fx.M[0])
+        self.assertIn("owner_required_unresolved", codes)
+        self.assertFalse({"email_without_recipient_imported_as_task", "priority_server_default",
+                          "email_kept_as_task"} & codes, codes)
+        self.assertNotIn("priority_server_default", self.report()["exceptions"]["byReason"])
+
+    def test_rejected_email_task_records_no_sent_only_codes(self):
+        data = fx.org()
+        data["EmailMessage"][1]["ToAddress"] = None
+        snap, espo = self.load_rejected(data, fx.M[1])
+        self.assertNotIn(fx.M[1], espo.by_sf("Task"))
+        self.assertIn("write_rejected", self.codes(fx.M[1]))
+        codes = self.codes(fx.M[1])
+        self.assertFalse({"email_without_recipient_imported_as_task", "priority_server_default"} & codes,
+                         codes)
+
+    def load_rejected(self, data, sf_id):
+        """A load whose server refuses the Task POST for ``sf_id`` (400): never stored."""
+        class Refuses(FakeEspo):
+            def send(self, method, path, query=None, body=None, headers=None):
+                if method == "POST" and path == "Task" and (body or {}).get("sfId") == sf_id:
+                    self.writes.append((method, path, body))
+                    return 400, {"field": "name", "type": "valid"}
+                return super().send(method, path, query, body, headers)
+        snap = write_snapshot(os.path.join(self.tmp, "rej"), data=data)
+        espo = Refuses()
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 5, self.last_err)    # finished, failures
+        return snap, espo
+
+    def test_html_only_body_gives_a_null_description(self):
+        data = fx.org()
+        data["EmailMessage"][1].update(ToAddress=None, TextBody=None)       # HtmlBody is not in v4
+        snap, espo = self.load(data)
+        t = espo.by_sf("Task")[fx.M[1]]
+        self.assertIsNone(t["description"])
+        sent = [b for m, e, b in espo.writes if e == "Task" and b.get("sfId") == fx.M[1]]
+        self.assertIn("description", sent[0])
+        self.assertIsNone(sent[0]["description"])
+        self.assertEqual(self.rerun_writes(snap, espo), [])
 
 
 if __name__ == "__main__":

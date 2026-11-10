@@ -67,7 +67,9 @@
                 {
                     "name": "sfCreatedAt"
                 },
-                false
+                {
+                    "name": "sfCompletedAt"
+                }
             ]
         ]
     }

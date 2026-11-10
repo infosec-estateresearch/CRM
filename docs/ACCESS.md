@@ -53,6 +53,7 @@ Field-level access:
 - `sfId` on User, Account and Contact is hidden (read no, edit no) from `ER Staff`, `ER Intake` and `ER Manager`.
 - `sfId` is also hidden on Opportunity, Call, Meeting, Task and Email (CRM-004, CRM-005).
 - `sfOwnerId` and `sfCreatedAt` on Account and Contact are read yes, edit no for those three roles.
+- `Task.sfCompletedAt` (CRM-008-G) is read yes, edit no for those three roles.
 - `ER Import` has read yes, edit yes on every one of these fields, so the importer can write them.
 - Admins see sfId on the firm detail view. It cannot be changed after the record is created (see section 5).
 

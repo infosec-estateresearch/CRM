@@ -18,7 +18,7 @@ import os
 
 from .api import WriteRejected
 from .errors import LoadError
-from .mapping import EXCEPTION_CODES, REFUSING_CODES, check_shape
+from .mapping import EXCEPTION_CODES, REFUSING_CODES, SENT_ONLY_CODES, check_shape
 from .users import is_human
 
 ENTITIES = ("User", "ServiceType", "Account", "Contact", "Opportunity", "Task", "Call", "Meeting", "Email")
@@ -578,14 +578,25 @@ class Loader:
             relations.setdefault(rel.get("EmailMessageId"), []).append(rel)
         for r in emails:
             attrs, exc = m.email_message(r, relations.get(r["Id"], []), task_by_id, ctx)
-            if attrs["to"] is None:
-                if r["Id"] not in self.index["Email"]:
-                    # CRM-008-F change 4: Email.to is required; no recipient -> a Task.
-                    attrs, exc = m.email_message_as_task(r, task_by_id, ctx)
-                    if self._record_exc("EmailMessage", r, exc):
-                        continue
-                    self.upsert("email_message", "EmailMessage", r["Id"], "Task", r["Id"], attrs)
+            as_email = r["Id"] in self.index["Email"]
+            kept = not as_email and r["Id"] in self.index["Task"]
+            has_to = attrs["to"] is not None
+            if kept or (not has_to and not as_email):
+                # CRM-008-F change 4: Email.to is required; no recipient -> a Task.
+                # CRM-008-G: one an earlier run created as a Task stays a Task (never moved,
+                # never also POSTed as an Email), even once it has a recipient.
+                attrs, exc = m.email_message_as_task(r, task_by_id, ctx)
+                if has_to:
+                    exc = [("email_kept_as_task" if c == "email_without_recipient_imported_as_task"
+                            else c) for c in exc]
+                sent_only = [c for c in exc if c in SENT_ONLY_CODES]
+                if self._record_exc("EmailMessage", r, [c for c in exc if c not in SENT_ONLY_CODES]):
                     continue
+                stored = self.upsert("email_message", "EmailMessage", r["Id"], "Task", r["Id"], attrs)
+                if stored is not None:
+                    self._record_exc("EmailMessage", r, sent_only)
+                continue
+            if not has_to:
                 # An Email from an earlier run stays an Email; null to would be refused (400).
                 del attrs["to"]
             if self._record_exc("EmailMessage", r, exc):

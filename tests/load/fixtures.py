@@ -463,6 +463,7 @@ class FakeEspo:
             for attr, default in self.DEFAULTS.get(entity, {}).items():
                 stored.setdefault(attr, default)               # omitted: the entityDefs default
             self._unstorable(entity, stored, stored)
+            self._task_completion(entity, None, stored)
             rid = self._insert(entity, stored)
             if entity == "Email":
                 self.db[entity][rid]["messageId"] = f"dummy:{rid}"     # always replaced
@@ -484,16 +485,23 @@ class FakeEspo:
             if bad:
                 return 400, {"field": "phoneNumber", "type": "valid"}
             stored.pop("messageId", None)
+            before = dict(rec)
             rec.update(stored)
             self._unstorable(entity, stored, rec)
+            self._task_completion(entity, before, rec)
             return 200, dict(rec)
         return 405, None
 
     # Each check can be switched off (mutation tests prove each one is exercised).
     # CRM-008-F: phone_list (list rows omit phoneNumberData), title_account (title stored only
-    # with an account), date_completed (kept only when Completed), email_to (Email.to required).
+    # with an account), email_to (Email.to required).
+    # CRM-008-G: date_completed_read_only (API input discarded, fact 1), date_completed_core (the
+    # core DateCompleted hook, fact 2), completed_hook (PreserveSalesforceCompletedDate, fact 3).
     CHECKS = ("owner", "required", "max_length", "currency", "email",
-              "phone_list", "title_account", "date_completed", "email_to")
+              "phone_list", "title_account", "email_to",
+              "date_completed_read_only", "date_completed_core", "completed_hook")
+    # The server clock the core DateCompleted hook stamps ("now"); never a source value.
+    NOW = "2026-11-10 09:00:00"
 
     def _checks(self):
         return set(self.CHECKS) - getattr(self, "disabled_checks", set())
@@ -501,13 +509,28 @@ class FakeEspo:
     def _unstorable(self, entity, sent, rec):
         """What 10.0.12 does not keep (PL-verified on crm-dev, CRM-008-F facts 2 and 3): a sent
         Contact title reads back null without an account; a sent Task dateCompleted reads back
-        null unless the status is Completed."""
+        null unless the status is Completed (CRM-008-G: see _task_completion)."""
         checks = self._checks()
         if "title_account" in checks and entity == "Contact" and "title" in sent and not rec.get("accountId"):
             rec["title"] = None
-        if "date_completed" in checks and entity == "Task" and "dateCompleted" in sent and \
-                rec.get("status") != "Completed":
-            rec["dateCompleted"] = None
+
+    def _task_completion(self, entity, before, rec):
+        """Task.dateCompleted as 10.0.12 stores it (CRM-008-G facts 1-3, PL-verified on crm-dev).
+        ``before`` is the record before a PUT (None on create); ``rec`` the record being saved."""
+        if entity != "Task":
+            return
+        checks = self._checks()
+        if "date_completed_read_only" in checks:
+            # readOnly: API input is discarded on create and update.
+            rec["dateCompleted"] = None if before is None else before.get("dateCompleted")
+        new = before is None
+        if "date_completed_core" in checks and (new or rec.get("status") != before.get("status")):
+            # Core hook, on a status change: null unless Completed, then now (no IMPORT option).
+            rec["dateCompleted"] = self.NOW if rec.get("status") == "Completed" else None
+        if "completed_hook" in checks and rec.get("status") == "Completed" and rec.get("sfCompletedAt") and \
+                (new or rec.get("sfCompletedAt") != before.get("sfCompletedAt")):
+            # The custom hook, $order 20 (after core).
+            rec["dateCompleted"] = rec["sfCompletedAt"]
 
     def _refused(self, entity, body, create, current=None):
         """The 400 body EspoCRM 10.0.12 returns for ``body``, or None (CRM-008 refusals)."""

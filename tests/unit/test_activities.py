@@ -8,6 +8,11 @@ PHP-free decision table of the archived-email hook.
 
 import copy
 import itertools
+import json
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 import access_policy
@@ -36,6 +41,13 @@ def _hook(old, new):
     def mutate(b):
         assert old in b["hook"], old
         b["hook"] = b["hook"].replace(old, new, 1)
+    return mutate
+
+
+def _completed(old, new):
+    def mutate(b):
+        assert old in b["completedHook"], old
+        b["completedHook"] = b["completedHook"].replace(old, new, 1)
     return mutate
 
 
@@ -116,6 +128,31 @@ BROKEN = {
                                             .pop(3)), {"layouts"}),
     "hook_wrong_status": (_hook("!== 'Archived'", "!== 'Sent'"), {"hook_body"}),
     "api_user_renamed": (_set(["apiUsers", 0, "userName"], "er-loader"), {"hook_body"}),
+    # CRM-008-G: Task.sfCompletedAt and the completion-date hook.
+    "task_completed_at_read_only": (_set(["defs", "Task", "fields", "sfCompletedAt", "readOnly"],
+                                         True), {"legacy_fields"}),
+    "task_completed_at_missing": (_del(["defs", "Task", "fields", "sfCompletedAt"]),
+                                  {"legacy_fields", "layouts"}),
+    "task_completed_at_unlabelled": (_del(["i18n", "Task", "fields", "sfCompletedAt"]), {"labels"}),
+    "task_completed_at_not_in_legacy": (_set(["layouts", "Task", "detail", 1, "rows", 1, 1], False),
+                                        {"layouts"}),
+    "completed_hook_core_order": (_completed("$order = 20;", "$order = 9;"),
+                                  {"completed_hook_shape"}),
+    "completed_hook_after_save": (_completed("CompletedDate implements BeforeSave",
+                                            "CompletedDate implements AfterSave"),
+                                  {"completed_hook_shape"}),
+    "completed_hook_any_status": (_completed("!== 'Completed'", "=== 'Never'"),
+                                  {"completed_hook_body"}),
+    "completed_hook_every_save": (_completed("if (!$entity->isNew() && "
+                                             "!$entity->isAttributeChanged('sfCompletedAt')) {\n"
+                                             "            return;\n        }", ""),
+                                  {"completed_hook_body"}),
+    "completed_hook_new_only": (_completed(" && !$entity->isAttributeChanged('sfCompletedAt')", ""),
+                                {"completed_hook_body"}),
+    "completed_hook_null_copied": (_completed("if (!$sfCompletedAt) {\n            return;\n        }",
+                                              ""), {"completed_hook_body"}),
+    "completed_hook_wrong_target": (_completed("set('dateCompleted'", "set('dateEnd'"),
+                                    {"completed_hook_body"}),
 }
 
 
@@ -168,6 +205,12 @@ class TestRepository(unittest.TestCase):
         self.assertEqual(len(policy.PROTECTED_ATTRIBUTES), 30)
         self.assertEqual(len(set(policy.PROTECTED_ATTRIBUTES)), 30)
         self.assertEqual(set(policy.PROTECTED_ATTRIBUTES), policy.EMAIL_GUARDED_ATTRIBUTES)
+
+    def test_task_completed_at_is_in_the_legacy_panel(self):
+        panel = policy.load_bundle()["layouts"]["Task"]["detail"][-1]
+        self.assertEqual(panel["rows"][-1], [{"name": "sfCreatedAt"}, {"name": "sfCompletedAt"}])
+        self.assertEqual(policy.load_bundle()["i18n"]["Task"]["fields"]["sfCompletedAt"],
+                         "Completed in Salesforce")
 
     def test_task_detail_keeps_date_completed_after_date_end(self):
         rows = policy.load_bundle()["layouts"]["Task"]["detail"][0]["rows"]
@@ -246,6 +289,99 @@ class TestArchivedEmailTable(unittest.TestCase):
         finally:
             policy.archived_save_allowed = original
         self.assertEqual(len(wrong), 5)
+
+
+class TestCompletedDateTable(unittest.TestCase):
+    """The spec of PreserveSalesforceCompletedDate (WO CRM-008-G item 2)."""
+
+    SF, NOW, OLD = "2025-05-05 10:00:00", "2026-11-10 12:00:00", "2026-01-01 09:00:00"
+    # isNew, status, sfCompletedAt, sfCompletedAt changed, core value -> dateCompleted
+    TABLE = [
+        (True, "Completed", SF, True, NOW, SF),               # import creates Completed
+        (True, "Not Started", SF, True, None, None),          # not Completed: core null
+        (True, "Completed", None, False, NOW, NOW),           # no Salesforce date: core now
+        (False, "Completed", SF, False, SF, SF),              # unrelated PUT: unchanged
+        (False, "Not Started", SF, False, None, None),        # reopened: core null
+        (False, "Completed", SF, False, NOW, NOW),            # staff re-completes: core now
+        (False, "Completed", SF, True, NOW, SF),              # importer corrects the date
+        (False, "Completed", OLD, True, SF, OLD),
+    ]
+
+    def test_rule_table(self):
+        for *args, want in self.TABLE:
+            with self.subTest(case=args):
+                self.assertEqual(policy.completed_date_after_save(*args), want)
+
+    def test_harness_detects_a_wrong_table(self):
+        original = policy.completed_date_after_save
+        try:
+            # The probe hook without the refinement: every Completed save takes sfCompletedAt.
+            policy.completed_date_after_save = (lambda n, st, sf, ch, core:
+                                                sf if st == "Completed" and sf else core)
+            wrong = [args for *args, want in self.TABLE
+                     if policy.completed_date_after_save(*args) != want]
+        finally:
+            policy.completed_date_after_save = original
+        self.assertEqual(len(wrong), 1)
+
+
+# Minimal stand-ins for Espo\ORM\Entity, SaveOptions and BeforeSave; the hook file runs
+# against them for every row of TestCompletedDateTable.TABLE.
+COMPLETED_HARNESS = r"""
+namespace Espo\ORM { class Entity {
+    public $a; public $new; public $changed;
+    function __construct($a, $new, $changed) { $this->a = $a; $this->new = $new; $this->changed = $changed; }
+    function get($k) { return $this->a[$k] ?? null; }
+    function set($k, $v) { $this->a[$k] = $v; }
+    function isNew() { return $this->new; }
+    function isAttributeChanged($k) { return in_array($k, $this->changed, true); }
+} }
+namespace Espo\ORM\Repository\Option { class SaveOptions {} }
+namespace Espo\Core\Hook\Hook { interface BeforeSave {
+    public function beforeSave(\Espo\ORM\Entity $entity, \Espo\ORM\Repository\Option\SaveOptions $options): void;
+} }
+namespace {
+    require $argv[1];
+    $rows = json_decode($argv[2], true);
+    $cls = 'Espo\Custom\Hooks\Task\PreserveSalesforceCompletedDate';
+    $hook = new $cls();
+    $out = [$cls::$order];
+    foreach ($rows as [$new, $status, $sf, $changed, $core]) {
+        $e = new \Espo\ORM\Entity(['status' => $status, 'sfCompletedAt' => $sf, 'dateCompleted' => $core],
+                                    $new, $changed ? ['sfCompletedAt'] : []);
+        $hook->beforeSave($e, new \Espo\ORM\Repository\Option\SaveOptions());
+        $out[] = $e->get('dateCompleted');
+    }
+    echo json_encode($out);
+}
+"""
+
+
+class TestCompletedHookRuns(unittest.TestCase):
+    """Runs the real hook file under php against stubs (skipped when php is missing)."""
+
+    def run_hook(self, source):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "hook.php")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(source)
+            rows = [args for *args, _want in TestCompletedDateTable.TABLE]
+            res = subprocess.run(["php", "-d", "display_errors=stderr", "-r", COMPLETED_HARNESS,
+                                  path, json.dumps(rows)], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        return json.loads(res.stdout)
+
+    @unittest.skipUnless(shutil.which("php"), "php not installed")
+    def test_hook_follows_the_table_after_core(self):
+        out = self.run_hook(policy.load_bundle()["completedHook"])
+        self.assertEqual(out, [20] + [want for *_a, want in TestCompletedDateTable.TABLE])
+
+    @unittest.skipUnless(shutil.which("php"), "php not installed")
+    def test_harness_detects_the_unrefined_probe_hook(self):
+        source = policy.load_bundle()["completedHook"].replace(
+            "!$entity->isNew() && !$entity->isAttributeChanged('sfCompletedAt')", "false", 1)
+        out = self.run_hook(source)
+        self.assertNotEqual(out[1:], [want for *_a, want in TestCompletedDateTable.TABLE])
 
 
 if __name__ == "__main__":
