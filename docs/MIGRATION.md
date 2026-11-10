@@ -267,12 +267,27 @@ exit code.
    and the report state `identity: write-capable (waived: <url>)` and `writable_objects`.
 3. `scripts/migrate.sh --auth soap-legacy contract-check` (then `count`, then `extract`).
    The script reads only `NIF_SRC_SALESFORCE_USER` and `NIF_SRC_SALESFORCE_PASS` from the
-   existing ELT env file. It opens the file read-only, never follows a symlink, and parses it
-   strictly (`hostcheck.parse_legacy_env`: unquoted values must not contain whitespace,
-   quotes, backslash or any of ``;&|<>()$` ``, and quoted values must be closed with nothing
-   after them). The whole file is refused, with only the line number in the error, if any
-   line leaves a quote open, any non-comment line ends with an unescaped backslash outside
-   single quotes (a line continuation), or the file holds any CR character. It pipes them as JSON on stdin to
+   existing ELT env file. It opens the file read-only and never follows a symlink.
+   `hostcheck.parse_legacy_env` (CRM-002-T) reads the two values exactly as the file's only
+   consumer, the ERiC loader, reads them. The file is never sourced by a shell. For each line,
+   the parser strips it, skips it if it is empty, starts with `#` or has no `=`, splits it
+   at the first `=`, and strips the key and the value. There is no quote, escape, comment
+   or shell processing, so the value is literal: a later `=` and any `#` are part of it, and
+   so are the characters `;&|<>()#!*?{}[]~^%@=+,.:/-_`. The parser is stricter than the
+   consumer where a reading could be ambiguous:
+   - The whole file is refused if it holds any CR character, any other line break that
+     Python's `splitlines` honours besides LF, or a non-comment line ending in a backslash.
+   - A target value is refused if it is empty, or holds a quote, a backtick, `$`, a
+     backslash, any whitespace or control character, or any non-printable character. So
+     `PASS=abc # x` is refused, because the consumer would read `abc # x`.
+   - A duplicate definition of a target name is refused, where the consumer would take the
+     first one. So is an `export ` prefix, which the consumer would read as a different key.
+   - Other lines are not interpreted beyond the whole-file checks.
+
+   Errors give only a line number and a reason code (`refused-character`, `empty-value`,
+   `duplicate-definition`, `export-prefix`, `missing-user`/`missing-pass`, or the
+   whole-file reason). They never give a value or a character class. The script pipes the
+   two values as JSON on stdin to
    `docker compose run -T --rm crm-migrate … --auth soap-legacy --credentials-stdin`. The
    values are never written under `/srv/CRM/runtime/migrate`, into arguments or into the
    environment. The script records the file's sha256 and mtime before and after the run, and

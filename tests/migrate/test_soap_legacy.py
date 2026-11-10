@@ -389,8 +389,8 @@ class LegacyEnvParserTest(unittest.TestCase):
     FIXTURE = (
         "# synthetic ELT env file\n"
         "NIF_DB_HOST=db.example.test\n"
-        "export NIF_SRC_SALESFORCE_USER=user@example.test\n"
-        "NIF_SRC_SALESFORCE_PASS='" + FAKE_PASSWORD + "'\n"
+        "NIF_SRC_SALESFORCE_USER=user@example.test\n"           # CRM-002-T: no export, no quotes
+        "  NIF_SRC_SALESFORCE_PASS = " + FAKE_PASSWORD + "  \n"
         "OTHER_SECRET=\"unrelated value with spaces\"\n"
         "\n"
         "NIF_SRC_SALESFORCE_TOKEN=ignored\n"
@@ -405,9 +405,12 @@ class LegacyEnvParserTest(unittest.TestCase):
         self.assertEqual(json.loads(hc.legacy_credentials_json(creds)), creds)
 
     def test_quoting(self):
-        for raw, expect in (('"p#w!"', "p#w!"), ("'p$w\\x'", "p$w\\x"), ("plain", "plain")):
+        # CRM-002-T: the consumer keeps quotes literally, so a quoted target value is refused.
+        for raw in ('"p#w!"', "'p$w\\x'", "'pw'"):
             text = f"NIF_SRC_SALESFORCE_USER=u\nNIF_SRC_SALESFORCE_PASS={raw}\n"
-            self.assertEqual(hc.parse_legacy_env(text)[0]["password"], expect)
+            self.assertIsNone(hc.parse_legacy_env(text)[0])
+        text = "NIF_SRC_SALESFORCE_USER=u\nNIF_SRC_SALESFORCE_PASS=plain\n"
+        self.assertEqual(hc.parse_legacy_env(text)[0]["password"], "plain")
 
     def test_broken(self):
         base = "NIF_SRC_SALESFORCE_USER=u\nNIF_SRC_SALESFORCE_PASS=p\n"
@@ -419,8 +422,10 @@ class LegacyEnvParserTest(unittest.TestCase):
             "expansion": "NIF_SRC_SALESFORCE_USER=u\nNIF_SRC_SALESFORCE_PASS=p$HOME\n",
             "dq_expansion": "NIF_SRC_SALESFORCE_USER=u\nNIF_SRC_SALESFORCE_PASS=\"p$x\"\n",
             "space": "NIF_SRC_SALESFORCE_USER=u\nNIF_SRC_SALESFORCE_PASS=p q\n",
-            "malformed_line": base + "garbage line\n",
-            "spaced_assign": "NIF_SRC_SALESFORCE_USER = u\nNIF_SRC_SALESFORCE_PASS=p\n",
+            # CRM-002-T: "garbage line" and "NAME = u" are no longer refused (the consumer skips
+            # the one and strips the other); they are replaced by refused target lines.
+            "export_target": "export NIF_SRC_SALESFORCE_USER=u\nNIF_SRC_SALESFORCE_PASS=p\n",
+            "quoted_target": "NIF_SRC_SALESFORCE_USER=u\nNIF_SRC_SALESFORCE_PASS='p'\n",
         }
         for name, text in cases.items():
             with self.subTest(name):
