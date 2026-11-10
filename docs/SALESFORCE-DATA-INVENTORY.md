@@ -77,6 +77,10 @@
 - It is **not enough** to migrate a recognisable CRM. The branch hierarchy, shipping addresses, enquiry owners, service types, enquiry contacts, email headers and relations, and deletions are all missing, and the copy is going stale.
 - A **fresh, read-only, full extraction from Salesforce** is required. The ERiC copy then serves as a cross-check in reconciliation.
 
+**L1 schema result (2026-11-10, CRM-002-U):**
+- Salesforce has **no enquiry postcode field**: `Opportunity.Post_code__c` is a self-lookup to Opportunity, not a postcode. It is not extracted, and CRM-004 `postcode` stays empty on import.
+- Salesforce has **no key-information field**: `Opportunity.Key_Information__c` does not exist. CRM-004 `keyInformation` stays empty on import.
+
 ## 4. Shortest safe sequence of bounded work orders
 
 Each one is a separate work order with Architect exact-version approval, the ForgeV2 loop with independent review, and no real data in Git, CI or specialist prompts.

@@ -10,14 +10,23 @@ CRM-002-S: under ``--auth soap-legacy`` only, a validated write waiver (``waiver
 waives the write-flag failure for flags that are exactly ``True``. The report then states
 ``identity: write-capable (waived: <url>)`` and the count of writable objects. Every other
 gate rule is unchanged, and client-credentials mode never passes a waiver.
+
+CRM-002-U: each ``type_mismatch`` and ``reference_mismatch`` entry records the field name,
+the expected contract type and the described type name, plus the described ``referenceTo``
+object names when the described type is ``reference``. These are schema identifiers only:
+any value not matching ``[A-Za-z][A-Za-z0-9_]{0,79}`` is recorded as ``"unrecognised"``.
+Logs keep counts only.
 """
 
+import re
 from dataclasses import dataclass
 
 from .contract import WAIVABLE_FLAGS, EffectiveObject
 from .errors import MigrateError
 
 REQUIRED_TRUE = ("queryable", "retrieveable")
+SCHEMA_IDENT_RE = re.compile(r"\A[A-Za-z][A-Za-z0-9_]{0,79}\Z")
+UNRECOGNISED = "unrecognised"
 
 
 @dataclass
@@ -44,6 +53,27 @@ def _reference_ok(spec_field, described):
     if spec_field.reference_match == "superset":
         return expected.issubset(set(actual))
     return expected == set(actual)
+
+
+def schema_ident(value):
+    """A described schema identifier, or ``"unrecognised"`` if it is not one."""
+    if isinstance(value, str) and SCHEMA_IDENT_RE.fullmatch(value):
+        return value
+    return UNRECOGNISED
+
+
+def mismatch_entry(spec_field, described):
+    """Report entry for a type or reference mismatch: schema identifiers only."""
+    entry = {"field": spec_field.name, "expected": spec_field.type, "described": schema_ident(described.get("type"))}
+    if spec_field.type == "reference":
+        entry["expectedReferenceTo"] = list(spec_field.reference_to)
+    if entry["described"] == "reference":
+        targets = described.get("referenceTo")
+        if isinstance(targets, list):
+            entry["referenceTo"] = [schema_ident(t) for t in targets]
+        else:
+            entry["referenceTo"] = UNRECOGNISED
+    return entry
 
 
 def identity_label(writable_objects, write_waiver):
@@ -111,10 +141,10 @@ def evaluate_gate(contract, describes, write_waiver=None):
                     rep["unavailable_optional"].append(fspec.name)
                 continue
             if described.get("type") != fspec.type:
-                rep["type_mismatch"].append(fspec.name)
+                rep["type_mismatch"].append(mismatch_entry(fspec, described))
                 continue
             if fspec.type == "reference" and not _reference_ok(fspec, described):
-                rep["reference_mismatch"].append(fspec.name)
+                rep["reference_mismatch"].append(mismatch_entry(fspec, described))
                 continue
             available.append(fspec.name)
         if rep["missing_required"] or rep["type_mismatch"] or rep["reference_mismatch"]:

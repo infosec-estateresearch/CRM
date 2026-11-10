@@ -63,7 +63,7 @@ class BaselineTest(TempDirMixin, unittest.TestCase):
         for key in ("t_start", "passes", "overlap_seconds", "passes_max", "api_version", "contract", "objects",
                     "status", "files", "verification"):
             self.assertIn(key, man)
-        self.assertEqual(man["contract"]["version"], 2)
+        self.assertEqual(man["contract"]["version"], 3)
         self.assertEqual(man["contract"]["sha256"], contract().sha256)
         self.assertEqual(read_manifest(snap)["files"], man["files"])
 

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from .errors import ContractError
 
-CONTRACT_VERSION = 2
+CONTRACT_VERSION = 3
 NAME_RE = re.compile(r"\A[A-Za-z][A-Za-z0-9_]*\Z")
 PURPOSE_RE = re.compile(r"\A[RM]\d+\b")
 FIELD_TYPES = frozenset({
@@ -103,7 +103,8 @@ def parse_contract(raw_bytes):
     except (UnicodeDecodeError, ValueError):
         raise ContractError("contract_not_json") from None
     _need(isinstance(doc, dict), "contract_shape", "top-level object")
-    _need(doc.get("contractVersion") == CONTRACT_VERSION, "contract_version", "expected 2")
+    _need(doc.get("contractVersion") == CONTRACT_VERSION, "contract_version",
+          f"expected {CONTRACT_VERSION}")
     raw_objects = doc.get("objects")
     _need(isinstance(raw_objects, list) and raw_objects, "contract_shape", "objects")
     objects = []

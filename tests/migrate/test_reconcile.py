@@ -96,10 +96,10 @@ class ReconcileTest(TempDirMixin, unittest.TestCase):
         self.assertEqual(self.single["objects"]["Task"]["fill_rates"]["IsArchived"]["filled"], 30)  # False is a value
 
     def test_unavailable_field_fill_rate_is_unavailable_not_zero(self):
-        fake = make_fake(contract(), org_kwargs={"unavailable": ("Opportunity.Post_code__c",)})
+        fake = make_fake(contract(), org_kwargs={"unavailable": ("Opportunity.Opportunity_Service__c",)})
         snap, _ = self.extract(fake)
         rep = reconcile(load_snapshot(snap))
-        self.assertEqual(rep["objects"]["Opportunity"]["fill_rates"]["Post_code__c"], "unavailable")
+        self.assertEqual(rep["objects"]["Opportunity"]["fill_rates"]["Opportunity_Service__c"], "unavailable")
 
     def test_deletion_classes_single_snapshot(self):
         acc = self.single["objects"]["Account"]["deletion_classes"]

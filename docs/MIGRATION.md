@@ -9,7 +9,7 @@
 
 | Path | Contents |
 |---|---|
-| `migrate/contract/salesforce-fields.json` | Source-field contract, version 2. SOQL is built only from this file. |
+| `migrate/contract/salesforce-fields.json` | Source-field contract, version 3 (CRM-002-U, L1 corrections). SOQL is built only from this file. The tool refuses any other `contractVersion` with `contract_version`. |
 | `migrate/bin/crm-migrate.py` | Entry point. It runs only as `python -I -B` and inserts exactly one library path. |
 | `migrate/lib/crm_migrate/` | The package. `policy.py` holds the request allowlist, `client.py` the single Salesforce client, `transport.py` the only real transport, and `hostcheck.py` the host guard decisions. |
 | `deploy/migrate/compose.json` | Compose project `crm-migrate`, with services `crm-migrate` (live) and `crm-migrate-selftest` (no network). |
@@ -38,6 +38,15 @@ Always run the tool through `scripts/migrate.sh`, as root, on DOCKER1. The optio
 - every `required` field is present, with the expected type and `referenceTo`.
 
 `referenceMatch: superset` marks the polymorphic fields whose `referenceTo` list depends on the org (`Task.WhatId`, `Event.WhatId`, `EmailMessage.RelatedToId`, `EmailMessageRelation.RelationId` and `Note.ParentId`). For those, the listed targets must be present, and extra targets are allowed. A missing optional field is left out of the SOQL and reported as `unavailable`.
+
+**Mismatch report (CRM-002-U).** In `contract-check.json`, every `type_mismatch` and `reference_mismatch` entry is an object, not a bare field name:
+- `field`: the contract field name;
+- `expected`: the contract type;
+- `described`: the type name Salesforce describes;
+- `expectedReferenceTo`: the contract targets (reference fields only);
+- `referenceTo`: the described target object names (only when `described` is `reference`).
+
+Example: `{"field": "X", "expected": "boolean", "described": "picklist"}`. These values are schema identifiers only. Any described value that does not match `[A-Za-z][A-Za-z0-9_]{0,79}` is recorded as `"unrecognised"`, and so is a `referenceTo` that is not a list. Log lines (`gate_object`) keep counts only.
 
 **Exit codes:**
 
@@ -172,22 +181,35 @@ The overall status is the worst object status.
 | **L2** (counts only) | L1 clean, plus the PO's L2 authorisation | `migrate.sh count` | `query` and `queryAll` counts compared with the inventory. Large gaps are resolved before L3. |
 | **L3** (records) | The PO's data-scope authorisation: objects, date range, purpose, storage, retention, disposal | `migrate.sh extract`, then `migrate.sh reconcile <id> [<previous-id>]` | The sanitised reconciliation, with the completeness status |
 
+## Contract v3: L1 corrections (2026-11-10)
+
+L1 (`contract-check --auth soap-legacy`, schema only) failed the v2 gate on 3 of 12 objects. Contract v3 makes these changes, and no others:
+
+| Object.field | Contract v2 | Contract v3 |
+|---|---|---|
+| `Account.Interested_in_integration__c` | boolean, required | picklist, required |
+| `EmailMessageRelation.RelationAddress` | email, required | string, required |
+| `Opportunity.Post_code__c` | string, optional | removed. In Salesforce it is a self-lookup to Opportunity (`Post_code__r`), not a postcode. |
+| `Opportunity.Key_Information__c` | textarea, optional | removed. There is no such field in Salesforce. |
+
+The removals follow the data-minimisation rule: neither field carries the data its purpose names.
+
 ## To be confirmed at L1
 
-These contract details come from Salesforce documentation and the inventory, not from the live org. `contract-check` compares them, so a wrong guess fails safe and is fixed in the contract.
+The tables below are the original v2 assumptions; rows corrected at L1 are marked. These contract details come from Salesforce documentation and the inventory, not from the live org. `contract-check` compares them, so a wrong guess fails safe and is fixed in the contract.
 
 **Custom field types:**
 
 | Field | Type in the contract |
 |---|---|
 | `Account.TLP__c` | picklist |
-| `Account.Interested_in_integration__c` | boolean |
+| `Account.Interested_in_integration__c` | ~~boolean~~ picklist (v3, L1) |
 | `Account.Bankruptcy_Special_Rate__c` | boolean |
 | `Opportunity.Loss_Reason__c` | picklist |
 | `Opportunity.Paid_geneology_enquiry__c` | picklist |
 | `Opportunity.Opportunity_Service__c` | picklist |
-| `Opportunity.Post_code__c` | string |
-| `Opportunity.Key_Information__c` | textarea |
+| `Opportunity.Post_code__c` | ~~string~~ removed in v3 (L1: self-lookup reference) |
+| `Opportunity.Key_Information__c` | ~~textarea~~ removed in v3 (L1: absent) |
 
 **Standard types and references:**
 
@@ -195,7 +217,7 @@ These contract details come from Salesforce documentation and the inventory, not
 |---|---|
 | `Task.Subject`, `Event.Subject` | combobox |
 | `EmailMessage.ToAddress`, `EmailMessage.CcAddress` | string |
-| `EmailMessageRelation.RelationAddress` | email |
+| `EmailMessageRelation.RelationAddress` | ~~email~~ string (v3, L1) |
 | `Task.CallDisposition` | string |
 | `UserRole.ParentRoleId` | references `[UserRole]` |
 | `Profile.UserLicenseId` | references `[UserLicense]` |

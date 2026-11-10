@@ -55,22 +55,25 @@ class GateTest(TempDirMixin, unittest.TestCase):
     def test_required_field_wrong_type(self):
         kw = {"field_overrides": {"Opportunity.Amount": {"type": "double"}}}
         result, _ = self.gate(**kw)
-        self.assertEqual(result.report["objects"]["Opportunity"]["type_mismatch"], ["Amount"])
+        self.assertEqual(result.report["objects"]["Opportunity"]["type_mismatch"],
+                         [{"field": "Amount", "expected": "currency", "described": "double"}])
         self.assert_extract_refused(**kw)
 
     def test_reference_target_differs(self):
         kw = {"field_overrides": {"Contact.AccountId": {"referenceTo": ["Lead"]}}}
         result, _ = self.gate(**kw)
-        self.assertEqual(result.report["objects"]["Contact"]["reference_mismatch"], ["AccountId"])
+        self.assertEqual(result.report["objects"]["Contact"]["reference_mismatch"],
+                         [{"field": "AccountId", "expected": "reference", "described": "reference",
+                           "expectedReferenceTo": ["Account"], "referenceTo": ["Lead"]}])
         self.assert_extract_refused(**kw)
 
     def test_exact_reference_with_extra_target_fails(self):
         result, _ = self.gate(field_overrides={"Account.ParentId": {"referenceTo": ["Account", "User"]}})
-        self.assertEqual(result.report["objects"]["Account"]["reference_mismatch"], ["ParentId"])
+        self.assertEqual([m["field"] for m in result.report["objects"]["Account"]["reference_mismatch"]], ["ParentId"])
 
     def test_superset_reference_missing_listed_target_fails(self):
         result, _ = self.gate(field_overrides={"Task.WhatId": {"referenceTo": ["Account", "Case"]}})
-        self.assertEqual(result.report["objects"]["Task"]["reference_mismatch"], ["WhatId"])
+        self.assertEqual([m["field"] for m in result.report["objects"]["Task"]["reference_mismatch"]], ["WhatId"])
 
     def test_any_write_flag_fails(self):
         for flag in ("createable", "updateable", "deletable"):
@@ -113,7 +116,7 @@ class GateTest(TempDirMixin, unittest.TestCase):
         self.assertEqual(eff["EmailMessage"].unavailable, ("ThreadIdentifier",))
 
     def test_optional_field_with_wrong_type_fails(self):
-        result, _ = self.gate(field_overrides={"Opportunity.Post_code__c": {"type": "int"}})
+        result, _ = self.gate(field_overrides={"Opportunity.Opportunity_Service__c": {"type": "int"}})
         self.assertFalse(result.ok)
 
     def test_describe_error_fails(self):
