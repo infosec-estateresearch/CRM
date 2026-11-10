@@ -1,0 +1,52 @@
+{
+    "fields": {
+        "meetingType": {
+            "type": "enum",
+            "options": [
+                "Meeting",
+                "Presentation",
+                "Bag Drop",
+                "Call",
+                "Other",
+                "Email",
+                "Unspecified (legacy)"
+            ],
+            "default": "Meeting",
+            "isSorted": false,
+            "audited": true,
+            "isCustom": true
+        },
+        "sfId": {
+            "type": "varchar",
+            "maxLength": 18,
+            "readOnlyAfterCreate": true,
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        },
+        "sfOwnerId": {
+            "type": "varchar",
+            "maxLength": 18,
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        },
+        "sfCreatedAt": {
+            "type": "datetime",
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        }
+    },
+    "indexes": {
+        "sfId": {
+            "type": "unique",
+            "columns": [
+                "sfId"
+            ]
+        }
+    }
+}

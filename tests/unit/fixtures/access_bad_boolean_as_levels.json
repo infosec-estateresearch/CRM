@@ -49,7 +49,7 @@
         "Email": {
           "create": "yes",
           "read": "all",
-          "edit": "own",
+          "edit": "no",
           "delete": "no",
           "stream": "all"
         },
@@ -179,6 +179,74 @@
             "read": "yes",
             "edit": "no"
           }
+        },
+        "Call": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Meeting": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Task": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Email": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfEmailMessageId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfThreadIdentifier": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfActivityId": {
+            "read": "yes",
+            "edit": "no"
+          }
         }
       },
       "assignmentPermission": "all",
@@ -244,7 +312,7 @@
         "Email": {
           "create": "yes",
           "read": "all",
-          "edit": "own",
+          "edit": "no",
           "delete": "no",
           "stream": "all"
         },
@@ -377,6 +445,74 @@
             "edit": "no"
           },
           "lossReasonLegacyMissing": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Call": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Meeting": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Task": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Email": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfEmailMessageId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfThreadIdentifier": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfActivityId": {
             "read": "yes",
             "edit": "no"
           }
@@ -575,6 +711,74 @@
             "read": "yes",
             "edit": "no"
           }
+        },
+        "Call": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Meeting": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Task": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Email": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfEmailMessageId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfThreadIdentifier": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfActivityId": {
+            "read": "yes",
+            "edit": "no"
+          }
         }
       },
       "assignmentPermission": "all",
@@ -767,6 +971,74 @@
             "edit": "yes"
           },
           "lossReasonLegacyMissing": {
+            "read": "yes",
+            "edit": "yes"
+          }
+        },
+        "Call": {
+          "sfId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "yes"
+          }
+        },
+        "Meeting": {
+          "sfId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "yes"
+          }
+        },
+        "Task": {
+          "sfId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "yes"
+          }
+        },
+        "Email": {
+          "sfId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfEmailMessageId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfThreadIdentifier": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfActivityId": {
             "read": "yes",
             "edit": "yes"
           }

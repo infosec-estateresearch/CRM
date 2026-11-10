@@ -223,13 +223,15 @@ class TestDuplicateChecks(unittest.TestCase):
 
     def test_no_php_outside_classes(self):
         # CRM-003 adds the Account deletion guard under Hooks/Account; CRM-004 adds
-        # the Opportunity loss-reason hook under Hooks/Opportunity.
+        # the Opportunity loss-reason hook under Hooks/Opportunity; CRM-005 the
+        # archived-email guard under Hooks/Email.
         for root, _, files in os.walk(CUSTOM):
             for name in files:
                 if name.endswith(".php"):
                     self.assertTrue(re.search(r"[\\/]Classes[\\/]", root)
-                                    or re.search(r"[\\/]Hooks[\\/](Account|Opportunity)$",
-                                                 root), root)
+                                    or re.search(
+                                        r"[\\/]Hooks[\\/](Account|Opportunity|Email)$",
+                                        root), root)
 
 
 if __name__ == "__main__":

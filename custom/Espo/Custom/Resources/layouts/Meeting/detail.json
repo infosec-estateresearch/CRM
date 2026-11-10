@@ -1,0 +1,70 @@
+[
+    {
+        "rows": [
+            [
+                {
+                    "name": "name"
+                },
+                {
+                    "name": "parent"
+                }
+            ],
+            [
+                {
+                    "name": "status"
+                },
+                {
+                    "name": "meetingType"
+                }
+            ],
+            [
+                {
+                    "name": "dateStart"
+                },
+                {
+                    "name": "dateEnd"
+                }
+            ],
+            [
+                {
+                    "name": "isAllDay"
+                },
+                {
+                    "name": "duration"
+                }
+            ],
+            [
+                {
+                    "name": "reminders"
+                },
+                false
+            ],
+            [
+                {
+                    "name": "description",
+                    "fullWidth": true
+                }
+            ]
+        ]
+    },
+    {
+        "label": "Legacy",
+        "collapsed": true,
+        "rows": [
+            [
+                {
+                    "name": "sfId"
+                },
+                {
+                    "name": "sfOwnerId"
+                }
+            ],
+            [
+                {
+                    "name": "sfCreatedAt"
+                },
+                false
+            ]
+        ]
+    }
+]

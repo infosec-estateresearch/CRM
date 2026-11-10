@@ -1,0 +1,19 @@
+{
+    "fields": {
+        "meetingType": "Meeting type",
+        "sfId": "Salesforce ID",
+        "sfOwnerId": "Salesforce owner ID",
+        "sfCreatedAt": "Salesforce created at"
+    },
+    "options": {
+        "meetingType": {
+            "Meeting": "Meeting",
+            "Presentation": "Presentation",
+            "Bag Drop": "Bag Drop",
+            "Call": "Call",
+            "Other": "Other",
+            "Email": "Email",
+            "Unspecified (legacy)": "Unspecified (legacy)"
+        }
+    }
+}

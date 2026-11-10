@@ -208,7 +208,9 @@ class TestRepository(unittest.TestCase):
         for kind in ("entityDefs", "clientDefs", "logicDefs", "selectDefs", "scopes"):
             for name in os.listdir(os.path.join(policy.RES, "metadata", kind)):
                 self.assertIn(name[:-5], {"Account", "Contact", "User", "Opportunity",
-                                          "ServiceType"}, f"{kind}/{name}")
+                                          "ServiceType", "Call", "Meeting", "Task",
+                                          "Email"},  # CRM-005
+                              f"{kind}/{name}")
 
 
 class TestBrokenFixtures(unittest.TestCase):

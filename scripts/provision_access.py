@@ -7,6 +7,7 @@ Usage (operator stage; credentials only in the environment):
 
     python3 scripts/provision_access.py dev --key-file /root/crm-import-key.env
     python3 scripts/provision_access.py dev --key-file ... --import-user-active no   # after the load
+    python3 scripts/provision_access.py dev --key-file ... --deploy-dashboards       # CRM-005
 
 - The first argument names the target environment and must be exactly "dev"
   (exit 2 otherwise), as for the shell scripts' dev guard.
@@ -16,6 +17,10 @@ Usage (operator stage; credentials only in the environment):
   API-key auth method. EspoCRM generates the key; it is written only to
   --key-file, which must not exist and is created mode 0600. An existing API
   user keeps its key: nothing is written and the file is not created.
+- Dashboard templates (config/access/dashboards.json, CRM-005) are created or
+  updated by name like roles. They are deployed to their teams only with
+  --deploy-dashboards, because deploying replaces the dashboards of every user in
+  the team (append false); without the flag no dashboard is touched.
 - Nothing secret is printed: progress goes to stderr by name, a summary to stdout.
 
 Credentials come from CRM_ADMIN_USERNAME / CRM_ADMIN_PASSWORD; the base URL from
@@ -43,6 +48,9 @@ ROLE_PERMISSIONS = (
     "mentionPermission", "userCalendarPermission", "lockPermission",
 )
 ROLE_ATTRIBUTES = ("info", "data", "fieldData") + ROLE_PERMISSIONS
+# DashboardTemplate attributes managed from config/access/dashboards.json (CRM-005).
+DASHBOARD_ATTRIBUTES = ("layout", "dashletsOptions")
+DASHBOARD_KEYS = {"name", "deployToTeams"} | set(DASHBOARD_ATTRIBUTES)
 
 
 class ProvisionError(RuntimeError):
@@ -122,7 +130,48 @@ def load_config(config_dir=CONFIG_DIR):
             raise ProvisionError(f"API user {user['userName']}: unknown role")
         if not set(user.get("teams", [])) <= team_names:
             raise ProvisionError(f"API user {user['userName']}: unknown team")
-    return {"teams": teams, "roles": roles, "apiUsers": api_users}
+    dashboards = load_dashboards(config_dir, team_names)
+    return {"teams": teams, "roles": roles, "apiUsers": api_users, "dashboards": dashboards}
+
+
+def load_dashboards(config_dir, team_names):
+    """Dashboard templates (CRM-005): EspoCRM layout [{name, layout: [dashlet]}] with
+    dashletsOptions keyed by dashlet id, and the teams each one is deployed to."""
+    templates = _load_json(os.path.join(config_dir, "dashboards.json")).get("dashboardTemplates")
+    if not isinstance(templates, list):
+        raise ProvisionError(f"{config_dir}: dashboardTemplates must be a list")
+    names = []
+    for t in templates:
+        if not isinstance(t, dict) or not isinstance(t.get("name"), str) or not t["name"].strip():
+            raise ProvisionError("every dashboard template needs a non-empty name")
+        names.append(t["name"])
+        unknown = set(t) - DASHBOARD_KEYS
+        if unknown:
+            raise ProvisionError(f"dashboard template {t['name']}: unknown keys {sorted(unknown)}")
+        tabs = t.get("layout")
+        if not isinstance(tabs, list) or not tabs:
+            raise ProvisionError(f"dashboard template {t['name']}: layout must be a non-empty list")
+        ids = []
+        for tab in tabs:
+            if not isinstance(tab, dict) or not isinstance(tab.get("layout"), list):
+                raise ProvisionError(f"dashboard template {t['name']}: each tab needs a layout list")
+            for dashlet in tab["layout"]:
+                if not isinstance(dashlet, dict) or not {"id", "name", "x", "y", "width",
+                                                         "height"} <= set(dashlet):
+                    raise ProvisionError(f"dashboard template {t['name']}: dashlets need id, "
+                                         "name, x, y, width and height")
+                ids.append(dashlet["id"])
+        options = t.get("dashletsOptions")
+        if len(set(ids)) != len(ids) or not isinstance(options, dict) or \
+                not set(options) <= set(ids):
+            raise ProvisionError(f"dashboard template {t['name']}: dashlet ids must be unique "
+                                 "and dashletsOptions keyed by them")
+        teams = t.get("deployToTeams", [])
+        if not isinstance(teams, list) or not set(teams) <= team_names:
+            raise ProvisionError(f"dashboard template {t['name']}: unknown team")
+    if len(set(names)) != len(names):
+        raise ProvisionError(f"duplicate dashboard template name in {config_dir}")
+    return templates
 
 
 def api_only_roles(config):
@@ -249,7 +298,23 @@ def ensure_api_user(client, spec, role_ids, team_ids, key_file, active, counter)
         log(f"API user {user_name}: unchanged; key unchanged")
 
 
-def provision(client, config, key_file, import_active=None):
+def ensure_dashboards(client, templates, team_ids, deploy, counter):
+    """Create or update each DashboardTemplate by name; deploy only when asked."""
+    for spec in templates:
+        desired = {k: spec[k] for k in ("name",) + DASHBOARD_ATTRIBUTES}
+        template_id = ensure_by_name(client, "DashboardTemplate", desired, counter,
+                                     "dashboardTemplate")
+        if not deploy:
+            continue
+        for team in spec.get("deployToTeams", []):
+            client.call("POST", "DashboardTemplate/action/deployToTeam",
+                        data={"id": template_id, "teamId": team_ids[team], "append": False})
+            counter.counts.setdefault("dashboardDeployed", {"teams": 0})["teams"] += 1
+            log(f"dashboard template {spec['name']}: deployed to team {team} "
+                "(replaces its users' dashboards)")
+
+
+def provision(client, config, key_file, import_active=None, deploy_dashboards=False):
     counter = Counter()
     team_ids = {t["name"]: ensure_by_name(client, "Team", t, counter, "team")
                 for t in config["teams"]}
@@ -257,6 +322,7 @@ def provision(client, config, key_file, import_active=None):
                 for r in config["roles"]}
     for spec in config["apiUsers"]:
         ensure_api_user(client, spec, role_ids, team_ids, key_file, import_active, counter)
+    ensure_dashboards(client, config.get("dashboards", []), team_ids, deploy_dashboards, counter)
     return counter.counts
 
 
@@ -279,6 +345,9 @@ def main(argv=None, transport=None, environ=None):
                         help="new file (mode 0600) for a newly created API user's key")
     parser.add_argument("--import-user-active", choices=("yes", "no"),
                         help="set the API user's active state (default: leave it as it is)")
+    parser.add_argument("--deploy-dashboards", action="store_true",
+                        help="deploy dashboard templates to their teams; replaces those "
+                             "users' dashboards")
     parser.add_argument("--config-dir", default=CONFIG_DIR, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     active = None if args.import_user_active is None else args.import_user_active == "yes"
@@ -286,7 +355,7 @@ def main(argv=None, transport=None, environ=None):
         check_new_private_path(args.key_file)
         config = load_config(args.config_dir)
         client = client_from_env(args.base_url, environ, transport)
-        counts = provision(client, config, args.key_file, active)
+        counts = provision(client, config, args.key_file, active, args.deploy_dashboards)
     except crm_api.ConfigError as err:
         print(f"{prog}: {err}", file=sys.stderr)
         return 2

@@ -60,7 +60,8 @@ class FakeEspo:
     the records, as EspoCRM keeps only a hash."""
 
     def __init__(self, drop_sf_id=False, fail=None):
-        self.records = {"Team": {}, "Role": {}, "User": {}}
+        self.records = {"Team": {}, "Role": {}, "User": {}, "DashboardTemplate": {}}
+        self.deployed = []  # CRM-005: (templateId, teamId, append) per deployToTeam call
         self.passwords = {}
         self.calls = []
         self.drop_sf_id = drop_sf_id
@@ -98,6 +99,12 @@ class FakeEspo:
                            if c["method"] == method and c["path"].split("/")[0] == entity)
                 if seen == nth:
                     return 500, b'{"message":"fake failure"}'
+        if path == ["DashboardTemplate", "action", "deployToTeam"] and method == "POST":
+            if data.get("id") not in self.records["DashboardTemplate"] or \
+                    data.get("teamId") not in self.records["Team"]:
+                return 404, b""
+            self.deployed.append((data["id"], data["teamId"], data.get("append")))
+            return 200, b"true"
         store = self.records[entity]
         if method == "GET" and len(path) == 1:
             query = urllib.parse.parse_qs(parts.query)
@@ -337,6 +344,95 @@ class TestProvisionAccess(TmpDir):
         self.assertEqual(code, 1)
         self.assertIn("not an API user", err)
         self.assertEqual(fake.records["User"]["u9"]["type"], "regular")
+
+
+class TestDashboardTemplates(TmpDir):
+    """CRM-005: the ER Staff dashboard template ("My open tasks" plus Calendar) is
+    ensured by name; it is deployed to its team only with --deploy-dashboards."""
+
+    def template(self, fake):
+        found = [t for t in fake.records["DashboardTemplate"].values() if t["name"] == "ER Staff"]
+        self.assertEqual(len(found), 1)
+        return found[0]
+
+    def test_template_is_created_with_my_open_tasks_and_calendar(self):
+        fake = FakeEspo()
+        code, out, err = self.provision_access(fake)
+        self.assertEqual(code, 0, err)
+        t = self.template(fake)
+        dashlets = {d["id"]: d["name"] for tab in t["layout"] for d in tab["layout"]}
+        self.assertEqual(sorted(dashlets.values()), ["Calendar", "Tasks"])
+        tasks = next(i for i, n in dashlets.items() if n == "Tasks")
+        self.assertEqual(t["dashletsOptions"][tasks]["title"], "My open tasks")
+        self.assertNotIn("deployToTeams", t)
+        self.assertEqual(json.loads(out)["dashboardTemplate"]["created"], 1)
+
+    def test_without_the_flag_nothing_is_deployed(self):
+        fake = FakeEspo()
+        self.assertEqual(self.provision_access(fake)[0], 0)
+        self.assertEqual(fake.deployed, [])
+        self.assertFalse([c for c in fake.calls if "deployToTeam" in c["path"]])
+
+    def test_flag_deploys_to_the_enquiries_team_replacing_dashboards(self):
+        fake = FakeEspo()
+        code, out, err = self.provision_access(fake, "key.env", "--deploy-dashboards")
+        self.assertEqual(code, 0, err)
+        team = next(i for i, t in fake.records["Team"].items() if t["name"] == "Enquiries")
+        self.assertEqual(fake.deployed, [(self.template(fake)["id"], team, False)])
+        self.assertEqual(json.loads(out)["dashboardDeployed"], {"teams": 1})
+        self.assertIn("replaces", err)
+
+    def test_rerun_is_idempotent_and_corrects_drift_by_name(self):
+        fake = FakeEspo()
+        self.provision_access(fake)
+        fake.calls.clear()
+        code, out, _ = self.provision_access(fake, "key2.env")
+        self.assertEqual((code, fake.writes()), (0, []))
+        self.assertEqual(json.loads(out)["dashboardTemplate"]["unchanged"], 1)
+        t = self.template(fake)
+        t["dashletsOptions"] = {}
+        fake.calls.clear()
+        self.provision_access(fake, "key3.env")
+        self.assertEqual([(c["method"], c["path"]) for c in fake.writes()],
+                         [("PUT", f"DashboardTemplate/{t['id']}")])
+        self.assertEqual(set(fake.writes()[0]["data"]), {"dashletsOptions"})
+
+    def bad_config(self, mutate):
+        cfg = self.path("cfg")
+        shutil.copytree(provision_access.CONFIG_DIR, cfg)
+        with open(os.path.join(cfg, "dashboards.json"), encoding="utf-8") as fh:
+            doc = json.load(fh)
+        mutate(doc["dashboardTemplates"][0])
+        with open(os.path.join(cfg, "dashboards.json"), "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        return cfg
+
+    def test_invalid_templates_are_refused_before_any_http(self):
+        for label, mutate in (
+                ("unknown team", lambda t: t.update(deployToTeams=["ER Staff team"])),
+                ("options for no dashlet", lambda t: t["dashletsOptions"].update(dX={})),
+                ("dashlet without id", lambda t: t["layout"][0]["layout"][0].pop("id")),
+                ("unknown key", lambda t: t.update(isDefault=True))):
+            with self.subTest(label):
+                fake = FakeEspo()
+                code, _, err = run(provision_access.main,
+                                   ["dev", "--key-file", self.path(f"k-{len(label)}"),
+                                    "--config-dir", self.bad_config(mutate)], fake)
+                shutil.rmtree(self.path("cfg"))
+                self.assertEqual(code, 1, err)
+                self.assertIn("dashboard template", err)
+                self.assertEqual(fake.calls, [])
+
+    def test_missing_dashboards_file_fails_loudly(self):
+        cfg = self.path("cfg")
+        shutil.copytree(provision_access.CONFIG_DIR, cfg)
+        os.remove(os.path.join(cfg, "dashboards.json"))
+        fake = FakeEspo()
+        code, _, err = run(provision_access.main, ["dev", "--key-file", self.path("k"),
+                                                   "--config-dir", cfg], fake)
+        self.assertEqual(code, 1)
+        self.assertIn("dashboards.json", err)
+        self.assertEqual(fake.calls, [])
 
 
 class UsersBase(TmpDir):

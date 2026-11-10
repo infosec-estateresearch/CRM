@@ -73,6 +73,11 @@ BROKEN_ACCESS = {
     "access_bad_import_cannot_edit_legacy.json": {"import_edits_sf_fields"},
     # CRM-004 round 2: a human role reading Opportunity.sfId
     "access_bad_opportunity_sfid_readable.json": {"sf_id_admin_only"},
+    # CRM-005
+    "access_bad_email_sfid_readable.json": {"sf_id_admin_only"},
+    "access_bad_staff_edits_email.json": {"staff_and_intake_cannot_edit_email",
+                                          "matches_work_order_table"},
+    "access_bad_manager_edits_task_sf_owner.json": {"sf_fields_read_only_for_people"},
 }
 BROKEN_KEYS = {
     "keys_bad_sfid_writable.json": {"sf_id_field"},
@@ -164,6 +169,9 @@ class TestDeployedRoles(unittest.TestCase):
 
     def test_sf_id_hidden_from_human_roles(self):
         self.assertRule("sf_id_admin_only")
+
+    def test_staff_and_intake_cannot_edit_email(self):
+        self.assertRule("staff_and_intake_cannot_edit_email")
 
     def test_human_roles_cannot_edit_any_sf_field(self):
         self.assertRule("sf_fields_read_only_for_people")
@@ -358,11 +366,13 @@ class TestMetadataConsistency(unittest.TestCase):
 
     def test_layouts_only_for_allowlisted_entities(self):
         self.assertTrue(set(os.listdir(os.path.join(RES, "layouts"))) <= {
-            "User", "Account", "Contact", "Opportunity", "ServiceType"})  # CRM-004 adds two
+            "User", "Account", "Contact", "Opportunity", "ServiceType",  # CRM-004 adds two
+            "Call", "Meeting", "Task"})  # CRM-005
 
     def test_role_field_data_names_real_fields(self):
-        defs = dict(self.defs, Opportunity=load_json(  # CRM-004 adds Opportunity fieldData
-            os.path.join(policy.ENTITY_DEFS_DIR, "Opportunity.json")))
+        defs = dict(self.defs, **{e: load_json(  # CRM-004 Opportunity, CRM-005 activities
+            os.path.join(policy.ENTITY_DEFS_DIR, f"{e}.json"))
+            for e in ["Opportunity"] + policy.ACTIVITIES + ["Email"]})
         for role in policy.load_access()["roles"]:
             for entity, fields in role["fieldData"].items():
                 for name in fields:
@@ -388,6 +398,7 @@ class TestHookFile(unittest.TestCase):
         found = [os.path.relpath(os.path.join(r, f), hooks)
                  for r, _, files in os.walk(hooks) for f in files]
         self.assertEqual(sorted(found), [os.path.join("Account", "RestrictDeleteWithEnquiries.php"),
+                                         os.path.join("Email", "ProtectArchivedEmail.php"),
                                          os.path.join("Opportunity", "RequireLossReason.php")])
 
     def test_braces_balance(self):

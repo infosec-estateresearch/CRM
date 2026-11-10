@@ -1,0 +1,43 @@
+{
+    "dashboardTemplates": [
+        {
+            "name": "ER Staff",
+            "deployToTeams": [
+                "Enquiries"
+            ],
+            "layout": [
+                {
+                    "name": "My Espo",
+                    "layout": [
+                        {
+                            "id": "d0000501",
+                            "name": "Tasks",
+                            "x": 0,
+                            "y": 0,
+                            "width": 2,
+                            "height": 4
+                        },
+                        {
+                            "id": "d0000502",
+                            "name": "Calendar",
+                            "x": 2,
+                            "y": 0,
+                            "width": 2,
+                            "height": 4
+                        }
+                    ]
+                }
+            ],
+            "dashletsOptions": {
+                "d0000501": {
+                    "title": "My open tasks",
+                    "displayRecords": 10,
+                    "autorefreshInterval": 0.5
+                },
+                "d0000502": {
+                    "title": "Calendar"
+                }
+            }
+        }
+    ]
+}
