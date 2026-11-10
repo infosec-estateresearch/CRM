@@ -21,6 +21,11 @@ Usage (operator stage; credentials only in the environment):
   updated by name like roles. They are deployed to their teams only with
   --deploy-dashboards, because deploying replaces the dashboards of every user in
   the team (append false); without the flag no dashboard is touched.
+- Settings (CRM-008): the keys in config/settings.json (currency GBP, national
+  phone numbers) are read with GET Settings and only those that differ are sent
+  with PUT Settings (admin only); a second run reports them unchanged.
+- A role's "info" key in roles.json is documentation only: EspoCRM has no such
+  attribute, so it is never sent or compared (CRM-008).
 - Nothing secret is printed: progress goes to stderr by name, a summary to stdout.
 
 Credentials come from CRM_ADMIN_USERNAME / CRM_ADMIN_PASSWORD; the base URL from
@@ -38,6 +43,7 @@ import crm_api  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CONFIG_DIR = os.path.join(REPO, "config", "access")
+SETTINGS_FILE = os.path.join(REPO, "config", "settings.json")
 TARGET_ENV = "dev"
 
 # Role attributes managed from config/access/roles.json (EspoCRM 10.0.12 Role fields).
@@ -47,7 +53,11 @@ ROLE_PERMISSIONS = (
     "dataPrivacyPermission", "followerManagementPermission", "auditPermission",
     "mentionPermission", "userCalendarPermission", "lockPermission",
 )
-ROLE_ATTRIBUTES = ("info", "data", "fieldData") + ROLE_PERMISSIONS
+ROLE_ATTRIBUTES = ("data", "fieldData") + ROLE_PERMISSIONS
+# Keys allowed in roles.json that are never sent or compared (CRM-008 change 8).
+ROLE_DOC_KEYS = ("info",)
+# Settings managed from config/settings.json (CRM-008 change 2).
+SETTINGS_KEYS = ("currencyList", "defaultCurrency", "baseCurrency", "phoneNumberInternational")
 # DashboardTemplate attributes managed from config/access/dashboards.json (CRM-005).
 DASHBOARD_ATTRIBUTES = ("layout", "dashletsOptions")
 DASHBOARD_KEYS = {"name", "deployToTeams"} | set(DASHBOARD_ATTRIBUTES)
@@ -122,7 +132,7 @@ def load_config(config_dir=CONFIG_DIR):
     role_names = {r["name"] for r in roles}
     team_names = {t["name"] for t in teams}
     for role in roles:
-        unknown = set(role) - {"name"} - set(ROLE_ATTRIBUTES)
+        unknown = set(role) - {"name"} - set(ROLE_ATTRIBUTES) - set(ROLE_DOC_KEYS)
         if unknown:
             raise ProvisionError(f"role {role['name']}: unknown attributes {sorted(unknown)}")
     for user in api_users:
@@ -172,6 +182,22 @@ def load_dashboards(config_dir, team_names):
     if len(set(names)) != len(names):
         raise ProvisionError(f"duplicate dashboard template name in {config_dir}")
     return templates
+
+
+def load_settings(path=SETTINGS_FILE):
+    """The Settings values the target must have (config/settings.json, CRM-008)."""
+    settings = _load_json(path).get("settings")
+    if not isinstance(settings, dict) or not settings:
+        raise ProvisionError(f"{path}: settings must be a non-empty object")
+    unknown = set(settings) - set(SETTINGS_KEYS)
+    if unknown:
+        raise ProvisionError(f"{path}: unknown settings {sorted(unknown)}")
+    return settings
+
+
+def role_desired(role):
+    """What is sent and compared for a role: never the documentation-only keys."""
+    return {k: v for k, v in role.items() if k not in ROLE_DOC_KEYS}
 
 
 def api_only_roles(config):
@@ -314,11 +340,26 @@ def ensure_dashboards(client, templates, team_ids, deploy, counter):
                 "(replaces its users' dashboards)")
 
 
+def ensure_settings(client, desired, counter):
+    """Send only the Settings keys that differ (PUT Settings needs admin)."""
+    current = client.call("GET", "Settings") or {}
+    changes = diff(current, desired)
+    if changes:
+        client.call("PUT", "Settings", data=changes)
+        counter.add("settings", "updated")
+        log(f"settings: updated ({', '.join(sorted(changes))})")
+    else:
+        counter.add("settings", "unchanged")
+        log("settings: unchanged")
+
+
 def provision(client, config, key_file, import_active=None, deploy_dashboards=False):
     counter = Counter()
+    if config.get("settings"):
+        ensure_settings(client, config["settings"], counter)
     team_ids = {t["name"]: ensure_by_name(client, "Team", t, counter, "team")
                 for t in config["teams"]}
-    role_ids = {r["name"]: ensure_by_name(client, "Role", r, counter, "role")
+    role_ids = {r["name"]: ensure_by_name(client, "Role", role_desired(r), counter, "role")
                 for r in config["roles"]}
     for spec in config["apiUsers"]:
         ensure_api_user(client, spec, role_ids, team_ids, key_file, import_active, counter)
@@ -349,11 +390,13 @@ def main(argv=None, transport=None, environ=None):
                         help="deploy dashboard templates to their teams; replaces those "
                              "users' dashboards")
     parser.add_argument("--config-dir", default=CONFIG_DIR, help=argparse.SUPPRESS)
+    parser.add_argument("--settings-file", default=SETTINGS_FILE, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     active = None if args.import_user_active is None else args.import_user_active == "yes"
     try:
         check_new_private_path(args.key_file)
         config = load_config(args.config_dir)
+        config["settings"] = load_settings(args.settings_file)
         client = client_from_env(args.base_url, environ, transport)
         counts = provision(client, config, args.key_file, active, args.deploy_dashboards)
     except crm_api.ConfigError as err:

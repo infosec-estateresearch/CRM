@@ -33,7 +33,14 @@ EXCEPTION_CODES = frozenset({
     "parent_soft_deleted_in_sf",
     "enum_blank_unrepresentable", "call_duration_unknown", "phone_refused",
     "synthetic_enum_mapped",
+    # CRM-008
+    "owner_required_unresolved", "task_email_imported_as_task", "value_too_long",
+    "email_address_invalid", "email_from_invalid",
 })
+# Codes that refuse the record: it is never sent (CRM-008).
+REFUSING_CODES = frozenset({"owner_required_unresolved", "email_from_invalid"})
+# Core entities whose assignedUser is required: true in EspoCRM 10.0.12 (CRM-008 fact 3).
+OWNER_REQUIRED = frozenset({"Task", "Call", "Meeting"})
 
 # Every source field a mapping function reads, per object (besides those named in
 # mapping.json copy/enum). A dict or list in any of them is ``value_shape`` for that record.
@@ -117,11 +124,38 @@ def phone_usable(value):
     return isinstance(value, str) and bool(_DIGIT.search(value))
 
 
-def addresses(value):
-    """Salesforce address list ('a; b' or 'a, b') -> ';'-separated, or None."""
+# A conservative approximation of PHP FILTER_VALIDATE_EMAIL, which EspoCRM uses for
+# email addresses (CRM-008 change 6). Anything it accepts, PHP accepts; some addresses PHP
+# accepts are refused here (quoted local parts, IP-literal domains, non-ASCII, numeric
+# TLDs): a borderline address is dropped rather than sent and refused by the server.
+_LOCAL_ATOM = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
+_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+_EMAIL = re.compile(rf"\A{_LOCAL_ATOM}(?:\.{_LOCAL_ATOM})*@(?:{_LABEL}\.)+[A-Za-z]{{2,63}}\Z")
+
+
+def email_valid(value):
+    """True for an address EspoCRM accepts: dot-atom local part (at most 64 characters), a
+    dotted domain of LDH labels (each 1-63, no leading or trailing hyphen) ending in an
+    alphabetic TLD, 254 characters at most, ASCII only, no whitespace."""
+    if not isinstance(value, str) or len(value) > 254 or not value.isascii():
+        return False
+    if not _EMAIL.fullmatch(value):
+        return False
+    return len(value.rsplit("@", 1)[0]) <= 64
+
+
+def addresses(value, exc=None):
+    """Salesforce address list ('a; b' or 'a, b') -> ';'-separated, or None.
+
+    With ``exc``, an invalid address is dropped from the list (email_address_invalid)."""
     if blank(value):
         return None
     parts = [p.strip() for p in re.split(r"[;,]", value) if p.strip()]
+    if exc is not None:
+        valid = [p for p in parts if email_valid(p)]
+        if len(valid) != len(parts):
+            exc.append("email_address_invalid")
+        parts = valid
     return ";".join(parts) or None
 
 
@@ -210,6 +244,15 @@ class Mapper:
             out["sfOwnerId"] = text(row.get("OwnerId"))
             out["assignedUserId"] = self.owner(row, ctx, exc)
         return out
+
+    @staticmethod
+    def require_owner(attrs, exc):
+        """Task, Call and Meeting need an owner (core required): an unresolved one refuses the
+        record (owner_required_unresolved). The owner is never guessed; no placeholder."""
+        if attrs.get("assignedUserId") is None:
+            if "owner_unresolved" in exc:
+                exc.remove("owner_unresolved")
+            exc.append("owner_required_unresolved")
 
     def _parent(self, row, ctx, exc):
         """parent from WhatId by key prefix (Opportunity or Account), falling back to AccountId.
@@ -317,17 +360,27 @@ class Mapper:
             attrs[g] = text(parsed.get(g))
         return attrs, exc
 
-    def task_entity(self, row, exc=None):
+    def task_entity(self, row, exc=None, emailed=None):
+        """The target entity of a Task row. With ``emailed`` (the ActivityIds of every
+        EmailMessage), a Task-Email that no EmailMessage represents is a Task (CRM-008): an
+        Email needs a from address, which only an EmailMessage has."""
         sub = row.get("TaskSubtype")
         entity = self.m["taskSubtypeEntity"].get(sub) if isinstance(sub, str) else None
         if entity is None:
             entity = self._synthetic("Task.TaskSubtype", sub, exc)
-        return entity or "Task"
+        entity = entity or "Task"
+        if entity == "Email" and emailed is not None and row.get("Id") not in emailed:
+            if exc is not None:
+                exc.append("task_email_imported_as_task")
+            return "Task"
+        return entity
 
-    def task(self, row, ctx):
+    def task(self, row, ctx, emailed=None):
         exc = []
-        entity = self.task_entity(row, exc)
+        entity = self.task_entity(row, exc, emailed)
         attrs = self._legacy(row, ctx, exc)
+        if entity in OWNER_REQUIRED:
+            self.require_owner(attrs, exc)
         attrs["name"] = text(row.get("Subject"))
         ptype, pid = self._parent(row, ctx, exc)
         attrs["parentType"], attrs["parentId"] = ptype, pid
@@ -397,12 +450,18 @@ class Mapper:
     def event(self, row, ctx):
         exc = []
         attrs = self._legacy(row, ctx, exc)
+        self.require_owner(attrs, exc)
         attrs["name"] = text(row.get("Subject"))
         etype = row.get("Type")
         if blank(etype):
             attrs["meetingType"] = self.m["meetingTypeUntyped"]
+        elif isinstance(etype, str) and etype in self.m["enums"]["Meeting.meetingType"]:
+            attrs["meetingType"] = etype
         else:
-            attrs["meetingType"] = self._enum("Meeting.meetingType", etype, exc)
+            # Selftest only (CRM-008 change 7): synthetic Event Type values.
+            attrs["meetingType"] = self._synthetic("Event.Type", etype, exc)
+            if attrs["meetingType"] is None:
+                attrs["meetingType"] = self._enum("Meeting.meetingType", etype, exc)
         attrs["dateStart"] = self._required_start(
             self._dt(row.get("StartDateTime") or row.get("ActivityDateTime"), exc), None, attrs, exc)
         attrs["dateEnd"] = self._dt(row.get("EndDateTime"), exc)
@@ -426,10 +485,14 @@ class Mapper:
         # ``from`` takes the bare address only (a display name there makes EspoCRM drop it);
         # the display form goes to fromString.
         attrs["from"] = text(row.get("FromAddress"))
+        if attrs["from"] is not None:
+            attrs["from"] = attrs["from"].strip()
+        if not email_valid(attrs["from"]):
+            exc.append("email_from_invalid")         # Email.from is required: refused, never sent
         name = text(row.get("FromName"))
         attrs["fromString"] = (f"{name} <{attrs['from']}>" if name and attrs["from"] else attrs["from"])
-        attrs["to"] = addresses(row.get("ToAddress"))
-        attrs["cc"] = addresses(row.get("CcAddress"))
+        attrs["to"] = addresses(row.get("ToAddress"), exc)
+        attrs["cc"] = addresses(row.get("CcAddress"), exc)
         attrs["bodyPlain"] = text(row.get("TextBody"))
         attrs["body"] = attrs["bodyPlain"]
         attrs["isHtml"] = False

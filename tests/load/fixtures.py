@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
 import urllib.parse
 
@@ -351,12 +352,33 @@ class FakeEspo:
     TEXT = {"description", "body", "bodyPlain", "keyInformation"}
     SETTINGS_REFUSED = object()
     NULL_ACCEPTED = {("Meeting", "meetingType")}     # PL-verified: explicit null accepted, reads back null
+    # 10.0.12 refusals (PL-verified, CRM-008). assignedUser is required on these entities.
+    OWNER_REQUIRED = ("Task", "Call", "Meeting")
+    # varchar maxLength (same values as mapping.json maxLength, copied so a wrong table there
+    # is caught here). Every phone number is limited to PHONE_MAX_LENGTH.
+    MAX_LENGTH = {"ServiceType": {"name": 150},
+                  "Account": {"name": 249, "billingAddressCity": 100, "billingAddressState": 100,
+                              "billingAddressCountry": 100, "billingAddressPostalCode": 40,
+                              "shippingAddressCity": 100, "shippingAddressState": 100,
+                              "shippingAddressCountry": 100, "shippingAddressPostalCode": 40},
+                  "Contact": {"title": 255, "addressCity": 100, "addressState": 100, "addressCountry": 100,
+                              "addressPostalCode": 40},
+                  "Opportunity": {"sfStageName": 100, "sfLeadSource": 100, "clientReference": 100,
+                                  "caseNumber": 100}}
+    PHONE_MAX_LENGTH = 36
+    # Settings before provisioning: the 10.0.12 install default currency list.
+    DEFAULT_CURRENCY_LIST = ["USD"]
+    # An approximation of PHP FILTER_VALIDATE_EMAIL, independent of crm_load.mapping.
+    _EMAIL = re.compile(r"\A[^@\s\"(),:;<>\[\]\\]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\Z")
 
     def __init__(self, users=(U1, U2, U_INACTIVE, U_SHARED), hidden_sfids=(), phone_international=False,
                  settings=None):
         self.phone_international = phone_international
         # GET Settings: by default it reports phoneNumberInternational as the phone rule above.
-        self.settings = {"phoneNumberInternational": phone_international} if settings is None else settings
+        # The server's currency list; GET Settings reports it unless ``settings`` is given.
+        self.currency_list = list(self.DEFAULT_CURRENCY_LIST)
+        self.settings = ({"phoneNumberInternational": phone_international,
+                          "currencyList": list(self.currency_list)} if settings is None else settings)
         self.headers = []
         self.db = {e: {} for e in self.ENTITIES}
         self.writes = []
@@ -383,6 +405,14 @@ class FakeEspo:
         if entity == "Settings" and method == "GET":
             if self.settings is self.SETTINGS_REFUSED:
                 return 403, None
+            return 200, json.loads(json.dumps(self.settings))
+        if entity == "Settings" and method == "PUT":
+            if self.settings is self.SETTINGS_REFUSED:
+                return 403, None
+            self.writes.append((method, entity, json.loads(json.dumps(body))))
+            self.settings.update(json.loads(json.dumps(body)))
+            if "currencyList" in body:
+                self.currency_list = list(body["currencyList"])
             return 200, json.loads(json.dumps(self.settings))
         if entity not in self.db:
             return 404, None
@@ -413,6 +443,9 @@ class FakeEspo:
             refused = self._enum_refused(entity, body)
             if refused:
                 return 400, {"field": refused, "type": "valid"}
+            refused = self._refused(entity, body, create=True)
+            if refused:
+                return 400, refused
             stored, bad = self._server_side(entity, body)
             if bad:
                 return 400, {"field": "phoneNumber", "type": "valid"}
@@ -432,6 +465,9 @@ class FakeEspo:
             refused = self._enum_refused(entity, body)
             if refused:
                 return 400, {"field": refused, "type": "valid"}
+            refused = self._refused(entity, body, create=False, current=rec)
+            if refused:
+                return 400, refused
             stored, bad = self._server_side(entity, body)
             if bad:
                 return 400, {"field": "phoneNumber", "type": "valid"}
@@ -439,6 +475,59 @@ class FakeEspo:
             rec.update(stored)
             return 200, dict(rec)
         return 405, None
+
+    # Each check can be switched off (mutation tests prove each one is exercised).
+    CHECKS = ("owner", "max_length", "currency", "email")
+
+    def _refused(self, entity, body, create, current=None):
+        """The 400 body EspoCRM 10.0.12 returns for ``body``, or None (CRM-008 refusals)."""
+        checks = set(self.CHECKS) - getattr(self, "disabled_checks", set())
+        if "owner" in checks and entity in self.OWNER_REQUIRED and \
+                (create or "assignedUserId" in body) and body.get("assignedUserId") in (None, ""):
+            return {"field": "assignedUser", "type": "required"}
+        if "max_length" in checks:
+            for attr, limit in self.MAX_LENGTH.get(entity, {}).items():
+                v = body.get(attr)
+                if isinstance(v, str) and len(v.strip()) > limit:
+                    return {"field": attr, "type": "maxLength"}
+            phones = [body.get("phoneNumber")] + [p.get("phoneNumber") for p in body.get("phoneNumberData") or []]
+            if any(isinstance(n, str) and len(n.strip()) > self.PHONE_MAX_LENGTH for n in phones):
+                return {"field": "phoneNumber", "type": "maxLength"}
+        if "currency" in checks and body.get("amount") is not None:
+            currency = body.get("amountCurrency", (current or {}).get("amountCurrency"))
+            if currency not in self.currency_list:
+                return {"field": "amount", "type": "validCurrency"}
+        if "email" in checks and entity == "Email":
+            if (create or "from" in body) and (not isinstance(body.get("from"), str) or not body["from"].strip()):
+                return {"field": "from", "type": "required"}
+            for attr in ("to", "cc", "from"):
+                v = body.get(attr)
+                if not isinstance(v, str) or (attr == "from" and "<" in v):
+                    continue                     # a display name in from is dropped, not refused
+                if any(not self._EMAIL.match(a.strip()) for a in v.split(";") if a.strip()):
+                    return {"field": attr, "type": "valid"}
+        return None
+
+    def provision_settings(self, path=None):
+        """Apply config/settings.json through the real scripts/provision_access.ensure_settings."""
+        scripts = os.path.join(ROOT, "scripts")
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        import crm_api
+        import provision_access
+        client = crm_api.EspoClient("http://fake.example.test", "admin", "x", transport=self)
+        counter = provision_access.Counter()
+        desired = provision_access.load_settings(path or provision_access.SETTINGS_FILE)
+        provision_access.ensure_settings(client, desired, counter)
+        return counter.counts
+
+    def request(self, method, url, headers, body):
+        """scripts/crm_api.py transport interface onto ``send``."""
+        parsed = urllib.parse.urlsplit(url)
+        path = parsed.path.split("/api/v1/", 1)[1]
+        status, data = self.send(method, path, urllib.parse.parse_qsl(parsed.query),
+                                 None if body is None else json.loads(body), headers)
+        return status, (b"" if data is None else json.dumps(data).encode("utf-8"))
 
     def _no_blank(self, entity):
         fields = set(self.CORE_NO_BLANK.get(entity, ()))

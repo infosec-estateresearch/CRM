@@ -230,9 +230,53 @@ class TestDuplicateChecks(unittest.TestCase):
             for name in files:
                 if name.endswith(".php"):
                     self.assertTrue(re.search(r"[\\/]Classes[\\/]", root)
+                                    or root == CONTROLLERS  # CRM-008
                                     or re.search(
                                         r"[\\/]Hooks[\\/](Account|Opportunity|Email)$",
                                         root), root)
+
+
+
+CONTROLLERS = os.path.join(ESPO_CUSTOM, "Controllers")
+
+
+class TestControllers(unittest.TestCase):
+    """CRM-008 change 1: a custom entity scope is routed only through a controller."""
+
+    def custom_entity_scopes(self):
+        scopes_dir = os.path.join(RES, "metadata", "scopes")
+        out = []
+        for name in sorted(os.listdir(scopes_dir)):
+            scope = load("metadata", "scopes", name)
+            if scope.get("entity") is True and scope.get("isCustom") is True:
+                out.append(name[:-len(".json")])
+        return out
+
+    def test_service_type_is_a_custom_entity_scope(self):
+        self.assertIn("ServiceType", self.custom_entity_scopes())
+
+    def test_every_custom_entity_scope_has_a_controller(self):
+        for scope in self.custom_entity_scopes():
+            with self.subTest(scope=scope):
+                path = os.path.join(CONTROLLERS, f"{scope}.php")
+                self.assertTrue(os.path.isfile(path), f"missing {path}")
+                with open(path, encoding="utf-8") as fh:
+                    source = fh.read()
+                self.assertTrue(source.startswith("<?php\n"))
+                self.assertRegex(source, r"(?m)^namespace Espo\\Custom\\Controllers;$")
+                self.assertRegex(source, rf"(?m)^class {scope} extends "
+                                         r"\\Espo\\Core\\Templates\\Controllers\\Base\s*\{")
+
+    def test_controllers_are_only_for_custom_entity_scopes(self):
+        names = sorted(f[:-4] for f in os.listdir(CONTROLLERS) if f.endswith(".php"))
+        self.assertEqual(names, self.custom_entity_scopes())
+
+    @unittest.skipUnless(shutil.which("php"), "php not installed")
+    def test_controllers_lint(self):
+        for name in os.listdir(CONTROLLERS):
+            res = subprocess.run(["php", "-l", os.path.join(CONTROLLERS, name)],
+                                 capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
 
 
 if __name__ == "__main__":
