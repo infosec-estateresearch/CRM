@@ -128,6 +128,14 @@ def read_stdin_credentials(stream):
     for key in ("username", "password"):
         if not isinstance(doc[key], str) or not doc[key]:
             raise ConfigError("credentials_stdin", detail="username and password must be non-empty strings")
+        try:
+            doc[key].encode("utf-8", "strict")      # e.g. a lone surrogate from a JSON \ud800 escape
+        except UnicodeError:
+            valid = False
+        else:
+            valid = True
+        if not valid:                               # raised outside the except: no chained value
+            raise ConfigError("credentials_invalid", detail="username and password must be valid UTF-8")
     return doc["username"], doc["password"]
 
 

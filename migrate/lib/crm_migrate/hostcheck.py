@@ -135,6 +135,36 @@ def check_no_exported(environ, names):
     return [f"refusing: {n} is exported in the calling shell" for n in present]
 
 
+def _first_unclosed_quote_line(text):
+    """Line number of the first non-blank, non-comment line that leaves a ``'`` or ``"``
+    open at its end (shell rules: no escapes inside ``'...'``, backslash escapes elsewhere)."""
+    for number, line in enumerate(text.split("\n"), 1):
+        if line.endswith("\r"):
+            line = line[:-1]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        quote, i = None, 0
+        while i < len(line):
+            ch = line[i]
+            if quote == "'":
+                if ch == "'":
+                    quote = None
+            elif ch == "\\":
+                i += 1                                # skip the escaped character
+            elif quote == '"':
+                if ch == '"':
+                    quote = None
+            elif ch in "'\"":
+                quote = ch
+            elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+                break                                 # trailing comment outside quotes
+            i += 1
+        if quote is not None:
+            return number
+    return None
+
+
 def parse_legacy_env(text):
     """Pure strict parser for the ELT env file: returns ``(creds or None, errors)``.
 
@@ -142,12 +172,16 @@ def parse_legacy_env(text):
     other name is ignored, but every non-blank, non-comment line must be ``[export ]NAME=...``.
     The two values may be unquoted (no whitespace, quotes, backslash, backtick or any of
     ``;&|<>()$``), double-quoted (no ``"``, backslash, backtick or ``$`` inside) or
-    single-quoted; a quoted value must be closed, with nothing after the closing quote. A
+    single-quoted; a quoted value must be closed, with nothing after the closing quote. If
+    any line opens a quote it does not close on that line, the whole file is refused. A
     duplicate, missing, empty or ambiguous value is refused. Errors carry line numbers and
     names only, never a value."""
     found, errors = {}, []
     if not isinstance(text, str):
         return None, ["legacy env file is not text"]
+    unclosed = _first_unclosed_quote_line(text)
+    if unclosed is not None:                          # a value may span lines: ambiguous, fail closed
+        return None, [f"legacy env file line {unclosed} opens a quote it does not close; file refused"]
     for number, line in enumerate(text.split("\n"), 1):
         if line.endswith("\r"):
             line = line[:-1]

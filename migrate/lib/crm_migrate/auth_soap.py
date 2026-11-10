@@ -10,8 +10,9 @@ the latest, when Salesforce retires SOAP ``login()``.
   against these templates byte for byte, so no other SOAP operation can be expressed.
 * Responses must be strict UTF-8 (no UTF-16/32, no other declared encoding) and are refused
   on any ``<!DOCTYPE`` or ``<!ENTITY`` in the decoded text, then parsed by an expat parser
-  whose DTD and entity handlers raise, under a size limit. A fault is reduced to its ``faultcode`` and the
-  first token of ``exceptionCode``; the fault string is never kept.
+  whose DTD and entity handlers raise, under a size limit. A fault is reduced to its ``faultcode`` (only from the
+  fixed ``FAULTCODES`` set, else ``unrecognised``) and the first token of ``exceptionCode``
+  (only from the fixed ``errors.SF_ERROR_CODES`` set); the fault string is never kept.
 * The origin of ``serverUrl`` must be ``https://<label>.my.salesforce.com`` and must equal
   the configured ``CRM_SF_ORIGIN`` exactly, otherwise the run aborts before any REST call.
   The session id is used only as the Bearer token for that origin and held only in memory.
@@ -46,7 +47,15 @@ _SERVER_PATH_RE = re.compile(r"\A/services/Soap/u/(?P<version>[0-9]+\.[0-9]+)/(?
 _MYDOMAIN_RE = re.compile(r"\Ahttps://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.my\.salesforce\.com\Z")
 _SANDBOX_MYDOMAIN_RE = re.compile(r"\Ahttps://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.sandbox\.my\.salesforce\.com\Z")
 _SESSION_RE = re.compile(r"\A[A-Za-z0-9!._-]{16,1024}\Z")
-_FAULTCODE_RE = re.compile(r"\A[A-Za-z][A-Za-z0-9_.:-]{0,63}\Z")
+# A server-supplied faultcode is printed only if it is one of these; anything else prints
+# as ``faultcode=unrecognised`` (a faultcode is attacker-controlled text and is never echoed).
+FAULTCODES = frozenset((
+    "sf:INVALID_LOGIN", "sf:LOGIN_MUST_USE_SECURITY_TOKEN", "sf:INVALID_SESSION_ID",
+    "sf:API_DISABLED_FOR_ORG", "sf:REQUEST_LIMIT_EXCEEDED", "sf:PASSWORD_LOCKOUT",
+    "sf:INVALID_OPERATION_WITH_EXPIRED_PASSWORD", "sf:LOGIN_RATE_EXCEEDED",
+    "soapenv:Client", "soapenv:Server",
+))
+UNRECOGNISED_FAULTCODE = "unrecognised"
 _CTL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 LOGIN_TEMPLATE = (
@@ -275,8 +284,8 @@ def _raise_if_fault(root, status):
     if fault is None:
         return
     faultcode = (fault.findtext("faultcode") or "").strip()
-    if not _FAULTCODE_RE.fullmatch(faultcode):
-        faultcode = "UNKNOWN"
+    if faultcode not in FAULTCODES:
+        faultcode = UNRECOGNISED_FAULTCODE
     exception_code = None
     for el in fault.iter():
         if el.tag.endswith("}exceptionCode") or el.tag == "exceptionCode":
