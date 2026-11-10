@@ -14,12 +14,12 @@
 # started again and EspoCRM's clear-cache and rebuild run inside crm-app.
 # Because it can start services, the LAN access check (scripts/check_access.py)
 # runs first and a refusal stops the deploy before the stack is touched.
-# Usage: scripts/deploy_custom.sh dev
+# Usage: scripts/deploy_custom.sh dev|beta
 set -euo pipefail
 # shellcheck source=lib/common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
-require_dev "${1:-}"
+require_target "${1:-}"
 require_env_file
 require_runtime_paths
 # This script starts services again, so the LAN access settings must pass first.
