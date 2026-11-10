@@ -54,11 +54,8 @@
           "stream": "all"
         },
         "Currency": {
-          "create": "no",
-          "read": "all",
-          "edit": "no",
-          "delete": "no",
-          "stream": "all"
+          "read": "yes",
+          "edit": "no"
         },
         "Document": {
           "create": "no",
@@ -318,11 +315,8 @@
           "stream": "all"
         },
         "Currency": {
-          "create": "no",
-          "read": "all",
-          "edit": "no",
-          "delete": "no",
-          "stream": "all"
+          "read": "yes",
+          "edit": "no"
         },
         "Document": {
           "create": "no",
@@ -581,11 +575,8 @@
           "stream": "all"
         },
         "Currency": {
-          "create": "no",
-          "read": "all",
-          "edit": "no",
-          "delete": "no",
-          "stream": "all"
+          "read": "yes",
+          "edit": "no"
         },
         "Document": {
           "create": "no",
@@ -844,11 +835,8 @@
           "stream": "all"
         },
         "Currency": {
-          "create": "no",
-          "read": "all",
-          "edit": "no",
-          "delete": "no",
-          "stream": "all"
+          "read": "yes",
+          "edit": "no"
         },
         "Document": {
           "create": "no",

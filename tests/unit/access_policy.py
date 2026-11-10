@@ -48,6 +48,13 @@ UNUSED_SCOPES = ["Lead", "Campaign", "TargetList", "TargetListCategory", "Knowle
                  "Case"]
 # Reference scopes: read all, never create, edit or delete.
 READ_ONLY_SCOPES = ["Currency", "Document", "DocumentFolder", "User", "Team"]
+# CRM-003-F: entity scopes whose ACL is level-based, not the five-action table. Verified
+# by the PL live in espocrm 10.0.12 (scopes.<scope>.aclActionList / aclLevelList): the
+# server refuses (HTTP 400) any other action or level, e.g. Currency read "all".
+LEVEL_SCOPES = {"Currency": {"actions": ["read", "edit"], "levels": {"yes", "no"}}}
+# Read-only, per scope kind: entity scopes read all and nothing else; level-based scopes
+# read yes, edit no.
+READ_ONLY_LEVEL_ROW = {"read": "yes", "edit": "no"}
 # Added by CRM-004: reference data that admins maintain. Human roles read all and
 # change nothing (admins bypass role ACL); ER Import creates and edits, never deletes.
 ADMIN_MANAGED_SCOPES = ["ServiceType"]
@@ -86,10 +93,16 @@ def _row(create, edit, delete):
     return {"create": create, "read": "all", "edit": edit, "delete": delete, "stream": "all"}
 
 
+def read_only_row(scope):
+    """The read-only access for `scope`, expressed in that scope's kind of ACL."""
+    return dict(READ_ONLY_LEVEL_ROW) if scope in LEVEL_SCOPES else _row("no", "no", "no")
+
+
 # The WO CRM-003 item 2 table (plus the round-4 scope ruling), transcribed
 # independently of config/access/roles.json. CRM-005: Email edit is "no" for
-# ER Staff and ER Intake (archived email is read-only history).
-_FIXED = dict({s: _row("no", "no", "no") for s in READ_ONLY_SCOPES},
+# ER Staff and ER Intake (archived email is read-only history). CRM-003-F: Currency
+# is level-based (read yes, edit no).
+_FIXED = dict({s: read_only_row(s) for s in READ_ONLY_SCOPES},
               **{s: False for s in UNUSED_SCOPES})
 _HUMAN_ADMIN_MANAGED = {s: _row("no", "no", "no") for s in ADMIN_MANAGED_SCOPES}  # CRM-004
 _IMPORT_ADMIN_MANAGED = {s: _row("yes", "all", "no") for s in ADMIN_MANAGED_SCOPES}  # CRM-004
@@ -174,11 +187,12 @@ def rule_every_acl_scope_explicit(doc):
 
 
 def rule_known_levels(doc):
-    """Every entity scope is false or exactly the five actions, at valid levels."""
+    """Every entity scope is false or exactly the five actions, at valid levels.
+    Level-based scopes are checked by rule_level_scopes instead."""
     out = []
     for name, role in _roles(doc).items():
         for scope, actions in (role.get("data") or {}).items():
-            if scope in ACL_BOOLEAN_SCOPES or actions is False:
+            if scope in ACL_BOOLEAN_SCOPES or scope in LEVEL_SCOPES or actions is False:
                 continue
             if not isinstance(actions, dict) or sorted(actions) != sorted(ACTIONS):
                 out.append(f"{name}.{scope}: must be false or exactly the actions {ACTIONS}")
@@ -186,6 +200,27 @@ def rule_known_levels(doc):
             for action, level in actions.items():
                 if level not in LEVELS[action]:
                     out.append(f"{name}.{scope}.{action}: invalid level {level!r}")
+    return out
+
+
+def rule_level_scopes(doc):
+    """CRM-003-F: a level-based scope (Currency) is false or uses exactly its own actions,
+    each at one of its own levels; EspoCRM 10.0.12 refuses anything else with HTTP 400."""
+    out = []
+    for name, role in _roles(doc).items():
+        data = role.get("data") or {}
+        for scope, spec in LEVEL_SCOPES.items():
+            if scope not in data or data[scope] is False:
+                continue  # a missing scope is every_acl_scope_explicit's to report
+            actions = data[scope]
+            if not isinstance(actions, dict) or sorted(actions) != sorted(spec["actions"]):
+                out.append(f"{name}.{scope}: level-based scope must be false or exactly "
+                           f"the actions {spec['actions']}, not {actions!r}")
+                continue
+            for action, level in actions.items():
+                if level not in spec["levels"]:
+                    out.append(f"{name}.{scope}.{action}: level {level!r} is not one of "
+                               f"{sorted(spec['levels'])}")
     return out
 
 
@@ -197,11 +232,12 @@ def rule_unused_scopes_disabled(doc):
 
 
 def rule_read_only_reference_scopes(doc):
-    """Currency, Document, DocumentFolder, User and Team: read all, nothing else."""
-    want = _row("no", "no", "no")
-    return [f"{name}.{scope}: {(role.get('data') or {}).get(scope)} != read-only {want}"
+    """Document, DocumentFolder, User and Team: read all, nothing else. Currency
+    (level-based): read yes, edit no."""
+    return [f"{name}.{scope}: {(role.get('data') or {}).get(scope)} "
+            f"!= read-only {read_only_row(scope)}"
             for name, role in _roles(doc).items() for scope in READ_ONLY_SCOPES
-            if (role.get("data") or {}).get(scope) != want]
+            if (role.get("data") or {}).get(scope) != read_only_row(scope)]
 
 
 def rule_boolean_scopes(doc):
@@ -218,9 +254,12 @@ def rule_boolean_scopes(doc):
 
 
 def rule_stream_as_read(doc):
+    """Every entity scope with the five-action table; level-based scopes have no stream."""
     out = []
     for name, role in _roles(doc).items():
         for scope, actions in (role.get("data") or {}).items():
+            if scope in LEVEL_SCOPES:
+                continue
             if isinstance(actions, dict) and actions.get("stream") != actions.get("read"):
                 out.append(f"{name}.{scope}: stream {actions.get('stream')!r} "
                            f"differs from read {actions.get('read')!r}")
@@ -245,12 +284,16 @@ def rule_intake_edits_all_opportunity(doc):
 
 
 def rule_import_never_deletes(doc):
-    """ER Import deletes nothing: every scope is false, a boolean, or has delete 'no'."""
+    """ER Import deletes nothing: every scope is false, a boolean, or has delete 'no'.
+    A level-based scope has no delete action (rule_level_scopes refuses one), so it
+    passes here unless it carries a delete other than 'no'."""
     return [f"{IMPORT}.{scope}: delete is "
             f"{actions.get('delete') if isinstance(actions, dict) else actions!r}"
             for scope, actions in _data(doc, IMPORT).items()
             if not (actions is False or isinstance(actions, bool) and scope in ACL_BOOLEAN_SCOPES
-                    or isinstance(actions, dict) and actions.get("delete") == "no")]
+                    or isinstance(actions, dict) and actions.get("delete") == "no"
+                    or scope in LEVEL_SCOPES and isinstance(actions, dict)
+                    and actions.get("delete", "no") == "no")]
 
 
 def rule_import_api_only(doc):
@@ -345,6 +388,7 @@ ROLE_RULES = {
     "teams_and_roles_present": rule_teams_and_roles_present,
     "every_acl_scope_explicit": rule_every_acl_scope_explicit,
     "known_levels": rule_known_levels,
+    "level_scopes": rule_level_scopes,
     "unused_scopes_disabled": rule_unused_scopes_disabled,
     "read_only_reference_scopes": rule_read_only_reference_scopes,
     "boolean_scopes": rule_boolean_scopes,
