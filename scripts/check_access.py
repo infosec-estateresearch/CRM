@@ -4,6 +4,7 @@ crm-beta edge settings (CRM-007), standard library only.
 
     python3 scripts/check_access.py beta [--render]
     python3 scripts/check_access.py restoretest
+    python3 scripts/check_access.py dev|beta --base-url
 
 beta validates CRM_BETA_* and CRM_SITE_URL in /srv/CRM/runtime/beta/env, the
 beta compose bind policy, the crm-app HTTPS policy (crm-proxy.conf) and the
@@ -674,10 +675,15 @@ def check_restoretest_compose(doc):
     crm-dev: its own project name, one crm-db service on the registered MariaDB
     image, no published or exposed port, no host network, no bind mount, only
     its own project-scoped named volume and internal network (no `name:` or
-    `external`, which could alias another project's resources)."""
+    `external`, which could alias another project's resources). CRM-007R: the
+    network may set only driver: bridge and internal: true (beta's allowlist),
+    the volume only driver: local, and there are no top-level secrets/configs."""
     out = []
     if not isinstance(doc, dict):
         return ["restoretest compose is not a mapping"]
+    for key in ("secrets", "configs"):
+        if key in doc:
+            out.append(f"restoretest compose: top-level '{key}' is not allowed")
     if doc.get("name") != RESTORETEST_PROJECT:
         out.append(f"restoretest compose project name is not {RESTORETEST_PROJECT}")
     services = doc.get("services")
@@ -704,6 +710,8 @@ def check_restoretest_compose(doc):
         spec = top_vols[vol_name] or {}
         if not isinstance(spec, dict) or "name" in spec or "external" in spec or "driver_opts" in spec:
             out.append("the restoretest volume must be project-scoped (no name, external or driver_opts)")
+        elif set(spec) - {"driver"} or spec.get("driver", "local") != "local":
+            out.append("the restoretest volume may set only driver: local")
     nets = db.get("networks")
     if not isinstance(nets, dict) or set(nets) != {RESTORETEST_NETWORK}:
         out.append(f"crm-db must join only {RESTORETEST_NETWORK}")
@@ -716,6 +724,8 @@ def check_restoretest_compose(doc):
                 or spec.get("internal") is not True:
             out.append(f"{RESTORETEST_NETWORK} must be internal and project-scoped "
                        "(no name or external)")
+        else:  # the same allowlist as beta: only driver: bridge and internal: true
+            out += _beta_network_errors(RESTORETEST_NETWORK, spec)
     return out
 
 
@@ -813,6 +823,50 @@ def beta_runtime(environ):
 BETA_APP_PORT_RE = re.compile(r"^[1-9][0-9]{3,4}$")
 
 
+def target_runtime(target, environ):
+    """(runtime, None) or (None, why): target's runtime directory, as the
+    shell scripts' require_target resolves it (beta pinned by beta_runtime;
+    dev from CRM_RUNTIME_DIR, default DEFAULT_RUNTIME; named after the target)."""
+    if target == "beta":
+        runtime, problem = beta_runtime(environ)
+        if problem:
+            return None, problem
+    elif target == "dev":
+        runtime = environ.get("CRM_RUNTIME_DIR") or DEFAULT_RUNTIME
+    else:
+        return None, f"target environment must be 'dev' or 'beta' (got '{target}')"
+    if os.path.basename(runtime) != target:
+        return None, f"runtime directory is not a {target} runtime: {runtime}"
+    return runtime, None
+
+
+# CRM-007R: an export is a new directory export-<name> directly under the
+# target's constant backup directory $runtime/backups.
+EXPORT_NAME_RE = re.compile(r"^export-[A-Za-z0-9._-]+$")
+
+
+def export_out_problem(target, out, environ):
+    """None if out may be created as target's export directory; otherwise why
+    not. out must be <target runtime>/backups/<export-name>, the backup
+    directory a real (canonical, non-symlink) directory, and out must not
+    exist yet (not even as a dangling symlink)."""
+    runtime, problem = target_runtime(target, environ)
+    if problem:
+        return problem
+    backups = os.path.join(runtime, "backups")
+    name = os.path.basename(out)
+    if not EXPORT_NAME_RE.match(name) or ".." in name:
+        return "the export directory must be named export-[A-Za-z0-9._-]+ (no '..')"
+    if out != os.path.join(backups, name):
+        return f"the export directory must sit directly under {backups} (the {target} backups)"
+    if os.path.islink(backups) or not os.path.isdir(backups) \
+            or os.path.realpath(backups) != backups:
+        return f"the {target} backup directory is not a real canonical directory: {backups}"
+    if os.path.lexists(out):
+        return f"the export directory already exists: {out}"
+    return None
+
+
 def pinned_base_url(target, environ):
     """(url, None) or (None, why): the one base URL the provisioning scripts
     may use for target (CRM-007R), read from that target's checked env file
@@ -821,18 +875,10 @@ def pinned_base_url(target, environ):
       `check_access.py beta`);
     - dev: http://<CRM_BIND_IP>:8180 (CRM_BIND_IP as validated by
       `check_access.py dev`)."""
-    if target == "beta":
-        runtime, problem = beta_runtime(environ)
-        if problem:
-            return None, problem
-        names = ("CRM_BETA_APP_PORT",)
-    elif target == "dev":
-        runtime = environ.get("CRM_RUNTIME_DIR") or DEFAULT_RUNTIME
-        names = ("CRM_BIND_IP",)
-    else:
-        return None, f"target environment must be 'dev' or 'beta' (got '{target}')"
-    if os.path.basename(runtime) != target:
-        return None, f"runtime directory is not a {target} runtime: {runtime}"
+    runtime, problem = target_runtime(target, environ)
+    if problem:
+        return None, problem
+    names = ("CRM_BETA_APP_PORT",) if target == "beta" else ("CRM_BIND_IP",)
     env_file = os.path.join(runtime, "env")
     if (environ.get("CRM_ENV_FILE") or env_file) != env_file:
         return None, f"the env file must be {env_file}"
@@ -898,9 +944,10 @@ def main(argv=None, environ=None):
         for err in errors:
             print(f"{prog()}: refused: {err}", file=sys.stderr)
         return 1 if errors else 0
-    if target == "beta" and argv[1:] == ["--base-url"]:
-        # The pinned beta base URL (loopback only), for deploy_release.sh.
-        url, problem = pinned_base_url("beta", environ)
+    if target in ("dev", "beta") and argv[1:] == ["--base-url"]:
+        # The pinned base URL of the target (beta: loopback only), for
+        # deploy_release.sh and export.sh.
+        url, problem = pinned_base_url(target, environ)
         if problem:
             print(f"{prog()}: refusing to run: {problem}", file=sys.stderr)
             return 1

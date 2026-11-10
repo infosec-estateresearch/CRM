@@ -273,8 +273,11 @@ compose() {
 # - every file in SHA256SUMS matches, and every archive is listed;
 # - the TARGET marker backup.sh writes is listed in SHA256SUMS and holds
 #   exactly this target. A backup with no marker at all (made before CRM-007R)
-#   is accepted only for dev and only when <legacy> is non-empty
-#   (restore.sh dev --legacy-unmarked); beta never accepts one.
+#   is accepted only for dev, only when <legacy> is non-empty
+#   (restore.sh dev --legacy-unmarked) and only when its stamp is strictly
+#   earlier than the constant cut-over CRM_LEGACY_CUTOVER (PL decision: every
+#   existing dev backup predates it); beta never accepts one.
+CRM_LEGACY_CUTOVER=20261111T000000Z
 resolve_backup() {
     local arg=$1 legacy=$2 name canon base archive
     case "$arg" in
@@ -303,6 +306,10 @@ resolve_backup() {
         printf '%s\n' "$CRM_TARGET" | cmp -s - "$canon/TARGET" \
             || die "refusing to restore: the backup's TARGET marker is not '$CRM_TARGET' (a backup of another environment): $canon"
     elif [ "$CRM_TARGET" = dev ] && [ -n "$legacy" ]; then
+        local stamp=${name#crm-dev-} cut=$CRM_LEGACY_CUTOVER  # both [0-9]{8}T[0-9]{6}Z
+        stamp=${stamp//[TZ]/} cut=${cut//[TZ]/}
+        (( 10#$stamp < 10#$cut )) \
+            || die "refusing to restore: --legacy-unmarked accepts only backups stamped before $CRM_LEGACY_CUTOVER (the TARGET marker cut-over): $canon"
         echo "$(basename "$0"): warning: restoring a legacy dev backup with no TARGET marker (--legacy-unmarked): $canon" >&2
     else
         die "refusing to restore: the backup has no TARGET marker (dev only: a legacy crm-dev-* backup needs --legacy-unmarked): $canon"

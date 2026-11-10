@@ -15,7 +15,8 @@
 # $CRM_RUNTIME_DIR/backups, named crm-<target>-<UTC stamp>, with a checksummed
 # TARGET marker naming the target. Anything else is refused before any docker
 # call. Dev only: a legacy backup with no marker (made before CRM-007R) is
-# accepted with the explicit flag --legacy-unmarked.
+# accepted with the explicit flag --legacy-unmarked, and only if it is stamped
+# before the cut-over 20261111T000000Z (CRM_LEGACY_CUTOVER in lib/common.sh).
 #
 # Usage: scripts/restore.sh dev|beta <backup name or path>
 #        scripts/restore.sh dev --legacy-unmarked <backup name or path>

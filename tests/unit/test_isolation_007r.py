@@ -7,10 +7,17 @@
 2. Provisioning is pinned to its target's own base URL.
 3. The deploy root is constant and must be root-owned, not group/other-writable.
 4. A deploy refuses to start without the provisioning and acceptance inputs.
-5. Beta Compose networks: only {}, driver bridge, internal true.
+5. Beta Compose networks: only {}, driver bridge, internal true; the
+   restore-test compose gets the same network allowlist, a local volume only
+   and no top-level secrets/configs.
+6. export.sh / export_csv.py are bound to their target: output only a new
+   export-<name> directly under the target's backup directory, base URL only
+   the target's own.
+7. --legacy-unmarked accepts only stamps before the cut-over 20261111T000000Z.
+8. write_report refuses unless provisioning and acceptance both ran.
 
-The round-3 reviewers' probes (probe_cross.py, probe_deployroot.py,
-r5/allow_probe.py) are cases here. In-process only: fake docker, no network."""
+The reviewers' probes (probe_cross.py, probe_deployroot.py,
+r5/allow_probe.py, probe_export.py, probe_r.py) are cases here. In-process only: fake docker, no network."""
 
 import copy
 import glob
@@ -19,6 +26,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import unittest
 import unittest.mock
 
@@ -26,7 +34,8 @@ import test_beta as tb
 import test_scripts as ts
 from test_beta import BIND, REPO, SCRIPTS, ca, make_backup, read
 
-import provision_access  # noqa: E402  (scripts/ is on sys.path via test_beta)
+import export_csv  # noqa: E402  (scripts/ is on sys.path via test_beta)
+import provision_access  # noqa: E402
 import provision_users  # noqa: E402
 
 STAMP = "20261110T000000Z"
@@ -198,6 +207,24 @@ class TestDevRestoreRefusesForeignBackups(ts.ScriptEnv):
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("legacy dev backup with no TARGET marker", res.stderr)
         self.assertIn("restore completed", res.stdout)
+
+    def test_legacy_flag_refused_from_the_cutover_on(self):  # PL decision, CRM-007R r2
+        for stamp in ("20261111T000000Z", "20261111T000001Z", "20261231T120000Z", "20990101T000000Z"):
+            with self.subTest(stamp=stamp):
+                backup = make_backup(self.backups, f"crm-dev-{stamp}", marker=None)
+                self.assert_refused(self.restore("--legacy-unmarked", os.path.basename(backup)),
+                                    "stamped before 20261111T000000Z")
+
+    def test_legacy_flag_accepts_the_last_second_before_the_cutover(self):
+        backup = make_backup(self.backups, "crm-dev-20261110T235959Z", marker=None)
+        res = self.restore("--legacy-unmarked", os.path.basename(backup))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("restore completed", res.stdout)
+
+    def test_marked_backup_after_the_cutover_restores(self):
+        backup = make_backup(self.backups, "crm-dev-20270101T000000Z")
+        res = self.restore(os.path.basename(backup))
+        self.assertEqual(res.returncode, 0, res.stderr)
 
     def test_legacy_flag_still_needs_the_dev_backups_dir_and_name(self):
         outside = make_backup(os.path.join(self.tmp.name), f"crm-dev-{STAMP}", marker=None)
@@ -450,6 +477,344 @@ class TestBetaNetworkSpecs(unittest.TestCase):
         d = self.base()
         d["networks"]["extra"] = {"driver": "macvlan"}
         self.assertNotEqual(ca.check_beta_compose(d), [])
+
+
+class TestRestoretestNetworkAndVolumeSpecs(unittest.TestCase):
+    """The restore-test compose: beta's network allowlist (plus internal: true,
+    required there), a local volume only, no top-level secrets or configs."""
+
+    def doc(self):
+        with open(ca.RESTORETEST_COMPOSE_PATH) as fh:
+            return json.load(fh)
+
+    def test_allowed_specs(self):
+        for net in ({"internal": True}, {"driver": "bridge", "internal": True}):
+            for vol in (None, {}, {"driver": "local"}):
+                with self.subTest(net=net, vol=vol):
+                    d = self.doc()
+                    d["networks"]["restoretest-net"] = net
+                    d["volumes"]["db"] = vol
+                    self.assertEqual(ca.check_restoretest_compose(d), [])
+
+    def test_refused_network_specs(self):
+        for spec in ({"driver": "macvlan", "internal": True},
+                     {"driver": "bridge", "internal": True, "driver_opts": {}},
+                     {"internal": True, "ipam": {}}, {"internal": True, "attachable": True},
+                     {"internal": True, "enable_ipv6": True}, {"internal": True, "labels": {}},
+                     {"driver": "Bridge", "internal": True}, {"driver": "bridge"}, {}):
+            with self.subTest(spec=spec):
+                d = self.doc()
+                d["networks"]["restoretest-net"] = spec
+                self.assertNotEqual(ca.check_restoretest_compose(d), [])
+
+    def test_refused_volume_and_top_level(self):
+        for vol in ({"driver": "local-persist"}, {"driver": "nfs"}, {"driver": "Local"},
+                    {"driver": "local", "labels": {}}, {"labels": {"a": "b"}}):
+            with self.subTest(vol=vol):
+                d = self.doc()
+                d["volumes"]["db"] = vol
+                self.assertNotEqual(ca.check_restoretest_compose(d), [])
+        for key in ("secrets", "configs"):
+            with self.subTest(top=key):
+                for value in ({"s": {"file": "/srv/CRM/runtime/beta/env"}}, {}):
+                    d = self.doc()
+                    d[key] = value
+                    self.assertTrue(any(f"'{key}'" in e for e in ca.check_restoretest_compose(d)))
+
+    def test_broken_fixtures_are_refused(self):
+        paths = sorted(glob.glob(os.path.join(FIXTURES, "restoretest_bad_*.json")))
+        self.assertGreaterEqual(len(paths), 8)
+        for path in paths:
+            with self.subTest(fixture=os.path.basename(path)):
+                with open(path) as fh:
+                    self.assertNotEqual(ca.check_restoretest_compose(json.load(fh)), [])
+
+
+# --- 6. export bound to its target -----------------------------------------------
+
+# Stands in for export_csv.py (records its argv); check_access.py runs for real.
+EXPORT_SHIM = """#!/usr/bin/env bash
+case "$1" in */export_csv.py) printf '%s\\n' "$*" >> "$EXPORT_LOG"; exit 0 ;; esac
+exec "$REAL_PY" "$@"
+"""
+
+BAD_NAMES = ("/tmp/export-x", "../export-x", "export-x/../../dev/backups/export-x", "a/export-x",
+             "..", "export-..", "export-a..b", "export-", "export", "backup-x", "export-x y",
+             "export-x\n", "-export-x", "export-x/", "export-é")
+
+
+class ExportMixin:
+    def install_shim(self, bindir, tmp):
+        self.export_log = os.path.join(tmp, "export.log")
+        path = os.path.join(bindir, "python3")
+        with open(path, "w") as fh:
+            fh.write(EXPORT_SHIM)
+        os.chmod(path, 0o700)
+        return {"EXPORT_LOG": self.export_log, "REAL_PY": sys.executable,
+                "CRM_ADMIN_USERNAME": "a", "CRM_ADMIN_PASSWORD": "b"}
+
+    def exports(self):
+        if not os.path.exists(self.export_log):
+            return []
+        with open(self.export_log) as fh:
+            return fh.read().splitlines()
+
+    def assert_export_refused(self, res, needle=None):
+        self.assertNotEqual(res.returncode, 0, res.stdout)
+        if needle:
+            self.assertIn(needle, res.stderr)
+        self.assertEqual(self.exports(), [], "export_csv.py never ran (no request)")
+
+
+class TestBetaExportBound(ExportMixin, tb.BetaStackEnv):
+    """probe_export.py / probe_r.py, beta side."""
+
+    def setUp(self):
+        super().setUp()
+        self.env = self.install_shim(self.bin, self.tmp)
+        self.env["CRM_BASE_URL"] = "http://127.0.0.1:8280"
+        self.backups = os.path.join(self.runtime, "backups")
+        self.dev_backups = os.path.join(self.tmp, "runtime", "dev", "backups")
+        os.makedirs(self.dev_backups)
+
+    def export(self, *args, **over):
+        open(self.export_log, "w").close()
+        return self.run_beta("export.sh", *args, extra={**self.env, **over})
+
+    def test_default_output_is_a_new_dir_under_beta_backups(self):  # probe_r.py
+        res = self.export()
+        self.assertEqual(res.returncode, 0, res.stderr)
+        [call] = self.exports()
+        self.assertRegex(call, r" beta --base-url http://127\.0\.0\.1:8280 --out "
+                         + self.backups.replace(".", r"\.") + r"/export-\d{8}T\d{6}Z$")
+        self.assertEqual(os.listdir(self.dev_backups), [])
+
+    def test_bare_name_accepted(self):
+        res = self.export("export-before-upgrade_1.2")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertTrue(self.exports()[0].endswith(f"--out {self.backups}/export-before-upgrade_1.2"))
+
+    def test_into_dev_backups_refused(self):  # probe_export.py, probe_r.py
+        for arg in (os.path.join(self.dev_backups, "export-x"), os.path.join(self.dev_backups, "stolen"),
+                    self.dev_backups, os.path.join(self.backups, "export-x")):
+            with self.subTest(arg=arg):
+                self.assert_export_refused(self.export(arg), "bare name")
+        self.assertEqual(os.listdir(self.dev_backups), [])
+
+    def test_bad_names_refused(self):
+        for name in BAD_NAMES:
+            with self.subTest(name=name):
+                self.assert_export_refused(self.export(name), "bare name")
+
+    def test_existing_dir_or_symlink_refused(self):
+        os.makedirs(self.backups, 0o700, exist_ok=True)
+        os.mkdir(os.path.join(self.backups, "export-old"))
+        os.symlink(self.dev_backups, os.path.join(self.backups, "export-link"))
+        os.symlink(os.path.join(self.dev_backups, "nope"), os.path.join(self.backups, "export-dangling"))
+        for name in ("export-old", "export-link", "export-dangling"):
+            with self.subTest(name=name):
+                self.assert_export_refused(self.export(name), "already exists")
+        self.assertEqual(os.listdir(self.dev_backups), [])
+
+    def test_backup_dir_override_refused(self):  # probe_r.py (incl. empty)
+        for value in ("/tmp/elsewhere", self.dev_backups, ""):
+            with self.subTest(value=value):
+                res = self.export(CRM_BACKUP_DIR=value)
+                self.assertEqual(res.returncode, 2)
+                self.assertIn("unset CRM_BACKUP_DIR", res.stderr)
+                self.assertEqual(self.exports(), [])
+
+    def test_too_many_arguments_refused(self):
+        self.assert_export_refused(self.export("export-a", "export-b"), "usage")
+
+    def test_other_urls_refused(self):  # routed through check_access.py beta --base-url
+        for url in (f"http://{BIND}:8180", "http://127.0.0.1:8180", "http://127.0.0.1:8280/",
+                    "http://localhost:8280", "https://127.0.0.1:8280", "http://127.0.0.1:18080", ""):
+            with self.subTest(url=url):
+                self.assert_export_refused(self.export(CRM_BASE_URL=url), "CRM_BASE_URL")
+        with open(os.path.join(self.runtime, "env"), "a") as fh:  # port set twice
+            fh.write("CRM_BETA_APP_PORT=8281\n")
+        self.assert_export_refused(self.export(), "CRM_BETA_APP_PORT exactly once")
+
+
+DEV_BIND = ts.ACCESS["CRM_BIND_IP"]
+
+
+class TestDevExportBound(ExportMixin, ts.ScriptEnv):
+    """probe_export.py / probe_r.py, dev side."""
+
+    def setUp(self):
+        super().setUp()
+        self.env = self.install_shim(self.bin, self.tmp.name)
+        self.backups = os.path.join(self.runtime, "backups")
+        self.dev_url = f"http://{DEV_BIND}:8180"
+
+    def export(self, *args, **over):
+        open(self.export_log, "w").close()
+        env = {**self.env, **over}
+        return self.run_script("export.sh", "dev", *args,
+                               extra_env={k: v for k, v in env.items() if v is not None})
+
+    def test_own_url_or_unset_accepted(self):
+        for url in (self.dev_url, None):
+            with self.subTest(url=url):
+                res = self.export(CRM_BASE_URL=url)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                [call] = self.exports()
+                self.assertIn(f" dev --base-url {self.dev_url} --out {self.backups}/export-", call)
+                shutil.rmtree(self.backups)
+
+    def test_other_urls_refused(self):  # probe_export.py, probe_r.py (beta loopback)
+        for url in ("http://127.0.0.1:8280", "http://127.0.0.1:18080", "http://127.0.0.1:8180",
+                    f"http://{DEV_BIND}:8280", f"http://{DEV_BIND}:8181", f"{self.dev_url}/",
+                    f"https://{DEV_BIND}:8180", "http://localhost:8180", ""):
+            with self.subTest(url=url):
+                res = self.export(CRM_BASE_URL=url)
+                if url == "":  # empty = unset, as everywhere else in the scripts
+                    self.assertEqual(res.returncode, 0, res.stderr)
+                    shutil.rmtree(self.backups)
+                    continue
+                self.assert_export_refused(res, "CRM_BASE_URL must be exactly")
+                self.assertNotIn(DEV_BIND, res.stderr, "the bind address is not printed")
+
+    def test_dev_env_without_a_valid_bind_ip_refused(self):
+        self.write_env(self.runtime, CRM_BIND_IP="127.0.0.1")
+        self.assert_export_refused(self.export(CRM_BASE_URL="http://127.0.0.1:8180"),
+                                   "cannot determine the dev base URL")
+
+    def test_paths_and_bad_names_refused(self):
+        beta_backups = os.path.join(self.tmp.name, "runtime", "beta", "backups")
+        os.makedirs(beta_backups)
+        for name in BAD_NAMES + (os.path.join(beta_backups, "export-x"),):
+            with self.subTest(name=name):
+                self.assert_export_refused(self.export(name), "bare name")
+        self.assertEqual(os.listdir(beta_backups), [])
+
+    def test_existing_dir_or_symlink_refused(self):
+        os.mkdir(self.backups)
+        os.mkdir(os.path.join(self.backups, "export-old"))
+        os.symlink("/tmp", os.path.join(self.backups, "export-link"))
+        for name in ("export-old", "export-link"):
+            with self.subTest(name=name):
+                self.assert_export_refused(self.export(name), "already exists")
+
+    def test_backup_dir_symlink_refused(self):
+        beta_backups = os.path.join(self.tmp.name, "runtime", "beta", "backups")
+        os.makedirs(beta_backups)
+        os.symlink(beta_backups, self.backups)
+        self.assert_export_refused(self.export(), "not a real canonical directory")
+        self.assertEqual(os.listdir(beta_backups), [])
+
+
+class TestExportCsvBound(unittest.TestCase):
+    """export_csv.py checks the target, URL and output again, before any request."""
+
+    def setUp(self):
+        import tempfile
+        self.root = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        for target, text in (("dev", f"CRM_BIND_IP={BIND}\n"), ("beta", "CRM_BETA_APP_PORT=8280\n")):
+            os.makedirs(os.path.join(self.root, target, "backups"))
+            with open(os.path.join(self.root, target, "env"), "w") as fh:
+                fh.write(text)
+        self.url = {"dev": f"http://{BIND}:8180", "beta": "http://127.0.0.1:8280"}
+        self.seam = {"dev": {"CRM_RUNTIME_DIR": os.path.join(self.root, "dev")},
+                     "beta": {"CRM_TEST_ROOT": self.root}}
+
+    def out(self, target, name="export-x"):
+        return os.path.join(self.root, target, "backups", name)
+
+    def run_main(self, target, url, out):
+        t, err = CountingTransport(), io.StringIO()
+        env = {"CRM_ADMIN_USERNAME": "a", "CRM_ADMIN_PASSWORD": "b", **self.seam[target]}
+        with unittest.mock.patch("sys.stderr", err), unittest.mock.patch("sys.stdout", io.StringIO()):
+            rc = export_csv.main([target, "--base-url", url, "--out", out], transport=t, environ=env)
+        return rc, err.getvalue(), t.calls
+
+    def assert_refused(self, result):
+        rc, err, calls = result
+        self.assertEqual(rc, 2, err)
+        self.assertIn("refusing to run", err)
+        self.assertEqual(calls, [], "no HTTP request")
+
+    def test_own_target_writes_a_new_dir(self):
+        for target in ("dev", "beta"):
+            with self.subTest(target=target):
+                rc, err, calls = self.run_main(target, self.url[target], self.out(target))
+                self.assertEqual(rc, 0, err)
+                self.assertTrue(calls)
+                self.assertEqual(sorted(os.listdir(self.out(target))), ["accounts.csv", "contacts.csv"])
+                self.assertEqual(os.stat(self.out(target)).st_mode & 0o777, 0o700)
+
+    def test_cross_target_out_or_url_refused(self):
+        for target, other in (("dev", "beta"), ("beta", "dev")):
+            with self.subTest(target=target):
+                self.assert_refused(self.run_main(target, self.url[target], self.out(other)))
+                self.assert_refused(self.run_main(target, self.url[other], self.out(target)))
+                self.assertEqual(os.listdir(os.path.join(self.root, other, "backups")), [])
+
+    def test_bad_out_refused(self):
+        for target in ("dev", "beta"):
+            backups = os.path.join(self.root, target, "backups")
+            os.mkdir(self.out(target, "export-old"))
+            os.symlink("/tmp", self.out(target, "export-link"))
+            for out in (self.out(target, "export-old"), self.out(target, "export-link"),
+                        self.out(target, "x"), self.out(target, "export-.."),
+                        os.path.join(backups, "export-old", "export-y"),
+                        os.path.join(backups, "..", "export-y"), backups + "//export-y",
+                        os.path.join(self.root, "export-y"), "export-y"):
+                with self.subTest(target=target, out=out):
+                    self.assert_refused(self.run_main(target, self.url[target], out))
+            self.assertEqual(sorted(os.listdir(backups)), ["export-link", "export-old"])
+            self.assertEqual(os.listdir(self.out(target, "export-old")), [])
+
+    def test_symlinked_backup_dir_refused(self):
+        dev_backups = os.path.join(self.root, "dev", "backups")
+        os.rmdir(dev_backups)
+        os.symlink(os.path.join(self.root, "beta", "backups"), dev_backups)
+        self.assert_refused(self.run_main("dev", self.url["dev"], self.out("dev")))
+        self.assertEqual(os.listdir(os.path.join(self.root, "beta", "backups")), [])
+
+
+# --- 8. the report gate ------------------------------------------------------------
+
+class TestReportGate(tb.TestDeploySteps):
+    """write_report refuses unless PROVISIONED=done and ACCEPTANCE=passed, with
+    otherwise valid inputs, so the gate alone decides."""
+
+    def inputs(self):
+        dest = os.path.join(self.tmp, "rel")
+        os.makedirs(dest, exist_ok=True)
+        with open(os.path.join(dest, "RELEASE.json"), "w") as fh:
+            json.dump({"commit": "c" * 40, "short": "c" * 12, "images": {}, "delivery_records": {}}, fh)
+        bundle = os.path.join(self.tmp, "b.tar.gz")
+        with open(bundle, "wb") as fh:
+            fh.write(b"bundle")
+        return dest, bundle
+
+    def reports(self):
+        return [n for n in os.listdir(self.runtime) if n.startswith("deploy-report")]
+
+    def test_report_gate(self):
+        dest, bundle = self.inputs()
+        for prov, acc in (("skipped", "passed"), ("done", "skipped"), ("done", "failed"),
+                          ("", "passed"), ("done", ""), ("", ""), ("Done", "passed"),
+                          ("done", "passed "), ("unset", "unset")):
+            with self.subTest(provisioning=prov, acceptance=acc):
+                res = self.step(f"PROVISIONED='{prov}' ACCEPTANCE='{acc}'; "
+                                f"write_report {dest} {bundle} 1; echo REPORTED")
+                self.assertEqual(res.returncode, 1, res.stdout)
+                self.assertIn("refusing to report success", res.stderr)
+                self.assertNotIn("REPORTED", res.stdout)
+                self.assertEqual(self.reports(), [])
+        # Control: the same inputs with both steps done do produce a report.
+        res = self.step(f"PROVISIONED=done ACCEPTANCE=passed; write_report {dest} {bundle} 1")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(len(self.reports()), 1)
+
+
+for _name in [n for n in dir(tb.TestDeploySteps) if n.startswith("test_")]:
+    setattr(TestReportGate, _name, None)
 
 
 if __name__ == "__main__":

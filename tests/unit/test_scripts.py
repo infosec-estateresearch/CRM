@@ -1149,11 +1149,17 @@ class TestExport(unittest.TestCase):
                 export_csv.export(client, out)
 
     def test_missing_credentials_fail_loudly(self):
-        with tempfile.TemporaryDirectory() as out:
+        with tempfile.TemporaryDirectory() as base:
+            runtime = os.path.join(base, "dev")
+            os.makedirs(os.path.join(runtime, "backups"))
+            with open(os.path.join(runtime, "env"), "w") as fh:
+                fh.write(f"CRM_BIND_IP={ACCESS['CRM_BIND_IP']}\n")
+            out = os.path.join(runtime, "backups", "export-x")
             err = io.StringIO()
             with redirect_stderr(err), redirect_stdout(io.StringIO()):
-                code = export_csv.main(["--base-url", "http://127.0.0.1:8180", "--out", out],
-                                       transport=FakeListTransport({}), environ={})
+                code = export_csv.main(
+                    ["dev", "--base-url", f"http://{ACCESS['CRM_BIND_IP']}:8180", "--out", out],
+                    transport=FakeListTransport({}), environ={"CRM_RUNTIME_DIR": runtime})
             self.assertEqual(code, 2)
             self.assertIn("CRM_ADMIN_PASSWORD", err.getvalue())
 

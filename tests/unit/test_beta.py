@@ -716,21 +716,29 @@ class TestEdgeRevalidation(BetaStackEnv):
         self.assertFalse([c for c in self.docker_calls() if " up " in f" {c} "])
 
 
+# Stands in for export_csv.py (records its arguments); check_access.py runs for real.
+FAKE_EXPORT_PY = """#!/usr/bin/env bash
+case "$1" in */export_csv.py) echo "EXPORT $*"; exit 0 ;; esac
+exec "$REAL_PY" "$@"
+"""
+
+
 class TestExportBetaBaseUrl(BetaStackEnv):
-    def export(self, url, out="out"):
-        extra = {"CRM_ADMIN_USERNAME": "u", "CRM_ADMIN_PASSWORD": "p"}
+    def export(self, url, *args):
+        extra = {"CRM_ADMIN_USERNAME": "u", "CRM_ADMIN_PASSWORD": "p", "REAL_PY": sys.executable}
         if url is not None:
             extra["CRM_BASE_URL"] = url
         fake_py = os.path.join(self.bin, "python3")
-        with open(fake_py, "w") as fh:  # stands in for export_csv.py: records its arguments
-            fh.write('#!/usr/bin/env bash\necho "EXPORT $*"\n')
+        with open(fake_py, "w") as fh:
+            fh.write(FAKE_EXPORT_PY)
         os.chmod(fake_py, 0o700)
-        return self.run_beta("export.sh", os.path.join(self.tmp, out), extra=extra)
+        return self.run_beta("export.sh", *args, extra=extra)
 
     def test_base_url_must_be_the_env_files_app_port(self):
         res = self.export("http://127.0.0.1:8280")
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("--base-url http://127.0.0.1:8280", res.stdout)
+        self.assertIn("EXPORT", res.stdout)
+        self.assertIn(" beta --base-url http://127.0.0.1:8280 --out ", res.stdout)
         for url in (None, "", "http://127.0.0.1:8180", "http://127.0.0.1:8280/",
                     "https://127.0.0.1:8280", "http://localhost:8280", f"http://{BIND}:8280",
                     "http://127.0.0.1:8443", "http://127.0.0.1:08280"):
@@ -740,14 +748,15 @@ class TestExportBetaBaseUrl(BetaStackEnv):
                 self.assertIn("CRM_BASE_URL", res.stderr)
                 self.assertNotIn("EXPORT", res.stdout)
 
-    def test_app_port_must_be_set_once_in_plain_form(self):
+    def test_app_port_must_be_set_once(self):
+        # CRM-007R: read through check_access.pinned_base_url, as provisioning
+        # does (which, like Compose, unquotes a quoted value).
         env = os.path.join(self.runtime, "env")
         base = read(env)
         for label, text in {
                 "missing": base.replace("CRM_BETA_APP_PORT=8280\n", ""),
                 "twice": base + "CRM_BETA_APP_PORT=8280\n",
                 "exported": base.replace("CRM_BETA_APP_PORT=8280", "export CRM_BETA_APP_PORT=8280"),
-                "quoted": base.replace("CRM_BETA_APP_PORT=8280", 'CRM_BETA_APP_PORT="8280"'),
                 "low port": base.replace("CRM_BETA_APP_PORT=8280", "CRM_BETA_APP_PORT=80")}.items():
             with self.subTest(case=label):
                 with open(env, "w") as fh:
