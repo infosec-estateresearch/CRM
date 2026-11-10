@@ -1,0 +1,64 @@
+[
+    {
+        "rows": [
+            [
+                {
+                    "name": "name"
+                },
+                {
+                    "name": "parent"
+                }
+            ],
+            [
+                {
+                    "name": "status"
+                },
+                {
+                    "name": "direction"
+                }
+            ],
+            [
+                {
+                    "name": "dateStart"
+                },
+                {
+                    "name": "dateEnd"
+                }
+            ],
+            [
+                {
+                    "name": "duration"
+                },
+                {
+                    "name": "reminders"
+                }
+            ],
+            [
+                {
+                    "name": "description",
+                    "fullWidth": true
+                }
+            ]
+        ]
+    },
+    {
+        "label": "Legacy",
+        "collapsed": true,
+        "rows": [
+            [
+                {
+                    "name": "sfId"
+                },
+                {
+                    "name": "sfOwnerId"
+                }
+            ],
+            [
+                {
+                    "name": "sfCreatedAt"
+                },
+                false
+            ]
+        ]
+    }
+]

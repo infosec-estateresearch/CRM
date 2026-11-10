@@ -68,8 +68,13 @@ SF_EXTRA = {"sfOwnerId": "varchar", "sfCreatedAt": "datetime"}
 # people through fieldData, writable by ER Import.
 OPPORTUNITY_LEGACY_FIELDS = ["sfId", "sfStageName", "sfLeadSource", "sfOwnerId", "sfCreatedAt",
                              "legacyStale", "lossReasonLegacyMissing"]
-SF_FIELDS = {"User": ["sfId"], "Account": ["sfId"] + list(SF_EXTRA),
-             "Contact": ["sfId"] + list(SF_EXTRA), "Opportunity": OPPORTUNITY_LEGACY_FIELDS}
+# Added by CRM-005: the activity and email legacy fields, the same pattern.
+ACTIVITY_LEGACY_FIELDS = ["sfId", "sfOwnerId", "sfCreatedAt"]
+EMAIL_LEGACY_FIELDS = ACTIVITY_LEGACY_FIELDS + ["sfEmailMessageId", "sfThreadIdentifier",
+                                                "sfActivityId"]
+SF_FIELDS = dict({"User": ["sfId"], "Account": ["sfId"] + list(SF_EXTRA),
+                  "Contact": ["sfId"] + list(SF_EXTRA), "Opportunity": OPPORTUNITY_LEGACY_FIELDS},
+                 **{a: ACTIVITY_LEGACY_FIELDS for a in ACTIVITIES}, Email=EMAIL_LEGACY_FIELDS)
 AUDITED = {"Account": ["name", "type", "industry", "assignedUser", "parent",
                        "learningPlatformAccess"],
            "Contact": ["account", "emailAddress"]}
@@ -80,7 +85,8 @@ def _row(create, edit, delete):
 
 
 # The WO CRM-003 item 2 table (plus the round-4 scope ruling), transcribed
-# independently of config/access/roles.json.
+# independently of config/access/roles.json. CRM-005: Email edit is "no" for
+# ER Staff and ER Intake (archived email is read-only history).
 _FIXED = dict({s: _row("no", "no", "no") for s in READ_ONLY_SCOPES},
               **{s: False for s in UNUSED_SCOPES})
 _HUMAN_ADMIN_MANAGED = {s: _row("no", "no", "no") for s in ADMIN_MANAGED_SCOPES}  # CRM-004
@@ -88,10 +94,10 @@ _IMPORT_ADMIN_MANAGED = {s: _row("yes", "all", "no") for s in ADMIN_MANAGED_SCOP
 _HUMAN = dict(_FIXED, **HUMAN_BOOLEAN, **_HUMAN_ADMIN_MANAGED)
 EXPECTED_DATA = {
     STAFF: dict({"Account": _row("yes", "all", "no"), "Contact": _row("yes", "all", "no"),
-                 "Opportunity": _row("yes", "own", "no"), "Email": _row("yes", "own", "no")},
+                 "Opportunity": _row("yes", "own", "no"), "Email": _row("yes", "no", "no")},
                 **{a: _row("yes", "own", "own") for a in ACTIVITIES}, **_HUMAN),
     INTAKE: dict({"Account": _row("yes", "all", "no"), "Contact": _row("yes", "all", "no"),
-                  "Opportunity": _row("yes", "all", "no"), "Email": _row("yes", "own", "no")},
+                  "Opportunity": _row("yes", "all", "no"), "Email": _row("yes", "no", "no")},
                  **{a: _row("yes", "own", "own") for a in ACTIVITIES}, **_HUMAN),
     MANAGER: dict({"Account": _row("yes", "all", "no"), "Contact": _row("yes", "all", "all"),
                    "Opportunity": _row("yes", "all", "all"), "Email": _row("yes", "all", "no")},
@@ -280,11 +286,21 @@ def rule_matches_work_order_table(doc):
 
 
 # CRM-004 (round 2): Opportunity.sfId is hidden from people as well.
-SF_ID_HIDDEN_ENTITIES = SF_KEY_ENTITIES + ["Opportunity"]
+# CRM-005: so is sfId on Call, Meeting, Task and Email.
+SF_ID_HIDDEN_ENTITIES = SF_KEY_ENTITIES + ["Opportunity"] + ACTIVITIES + ["Email"]
+
+
+def rule_staff_and_intake_cannot_edit_email(doc):
+    """CRM-005: ER Staff and ER Intake have Email edit 'no' (archived email is history)."""
+    return [f"{name}: Email edit is {_data(doc, name).get('Email', {}).get('edit')!r}, "
+            "expected 'no'"
+            for name in (STAFF, INTAKE)
+            if _data(doc, name).get("Email", {}).get("edit") != "no"]
 
 
 def rule_sf_id_admin_only(doc):
-    """Human roles cannot read or edit sfId on User, Account, Contact or Opportunity."""
+    """Human roles cannot read or edit sfId on User, Account, Contact, Opportunity, Call,
+    Meeting, Task or Email."""
     out = []
     for name in NON_ADMIN_HUMAN_ROLES:
         field_data = (_roles(doc).get(name) or {}).get("fieldData") or {}
@@ -339,6 +355,7 @@ ROLE_RULES = {
     "service_type_admin_managed": rule_service_type_admin_managed,
     "matches_work_order_table": rule_matches_work_order_table,
     "sf_id_admin_only": rule_sf_id_admin_only,
+    "staff_and_intake_cannot_edit_email": rule_staff_and_intake_cannot_edit_email,
     "sf_fields_read_only_for_people": rule_sf_fields_read_only_for_people,
     "import_edits_sf_fields": rule_import_edits_sf_fields,
 }

@@ -1,0 +1,147 @@
+# CRM-005, round 1: Engineer
+
+- **Worktree:** `/srv/CRM/worktrees/CRM-005`, branch `forge/CRM-005`. The expected HEAD is `57d93eb63f497c7f368b4d098d0d102f9e66792e`: the CRM-004 delivery record, stacked on CRM-003. Confirm it first. Do not modify `.forge/`.
+- **The Work Order** (`work-orders/CRM-005.md` v1.0) is quoted verbatim below and is authoritative.
+- **Time box:** the dispatcher stops you at 30 minutes. Work in this order:
+  1. the entityDefs (fields and indexes);
+  2. i18n;
+  3. the archived-email hook;
+  4. `roles.json`;
+  5. the dashboard template;
+  6. the layouts;
+  7. the tests;
+  8. the docs.
+
+  Return by about 25 minutes, even if partial, with a "Known gaps" list.
+
+## Scope clarification from the PL (authorised additions to the allowlist)
+- **`config/access/roles.json` and `tests/unit/access_policy.py`, limited to:**
+  - Email `edit` set to `no` for **ER Staff** and **ER Intake**. ER Manager and ER Import are unchanged.
+  - `fieldData` for the new legacy fields on Call, Meeting, Task and Email, following the CRM-003/CRM-004 pattern:
+    - `sfId`, `sfOwnerId`, `sfCreatedAt`, `sfEmailMessageId`, `sfThreadIdentifier` and `sfActivityId` are read-only for human roles;
+    - `sfId` is hidden (read no) from human roles;
+    - extend the existing `SF_ID_HIDDEN_ENTITIES` / `rule_sf_id_admin_only` to Call, Meeting, Task and Email, with one broken fixture.
+- **Amendment v1.1 applies here too.** `sfId` uses `readOnlyAfterCreate`, **not** `readOnly`. `readOnly` makes the field unwritable for every user, including ER Import. The other legacy fields are **not** `readOnly` in entityDefs; they are read-only for people through role `fieldData`, so the importer can write them. The WO's "read-only unless stated" means this pattern.
+- **Dashboard template:** add `config/access/dashboards.json` and a minimal, idempotent extension of `scripts/provision_access.py`:
+  - ensure a `DashboardTemplate` named "ER Staff" exists by name, with a "My open tasks" Tasks dashlet and a Calendar dashlet;
+  - deploy it to the ER Staff team **only** when the flag `--deploy-dashboards` is given, because deploying replaces users' dashboards. Document this.
+  - Use `POST DashboardTemplate/action/deployToTeam` with `{id, teamId, append: false}`.
+  - Add tests with the existing fake transport.
+
+  This counts as "provisioned through config/access, with no custom code".
+- **`docs/ACCESS.md`:** one line only, saying that `sfId` is also hidden on Opportunity, Call, Meeting, Task and Email. This is a CRM-004 carried advisory.
+
+## EspoCRM 10.0.12 facts verified by the PL in the real image
+- **Fields:**
+  - Meeting: name, status (Planned, Held, Not Held), dateStart, dateEnd, isAllDay, duration, reminders, description, parent, account, users, contacts, leads, assignedUser, teams.
+  - Call status: Planned, Held, Not Held.
+  - Task status: Not Started, Started, Completed, Canceled, Deferred. Task also has dateEnd, reminders, parent, account and contact.
+- **Email fields** include: subject (`name`), from/to/cc/bcc, fromString, `messageId`, `body`, `bodyPlain`, `isHtml`, `status` (Draft, Sending, Sent, Archived, Failed), `parent`, `dateSent`, `assignedUser`, `users`, `teams`, `attachments`, and `isBeingImported`.
+  - Core `messageId` exists, so **do not** add a duplicate. `sfEmailMessageId` is the Salesforce EmailMessage id.
+- **Activity panels:** core clientDefs for Opportunity, Account and Contact already have the side panels `activities`, `history` and `tasks`. Don't recreate them. Only adjust them if needed: for example, check that the history panel on the Enquiry shows Email, and document it.
+- **Core Email layouts:** composeSmall, defaultSidePanel, detail, detailRestricted, detailSmall, detailSmallRestricted, filters, list, listSmall and massUpdate.
+  - For "archived body as plain text", override the Email `detail` layout to show `bodyPlain`, **or** document that archived emails are imported with `isHtml=false`. Choose the smaller, safe option.
+- **Core Meeting layouts:** bottomPanelsDetail, defaultSidePanel, detail, detailSmall, filters, list, listSmall and massUpdate.
+- **Core dashlets** (Crm module): Activities, Calendar, Calls, Meetings, Tasks and others. The Tasks dashlet has the options title, displayRecords, autorefreshInterval and expandedLayout. A DashboardTemplate has the fields `name`, `layout` and `dashletsOptions`; the dashboard layout format is `[{name, layout:[{id,name,x,y,width,height}]}]` with `dashletsOptions` keyed by dashlet id.
+- **The hook interface** is `Espo\Core\Hook\Hook\BeforeSave::beforeSave(Entity, SaveOptions): void`. Custom hooks go in `custom/Espo/Custom/Hooks/Email/`. Refuse with `Espo\Core\Exceptions\Forbidden`.
+  - Use the narrow exemption from CRM-004: `$user->isAdmin()`, **or** (`getType() === User::TYPE_API` **and** `getUserName() === 'er-import'`), tied statically to `config/access/api_users.json`.
+  - Guard only when the **fetched** status is `Archived` (`$entity->getFetched('status')`) and the entity is not new.
+  - The protected attributes are name, body, bodyPlain, isHtml, from/to/cc addresses, fromString, dateSent and messageId. Parent re-linking is allowed.
+- **The CRM-003 unique index pattern** is entityDefs `"indexes": {"sfId": {"type": "unique", "columns": ["sfId"]}}`, as in `custom/.../entityDefs/Account.json`.
+- **Facts:** the specialist sandbox has no php, Docker or browser. AC3–AC7 run at the operator stage.
+
+## Tests
+- Follow the static policy pattern of `tests/unit/enquiry_policy.py`.
+- Every new rule must fail against a broken fixture, and you must show non-vacuity by mutation.
+- All existing tests (288) must still pass.
+
+Finish in the Engineer final message format.
+
+## Work Order (verbatim, `work-orders/CRM-005.md` v1.0 on main)
+
+WO: CRM-005
+REPO: infosec-estateresearch/CRM
+HOST: DOCKER1
+ROOT: /srv/CRM/main
+WORKTREES: /srv/CRM/worktrees
+BASE: forge/CRM-004
+BROWSER: yes
+
+# CRM-005 — Activities and historic correspondence (synthetic data)
+
+- **Version:** v1.1, 2026-11-10. v1.1 corrects how the Salesforce key and legacy fields are made read-only (§ Amendment v1.1).
+- **Authority:** the PO priority override of 2026-11-10 (Issue #9).
+- **Parent PBI:** CRM-PBI-003 (R9), plus R11 (historic emails). Decisions D5, D10 and D11.
+- **Base:** stacked on `forge/CRM-004`.
+
+## Outcome
+
+Calls, tasks, meetings and presentations, the calendar, follow-ups, and archived historic correspondence, all in standard EspoCRM entities:
+- linked to enquiries, firms and contacts;
+- with their original owners and dates;
+- with their Salesforce keys preserved.
+
+## Facts verified by the operator (EspoCRM 10.0.12)
+- Meeting fields include `status`, `dateStart`, `dateEnd`, `isAllDay`, `parent`, `account`, `users`, `contacts`, `assignedUser` and `reminders`.
+- Task `parent` is `linkParent` over Account, Contact, Lead, Opportunity and Case.
+- Email `status` options are Draft, Sending, Sent, Archived and Failed.
+
+## Mapping intent (implemented by the importer, CRM-006; this WO provides the target)
+
+| Salesforce | EspoCRM |
+|---|---|
+| Task, subtype Task | Task (status from the Salesforce status) |
+| Task, subtype Call | Call (status Held) |
+| Task, subtype Email (a logged email) | Email, `status = Archived`. Body: `TextBody` from the linked EmailMessage, otherwise the Task description. |
+| Event | Meeting. `meetingType` carries the Salesforce Type; untyped becomes "Unspecified (legacy)" (D10). |
+| EmailMessage, plus its relations | Email (Archived), with from, to and cc addresses, `messageId` and threading, linked to Contacts and Users by address and id |
+
+## Change
+
+1. **Fields** (all `isCustom`, read-only unless stated):
+   - On Call, Meeting, Task and Email: `sfId` (varchar 18, **unique index**), `sfOwnerId`, `sfCreatedAt`.
+   - Email also: `sfEmailMessageId`, `sfThreadIdentifier`, `sfActivityId`.
+   - Meeting: `meetingType`, an editable enum: Meeting, Presentation, Bag Drop, Call, Other, Email, Unspecified (legacy).
+2. **Archived email is read-only history.**
+   - Archived Emails cannot be edited except by admins. Use a `beforeSave` hook that refuses changes to an Archived email's body, addresses or dates, with an exemption for the `ER Import` user. Adjust CRM-003's role table only through `config/access/roles.json`: Email edit set to `no` for Staff and Intake.
+   - No email accounts, no SMTP, no sending, and no inbound mail (D5). Outbound email stays disabled; `docs/ACTIVITIES.md` records the setting for the operator.
+3. **Layouts:**
+   - the activities and history panels on Enquiry, Account and Contact show calls, meetings, tasks and emails;
+   - the Meeting list and detail views show `meetingType`;
+   - the Email detail view shows the archived body as plain text;
+   - legacy panels are collapsed.
+4. **Calendar:** core. Document the shared calendar view for teams.
+5. **Follow-ups:** core Task with `dateEnd` and reminders. Add a "My open tasks" dashlet in a default dashboard template for Staff, provisioned through `config/access`, with no custom code.
+6. **Tests (unit, in-process):**
+   - metadata consistency;
+   - unique indexes;
+   - the archived-email guard rule table, checked statically and mirrored as a spec;
+   - every policy rule fails against a broken fixture.
+7. **Docs:** `docs/ACTIVITIES.md` covering the mapping intent, read-only history and calendar use.
+
+## Scope
+
+**Allowlist:**
+- `custom/**`, limited to Call, Meeting, Task and Email entityDefs, layouts, i18n and hooks
+- `config/access/**`, limited to the Email edit level and the dashboard template
+- `tests/unit/**`, `tests/acceptance/**`
+- `docs/ACTIVITIES.md`, the README usage section
+- `.forge/CRM-005/**`
+
+**Excluded:** the importer, sending or receiving email, Outlook integration (PBI-014), and real data.
+
+## Acceptance criteria
+- **AC1 / AC2:** unit tests with non-vacuity; gitleaks.
+
+**Operator stage** (`crm-dev`, synthetic data):
+- **AC3:** an enquiry shows its past calls, meetings, tasks and archived emails in History, and upcoming ones in Activities.
+- **AC4:** a Staff user cannot edit an archived email's body.
+- **AC5:** the calendar shows a user's meetings and tasks.
+- **AC6:** a follow-up task with a reminder appears in "My open tasks".
+- **AC7:** the `sfId` unique index rejects duplicates on each entity.
+
+## Amendment v1.1 (2026-11-10, PL, from the EspoCRM 10.0.12 source)
+`readOnly: true` in entityDefs becomes a **global** read-only restriction (`Espo\Core\Acl\GlobalRestriction`). It applies to every user, including the `ER Import` API user, so the importer could never write those fields. Therefore, everywhere this WO says "read-only" for `sf*` or legacy fields:
+- `sfId` uses **`readOnlyAfterCreate: true`**. It can be set on create and is immutable afterwards (`Espo\Core\Record\Service`).
+- Other legacy fields (`sfStageName`, `sfLeadSource`, `sfOwnerId`, `sfCreatedAt`, `legacyStale`, `lossReasonLegacyMissing`, `sfEmailMessageId`, `sfThreadIdentifier`, `sfActivityId`) carry **no** `readOnly` param. They are read-only for people through role `fieldData` (`edit: no` for ER Staff, ER Intake and ER Manager; `edit: yes` for ER Import) in `config/access/roles.json`, which is added to this WO's allowlist for those entries only. They are also left out of edit layouts.
+- Tests: no `sf*` or legacy field may carry `readOnly: true`; `sfId` has `readOnlyAfterCreate`; human roles cannot edit these fields.

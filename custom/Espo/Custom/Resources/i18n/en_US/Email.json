@@ -1,0 +1,13 @@
+{
+    "fields": {
+        "sfId": "Salesforce ID",
+        "sfOwnerId": "Salesforce owner ID",
+        "sfCreatedAt": "Salesforce created at",
+        "sfEmailMessageId": "Salesforce EmailMessage ID",
+        "sfThreadIdentifier": "Salesforce thread identifier",
+        "sfActivityId": "Salesforce activity ID"
+    },
+    "messages": {
+        "archivedReadOnly": "An archived email is read-only history."
+    }
+}
