@@ -1,0 +1,7 @@
+{
+    "primaryFilterClassNameMap": {
+        "openEnquiries": "Espo\\Custom\\Classes\\Select\\Opportunity\\PrimaryFilters\\OpenEnquiries",
+        "myOpenEnquiries": "Espo\\Custom\\Classes\\Select\\Opportunity\\PrimaryFilters\\MyOpenEnquiries",
+        "legacyStale": "Espo\\Custom\\Classes\\Select\\Opportunity\\PrimaryFilters\\LegacyStale"
+    }
+}

@@ -1,0 +1,32 @@
+[
+    {
+        "label": "Enquiry",
+        "rows": [
+            [{"name": "name"}, {"name": "account"}],
+            [{"name": "stage"}, {"name": "amount"}],
+            [{"name": "lossReason"}, {"name": "lastStage"}],
+            [{"name": "serviceType"}, {"name": "closeDate"}],
+            [{"name": "enquiryCategory"}, {"name": "businessType"}],
+            [{"name": "introducedBy"}, {"name": "channel"}],
+            [{"name": "description", "fullWidth": true}]
+        ]
+    },
+    {
+        "label": "Case details",
+        "rows": [
+            [{"name": "clientReference"}, {"name": "deceasedName"}],
+            [{"name": "caseNumber"}, {"name": "postcode"}],
+            [{"name": "keyInformation", "fullWidth": true}]
+        ]
+    },
+    {
+        "label": "Legacy",
+        "collapsed": true,
+        "rows": [
+            [{"name": "sfId"}, {"name": "sfStageName"}],
+            [{"name": "sfLeadSource"}, {"name": "sfOwnerId"}],
+            [{"name": "sfCreatedAt"}, {"name": "legacyStale"}],
+            [{"name": "lossReasonLegacyMissing"}, false]
+        ]
+    }
+]

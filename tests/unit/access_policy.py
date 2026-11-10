@@ -35,6 +35,7 @@ ACL_ENTITY_SCOPES = [
     "Email", "EmailTemplate", "EmailTemplateCategory", "KnowledgeBaseArticle",
     "KnowledgeBaseCategory", "Lead", "Meeting", "Opportunity", "TargetList",
     "TargetListCategory", "Task", "Team", "Template", "User",
+    "ServiceType",  # added by CRM-004 (custom reference entity)
 ]
 ACL_BOOLEAN_SCOPES = [
     "Activities", "Calendar", "EmailAccountScope", "ExternalAccount", "GlobalStream", "Import",
@@ -47,6 +48,9 @@ UNUSED_SCOPES = ["Lead", "Campaign", "TargetList", "TargetListCategory", "Knowle
                  "Case"]
 # Reference scopes: read all, never create, edit or delete.
 READ_ONLY_SCOPES = ["Currency", "Document", "DocumentFolder", "User", "Team"]
+# Added by CRM-004: reference data that admins maintain. Human roles read all and
+# change nothing (admins bypass role ACL); ER Import creates and edits, never deletes.
+ADMIN_MANAGED_SCOPES = ["ServiceType"]
 # Boolean scopes for the human roles; ER Import has every boolean scope false.
 HUMAN_BOOLEAN = {"Activities": True, "Calendar": True, "GlobalStream": True,
                  "WorkingTimeCalendar": True, "Import": False, "Webhook": False,
@@ -60,8 +64,12 @@ SF_KEY_ENTITIES = ["User", "Account", "Contact"]
 SF_EXTRA = {"sfOwnerId": "varchar", "sfCreatedAt": "datetime"}
 # Every Salesforce key field, by entity. None of them may be readOnly (the global
 # restriction would stop the importer too); people are kept off them by fieldData.
+# Added by CRM-004 (Amendment v1.1): the Opportunity legacy fields, read-only for
+# people through fieldData, writable by ER Import.
+OPPORTUNITY_LEGACY_FIELDS = ["sfId", "sfStageName", "sfLeadSource", "sfOwnerId", "sfCreatedAt",
+                             "legacyStale", "lossReasonLegacyMissing"]
 SF_FIELDS = {"User": ["sfId"], "Account": ["sfId"] + list(SF_EXTRA),
-             "Contact": ["sfId"] + list(SF_EXTRA)}
+             "Contact": ["sfId"] + list(SF_EXTRA), "Opportunity": OPPORTUNITY_LEGACY_FIELDS}
 AUDITED = {"Account": ["name", "type", "industry", "assignedUser", "parent",
                        "learningPlatformAccess"],
            "Contact": ["account", "emailAddress"]}
@@ -75,7 +83,9 @@ def _row(create, edit, delete):
 # independently of config/access/roles.json.
 _FIXED = dict({s: _row("no", "no", "no") for s in READ_ONLY_SCOPES},
               **{s: False for s in UNUSED_SCOPES})
-_HUMAN = dict(_FIXED, **HUMAN_BOOLEAN)
+_HUMAN_ADMIN_MANAGED = {s: _row("no", "no", "no") for s in ADMIN_MANAGED_SCOPES}  # CRM-004
+_IMPORT_ADMIN_MANAGED = {s: _row("yes", "all", "no") for s in ADMIN_MANAGED_SCOPES}  # CRM-004
+_HUMAN = dict(_FIXED, **HUMAN_BOOLEAN, **_HUMAN_ADMIN_MANAGED)
 EXPECTED_DATA = {
     STAFF: dict({"Account": _row("yes", "all", "no"), "Contact": _row("yes", "all", "no"),
                  "Opportunity": _row("yes", "own", "no"), "Email": _row("yes", "own", "no")},
@@ -86,7 +96,8 @@ EXPECTED_DATA = {
     MANAGER: dict({"Account": _row("yes", "all", "no"), "Contact": _row("yes", "all", "all"),
                    "Opportunity": _row("yes", "all", "all"), "Email": _row("yes", "all", "no")},
                   **{a: _row("yes", "all", "all") for a in ACTIVITIES}, **_HUMAN),
-    IMPORT: dict({s: _row("yes", "all", "no") for s in MAIN_SCOPES}, **_FIXED, **IMPORT_BOOLEAN),
+    IMPORT: dict({s: _row("yes", "all", "no") for s in MAIN_SCOPES}, **_FIXED, **IMPORT_BOOLEAN,
+                  **_IMPORT_ADMIN_MANAGED),
 }
 
 
@@ -246,6 +257,18 @@ def rule_import_api_only(doc):
     return out
 
 
+def rule_service_type_admin_managed(doc):
+    """CRM-004: human roles read ServiceType and change nothing; ER Import creates and
+    edits it and never deletes."""
+    out = []
+    for name in ROLES:
+        want = _row("yes", "all", "no") if name == IMPORT else _row("no", "no", "no")
+        for scope in ADMIN_MANAGED_SCOPES:
+            if _data(doc, name).get(scope) != want:
+                out.append(f"{name}.{scope}: {_data(doc, name).get(scope)} != {want}")
+    return out
+
+
 def rule_matches_work_order_table(doc):
     out = []
     for name, expected in EXPECTED_DATA.items():
@@ -309,6 +332,7 @@ ROLE_RULES = {
     "intake_edits_all_opportunity": rule_intake_edits_all_opportunity,
     "import_never_deletes": rule_import_never_deletes,
     "import_api_only": rule_import_api_only,
+    "service_type_admin_managed": rule_service_type_admin_managed,
     "matches_work_order_table": rule_matches_work_order_table,
     "sf_id_admin_only": rule_sf_id_admin_only,
     "sf_fields_read_only_for_people": rule_sf_fields_read_only_for_people,

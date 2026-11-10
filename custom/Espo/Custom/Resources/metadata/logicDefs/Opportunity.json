@@ -1,0 +1,39 @@
+{
+    "fields": {
+        "lastStage": {
+            "visible": {
+                "conditionGroup": [
+                    {
+                        "type": "equals",
+                        "attribute": "stage",
+                        "value": "Lost"
+                    }
+                ]
+            }
+        },
+        "lossReason": {
+            "visible": {
+                "conditionGroup": [
+                    {
+                        "type": "equals",
+                        "attribute": "stage",
+                        "value": "Lost"
+                    }
+                ]
+            },
+            "required": {
+                "conditionGroup": [
+                    {
+                        "type": "equals",
+                        "attribute": "stage",
+                        "value": "Lost"
+                    },
+                    {
+                        "type": "isFalse",
+                        "attribute": "lossReasonLegacyMissing"
+                    }
+                ]
+            }
+        }
+    }
+}
