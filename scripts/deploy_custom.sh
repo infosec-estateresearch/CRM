@@ -12,6 +12,8 @@
 # container's uid could, so custom/ and custom/Espo are first made owned by the
 # invoking user and not group- or world-writable. If crm-app was running, both are
 # started again and EspoCRM's clear-cache and rebuild run inside crm-app.
+# Because it can start services, the LAN access check (scripts/check_access.py)
+# runs first and a refusal stops the deploy before the stack is touched.
 # Usage: scripts/deploy_custom.sh dev
 set -euo pipefail
 # shellcheck source=lib/common.sh
@@ -20,6 +22,8 @@ set -euo pipefail
 require_dev "${1:-}"
 require_env_file
 require_runtime_paths
+# This script starts services again, so the LAN access settings must pass first.
+require_access
 
 src="$CRM_REPO_DIR/custom/Espo/Custom"
 runtime_custom="$CRM_RUNTIME_DIR/custom"

@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Shared helpers for backup.sh, restore.sh, export.sh and deploy_custom.sh. Source, do not run.
+# Shared helpers for backup.sh, restore.sh, export.sh, deploy_custom.sh and up.sh. Source, do not run.
 
 CRM_REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 CRM_PROJECT=crm-dev
@@ -37,13 +37,39 @@ require_dev() {
     CRM_ENV_FILE=${CRM_ENV_FILE:-$CRM_RUNTIME_DIR/env}
 }
 
+# The env file is always $CRM_RUNTIME_DIR/env: the one the access check and
+# the path checks read is the one Compose gets.
 require_env_file() {
+    [ "$CRM_ENV_FILE" = "$CRM_RUNTIME_DIR/env" ] \
+        || die "refusing to run: the env file must be $CRM_RUNTIME_DIR/env (CRM_ENV_FILE is $CRM_ENV_FILE)"
     [ -r "$CRM_ENV_FILE" ] || die "env file not readable: $CRM_ENV_FILE"
 }
 
-# The bind-mount source variables. Compose prefers a value in its process
-# environment over the env file, so none of them may come from the environment.
+# The bind-mount source variables.
 CRM_PATH_VARS=(CRM_DB_DIR CRM_DATA_DIR CRM_CUSTOM_DIR CRM_CLIENT_CUSTOM_DIR)
+
+# Every variable the env file defines, read from the names in deploy/env.example
+# (the single list). Compose prefers a value in its process environment over
+# the env file, so none of them may come from the environment: the scripts
+# refuse to run if one is set (require_runtime_paths), and compose() removes
+# all of them before calling docker.
+CRM_ENV_NAMES=()
+if [ -r "$CRM_REPO_DIR/deploy/env.example" ]; then
+    mapfile -t CRM_ENV_NAMES < <(sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*$/\1/p' -- "$CRM_REPO_DIR/deploy/env.example")
+fi
+require_env_names() {
+    [ "${#CRM_ENV_NAMES[@]}" -gt 0 ] \
+        || die "refusing to run: no variable names could be read from $CRM_REPO_DIR/deploy/env.example"
+}
+
+# Fail closed unless the LAN access settings in the env file pass
+# scripts/check_access.py (CRM-D019). Every script that can start or recreate
+# a service runs this before anything touches the stack.
+require_access() {
+    CRM_RUNTIME_DIR=$CRM_RUNTIME_DIR CRM_ENV_FILE=$CRM_ENV_FILE \
+        python3 -I "$CRM_REPO_DIR/scripts/check_access.py" dev \
+        || die "refusing to run: the LAN access settings in $CRM_ENV_FILE failed scripts/check_access.py"
+}
 
 # Fail closed unless $CRM_RUNTIME_DIR is an absolute path with no symlink in it
 # and the env file's bind-mount sources are exactly its data/, custom/ and
@@ -52,7 +78,8 @@ CRM_PATH_VARS=(CRM_DB_DIR CRM_DATA_DIR CRM_CUSTOM_DIR CRM_CLIENT_CUSTOM_DIR)
 # resolves is checked too (require_compose_mounts), which is authoritative.
 require_runtime_paths() {
     local canon name rel count line value
-    for name in "${CRM_PATH_VARS[@]}"; do
+    require_env_names
+    for name in "${CRM_ENV_NAMES[@]}"; do
         [ -z "${!name+set}" ] \
             || die "refusing to run: $name is set in the environment; Compose would prefer it to the env file. Unset it."
     done
@@ -131,10 +158,16 @@ require_compose_mounts() {
         || die "refusing to run: the bind mounts Compose resolves do not match $CRM_RUNTIME_DIR (or compose config failed)"
 }
 
-# docker compose runs without the bind-mount variables in its environment, so
-# only the checked env file can supply them (defence in depth).
+# docker compose runs without any env-file variable (every name in
+# deploy/env.example) in its environment, so only the checked env file can
+# supply them (defence in depth).
 compose() {
-    env -u CRM_DB_DIR -u CRM_DATA_DIR -u CRM_CUSTOM_DIR -u CRM_CLIENT_CUSTOM_DIR \
+    local name unset=()
+    require_env_names
+    for name in "${CRM_ENV_NAMES[@]}"; do
+        unset+=(-u "$name")
+    done
+    env "${unset[@]}" \
         docker compose -p "$CRM_PROJECT" -f "$CRM_REPO_DIR/deploy/compose.json" \
         --env-file "$CRM_ENV_FILE" "$@"
 }

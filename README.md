@@ -27,7 +27,7 @@ The CRM-001 dev stack is EspoCRM 10.0.12 plus MariaDB 11.4.13, both pinned by di
 
 - `crm-app` is published on port 8180 of one host LAN address, `CRM_BIND_IP`. It is not published on `127.0.0.1` or `0.0.0.0`.
 - Apache inside `crm-app` admits only the authorised internal networks in `CRM_ALLOWED_SOURCES`, plus loopback for the healthcheck. Every other source gets 403 (`deploy/apache/crm-access.conf`, CRM-D019).
-- The values exist only in the runtime env file, never in this repository. Check them with `python3 scripts/check_access.py dev` before every `up`.
+- The values exist only in the runtime env file, never in this repository. Start the stack only with `scripts/up.sh dev`, which checks them (`scripts/check_access.py`) before every `up`. A raw `docker compose up` skips that check.
 - The database publishes nothing.
 - The connection is plain HTTP. TLS is mandatory before any real data.
 - Operator steps, including moving the existing install: [docs/BUILD.md §7.6](docs/BUILD.md#76-lan-access-crm-d019).

@@ -48,8 +48,7 @@ The dev environment lives in `DOCKER1:/srv/CRM/runtime/dev/`, which is root-owne
 cd /srv/CRM/worktrees/CRM-001      # the delivered forge/CRM-001 worktree at the PR head commit
 git rev-parse HEAD                  # must equal the PR head SHA recorded on the WO Issue
 scripts/deploy_custom.sh dev        # before the first up (§7.2)
-python3 scripts/check_access.py dev # LAN access settings, before every up (§7.6)
-docker compose -p crm-dev -f deploy/compose.json --env-file /srv/CRM/runtime/dev/env up -d
+scripts/up.sh dev                   # every start: checks paths and LAN access, then up -d --wait (§7.6)
 python3 scripts/seed_synthetic.py --base-url "http://<CRM_BIND_IP>:8180"
 python3 -m unittest discover -s tests/acceptance -v
 scripts/backup.sh dev && scripts/restore.sh dev <backup>
@@ -104,9 +103,9 @@ Everything below is for the operator stage. Run it as the authorised operator, f
    - `CRM_ALLOWED_SOURCES=<authorised subnet A> <authorised subnet B>`
    - `CRM_SITE_URL=http://<CRM_BIND_IP>:8180`
 
-   `python3 scripts/check_access.py dev` checks the last three (§7.6).
+   `python3 scripts/check_access.py dev` checks the last three (§7.6). `scripts/up.sh dev`, `deploy_custom.sh` and `restore.sh` run that check themselves before they start anything.
 
-   Compose refuses to start if any variable is unset. `deploy_custom.sh`, `backup.sh` and `restore.sh` read `CRM_DATA_DIR`, `CRM_CUSTOM_DIR` and `CRM_CLIENT_CUSTOM_DIR` from the env file as text (it is never sourced). They refuse to run unless each one is a single, absolute, plain `NAME=<path>` line whose canonical path is exactly `/srv/CRM/runtime/dev/{data,custom,client/custom}`, and unless `/srv/CRM/runtime/dev` itself contains no symlink. Every line that could assign the name in a form Compose accepts counts towards "single": `NAME=`, `NAME: value`, `export NAME`, leading blanks, a bare `NAME`. Compose's own parser takes the last such line. Do not export `CRM_DB_DIR`, `CRM_DATA_DIR`, `CRM_CUSTOM_DIR` or `CRM_CLIENT_CUSTOM_DIR` in the shell. Compose prefers the process environment to the env file, so the scripts refuse to run if any of the four is set.
+   Compose refuses to start if any variable is unset. `deploy_custom.sh`, `backup.sh` and `restore.sh` read `CRM_DATA_DIR`, `CRM_CUSTOM_DIR` and `CRM_CLIENT_CUSTOM_DIR` from the env file as text (it is never sourced). They refuse to run unless each one is a single, absolute, plain `NAME=<path>` line whose canonical path is exactly `/srv/CRM/runtime/dev/{data,custom,client/custom}`, and unless `/srv/CRM/runtime/dev` itself contains no symlink. Every line that could assign the name in a form Compose accepts counts towards "single": `NAME=`, `NAME: value`, `export NAME`, leading blanks, a bare `NAME`. Compose's own parser takes the last such line. Do not export any variable named in `deploy/env.example` in the shell. Compose prefers the process environment to the env file, so `deploy_custom.sh`, `backup.sh`, `restore.sh` and `up.sh` refuse to run if any of them is set. The list of names is read from `deploy/env.example` itself, so it cannot drift from the file.
 3. Confirm that `172.16.10.0/24` and `<CRM_BIND_IP>:8180` are free. A conflict is reported to Matt, not remediated (§6).
 
 ### 7.2 Layout of the stack
@@ -164,33 +163,41 @@ The entrypoint and image behaviour above comes from the upstream `espocrm-docker
 All commands run from the repository root.
 
 ```sh
-ENVF=/srv/CRM/runtime/dev/env
 scripts/deploy_custom.sh dev               # first deploy BEFORE the first up (crm-app not running: no rebuild yet)
-docker compose -p crm-dev -f deploy/compose.json --env-file "$ENVF" up -d --wait   # installs, incl. rebuild
+scripts/up.sh dev                          # checks, then up -d --wait: installs, incl. rebuild
 
 # Later customisation changes, with the stack up: stop app+daemon, deploy, start them, clear-cache + rebuild
 scripts/deploy_custom.sh dev
 
 # Credentials are read from the environment only; they are never written to disk.
-export CRM_BASE_URL=http://<CRM_BIND_IP>:8180 CRM_ADMIN_USERNAME=... CRM_ADMIN_PASSWORD=...
-python3 scripts/seed_synthetic.py --dry-run                # dataset summary, no HTTP
-python3 scripts/seed_synthetic.py --base-url "$CRM_BASE_URL" --seed 1
+# CRM_ADMIN_USERNAME and CRM_ADMIN_PASSWORD are env-file names, and backup.sh,
+# restore.sh, deploy_custom.sh and up.sh refuse to run while any env-file name
+# is set in their environment. So the credentials are exported only inside the
+# ( ... ) subshells, never in the shell that runs those scripts.
+( export CRM_BASE_URL=http://<CRM_BIND_IP>:8180 CRM_ADMIN_USERNAME=... CRM_ADMIN_PASSWORD=...
+  python3 scripts/seed_synthetic.py --dry-run               # dataset summary, no HTTP
+  python3 scripts/seed_synthetic.py --base-url "$CRM_BASE_URL" --seed 1 )
 
 scripts/backup.sh dev                      # -> /srv/CRM/runtime/dev/backups/crm-dev-<UTC>/
-scripts/export.sh dev                      # -> /srv/CRM/runtime/dev/backups/export-<UTC>/{accounts,contacts}.csv
+( export CRM_BASE_URL=http://<CRM_BIND_IP>:8180 CRM_ADMIN_USERNAME=... CRM_ADMIN_PASSWORD=...
+  scripts/export.sh dev )                  # -> /srv/CRM/runtime/dev/backups/export-<UTC>/{accounts,contacts}.csv
 scripts/restore.sh dev crm-dev-<UTC>       # prints "restore completed ... in <N>s" (record it for AC8)
 
-CRM_SEED=1 CRM_EXPORT_DIR=/srv/CRM/runtime/dev/backups/export-<UTC> CRM_EXPECTED_BIND_IP=<CRM_BIND_IP> \
-    python3 -m unittest discover -s tests/acceptance -v
+( export CRM_BASE_URL=http://<CRM_BIND_IP>:8180 CRM_ADMIN_USERNAME=... CRM_ADMIN_PASSWORD=...
+  CRM_SEED=1 CRM_EXPORT_DIR=/srv/CRM/runtime/dev/backups/export-<UTC> CRM_EXPECTED_BIND_IP=<CRM_BIND_IP> \
+      python3 -m unittest discover -s tests/acceptance -v )
 ```
 
 Script behaviour:
-- **The dev guard.** `deploy_custom.sh`, `backup.sh`, `restore.sh` and `export.sh` take the target environment as their first argument. They refuse, with exit 2, unless it is exactly `dev` and the runtime directory is named `dev`.
-- **Env-file paths.** `deploy_custom.sh`, `backup.sh` and `restore.sh` refuse to run (exit 1, nothing written, no `docker` call) in three cases (§7.1):
-  - any of `CRM_DB_DIR`, `CRM_DATA_DIR`, `CRM_CUSTOM_DIR` or `CRM_CLIENT_CUSTOM_DIR` is set in their environment;
+- **The dev guard.** `deploy_custom.sh`, `backup.sh`, `restore.sh`, `export.sh` and `up.sh` take the target environment as their first argument. They refuse, with exit 2, unless it is exactly `dev` and the runtime directory is named `dev`.
+- **Env-file paths.** `deploy_custom.sh`, `backup.sh`, `restore.sh` and `up.sh` refuse to run (exit 1, nothing written, no `docker` call) in these cases (§7.1):
+  - `CRM_ENV_FILE` names any file other than `$CRM_RUNTIME_DIR/env`;
+  - any variable named in `deploy/env.example` is set in their environment (the bind-mount paths, the database and administrator settings, `CRM_SITE_URL`, `CRM_BIND_IP` and `CRM_ALLOWED_SOURCES`), or no names can be read from that file;
   - the env file's `CRM_DATA_DIR`, `CRM_CUSTOM_DIR` or `CRM_CLIENT_CUSTOM_DIR` is missing, assigned more than once in any form, not in the plain `NAME=` form, or relative;
   - one of those values does not resolve to exactly `$CRM_RUNTIME_DIR/{data,custom,client/custom}`.
-- **Compose-resolved mounts.** After that static check, the same scripts run `docker compose ... config --format json`, which is authoritative, and parse it with `python3 -I` (standard library only). The bind sources for `/var/www/html/data`, `/var/www/html/custom` and `/var/www/html/client/custom` on both `crm-app` and `crm-daemon` must each be exactly one bind mount whose source is `$CRM_RUNTIME_DIR/{data,custom,client/custom}`. A source containing `..` is refused. The scripts refuse (exit 1, before any other `docker` call) on a mismatch, a missing mount, or a failure of `compose config`. The resolved config contains the secrets. It is piped straight into the parser, never printed or stored. The parser reports only service, mount target and source. As defence in depth, every `docker compose` call runs with those four variables removed from its environment (`env -u`).
+- **Compose-resolved mounts.** After that static check, the same scripts run `docker compose ... config --format json`, which is authoritative, and parse it with `python3 -I` (standard library only). The bind sources for `/var/www/html/data`, `/var/www/html/custom` and `/var/www/html/client/custom` on both `crm-app` and `crm-daemon` must each be exactly one bind mount whose source is `$CRM_RUNTIME_DIR/{data,custom,client/custom}`. A source containing `..` is refused. The scripts refuse (exit 1, before any other `docker` call) on a mismatch, a missing mount, or a failure of `compose config`. The resolved config contains the secrets. It is piped straight into the parser, never printed or stored. The parser reports only service, mount target and source. As defence in depth, every `docker compose` call the scripts make runs with every variable named in `deploy/env.example` removed from its environment (`env -u`), so only the checked env file can supply them.
+- **LAN access check.** Every script that can start or recreate a service (`up.sh`, `deploy_custom.sh` and `restore.sh`) then runs `scripts/check_access.py dev` (§7.6) on the same env file. If it refuses, the script exits 1 before it touches the stack: nothing is stopped, moved or started.
+- **`up.sh`** is the only supported way to start or recreate the stack. It runs the dev guard, the env-file and path checks and the access check, and then `docker compose ... up -d --wait`, with any further arguments appended (for example `scripts/up.sh dev --force-recreate crm-app`).
 - **`deploy_custom.sh`** is described in §7.2.
 - **`backup.sh`** runs `mariadb-dump` inside `crm-db`, using the container's own credentials, so no secret appears on the host command line. It also writes one archive per mounted runtime directory: `data.tar.gz` (`data/`), `custom.tar.gz` (`custom/`) and `client-custom.tar.gz` (`client/custom/`). Each archive stores its runtime-relative path. It then writes `SHA256SUMS` over all four files. A failed backup leaves no partial directory.
 - **`restore.sh`** checks the checksums. It also refuses a backup that lacks any of the four checksummed files, which includes backups made with the earlier, whole-document-root layout. Then it stops `crm-app` and `crm-daemon`. It moves each current directory aside, to `data.replaced-<UTC>`, `custom.replaced-<UTC>` and `client/custom.replaced-<UTC>` (nothing is deleted), and extracts each archive back into its own place. It imports the dump, starts the stack and prints the elapsed time. Remove the `*.replaced-*` directories by hand once the restore has been accepted.
@@ -235,11 +242,13 @@ Matt has authorised direct access to the dev CRM from the two internal networks,
 
    ```apache
    <Location "/">
+       AuthMerging And
        Require ip 127.0.0.1 ::1 ${CRM_ALLOWED_SOURCES}
    </Location>
    ```
 
-   - `<Location "/">` covers every URL path. Location sections are merged after `<Directory>` sections and `.htaccess`, so this `Require` replaces the grant that `apache2.conf` gives `/var/www/`. The image's `.htaccess` has no access directives.
+   - `<Location "/">` covers every URL path. Location sections are merged after `<Directory>` sections and `.htaccess`. With `AuthMerging And`, this `Require` is combined with the authorization that already applies there, which is the `Require all granted` that `apache2.conf` gives `/var/www/`. A request must pass both. The block can therefore only narrow access, and any authorization deny the image applies elsewhere still holds. The image's `.htaccess` has no access directives.
+   - The image also denies `data/`, `application/`, `custom/` and `vendor/` with mod_rewrite `[F]` (checked by the PL in the running image). Those denies are not authorization, so authz merging does not affect them either way. They stay in force.
    - Any other source gets `403 Forbidden`.
    - `Require ip` tests the TCP peer address. `mod_remoteip` is not loaded and no header (`X-Forwarded-For` or any other) is trusted.
    - Loopback stays allowed for the container's own healthcheck (`curl http://127.0.0.1/`).
@@ -248,7 +257,8 @@ Matt has authorised direct access to the dev CRM from the two internal networks,
 
    | Condition | Result |
    |---|---|
-   | Bad bind, sources or site URL in the env file | `check_access.py dev` refuses (exit 1) |
+   | Bad bind, sources or site URL in the env file | `check_access.py dev` refuses (exit 1), and so do `up.sh`, `deploy_custom.sh` and `restore.sh`, before any `up` |
+   | `CRM_BIND_IP`, `CRM_ALLOWED_SOURCES`, `CRM_SITE_URL` or any other env-file name exported in the shell | `up.sh`, `deploy_custom.sh`, `restore.sh` and `backup.sh` refuse (exit 1). Every `docker compose` call they make also runs without those names in its environment. |
    | `CRM_BIND_IP` or `CRM_ALLOWED_SOURCES` unset or empty in the env file | Compose refuses to create the stack (`${VAR:?}`) |
    | Variable undefined inside the container | Apache warns that it is not defined and leaves `${CRM_ALLOWED_SOURCES}` unexpanded. `mod_authz_host` rejects that as an invalid address, so the configuration does not parse and **Apache does not start**. The healthcheck then fails. |
    | Variable empty inside the container | The line reduces to `Require ip 127.0.0.1 ::1`, so **every remote client is denied**. The healthcheck still passes. |
@@ -259,7 +269,9 @@ Matt has authorised direct access to the dev CRM from the two internal networks,
    - no mapping without a host IP and no `0.0.0.0` (`ports_host_ip`);
    - no literal non-loopback address in the Compose file (`no_literal_ip`), and none anywhere in `deploy/`, `scripts/` or `tests/` (`TestLiteralAddresses`);
    - the read-only, `crm-app`-only access-file mount (`access_conf_mount`) and the required `CRM_ALLOWED_SOURCES` (`access_sources_env`);
-   - the conf file itself (`conf_deny_by_default`, `conf_no_grant`, `conf_no_remoteip`).
+   - the conf file itself (`conf_deny_by_default`, `conf_authmerging_and`, `conf_no_grant`, `conf_no_remoteip`, `conf_no_indirection`). `conf_authmerging_and` requires the block to be exactly `AuthMerging And` plus the `Require` line. `conf_no_indirection` refuses `Define`, `UnDefine`, `Include`, `IncludeOptional`, `<Macro>` and `Use`, and any directive other than the `Require` line that names `CRM_ALLOWED_SOURCES` (`SetEnv`, `SetEnvIf`, `PassEnv`, `UnsetEnv`, a rewrite `[E=]`). A `Define` would take precedence over the environment when Apache expands `${CRM_ALLOWED_SOURCES}`.
+
+   **Procedural check versus enforced controls.** `scripts/up.sh dev` (and `deploy_custom.sh` and `restore.sh`) run the access check before Compose. A raw `docker compose ... up` skips that procedural check entirely. Then only two controls remain in force: Compose's `${VAR:?}`, which refuses an unset or empty variable but not a wrong value, and the Apache restriction in `crm-access.conf`. Always start the stack with `scripts/up.sh dev`.
 
 **To confirm at the operator stage.** None of the following could be run in the ForgeV2 loop, which has no Docker and no network:
 - the Apache merge behaviour, and the fail-closed results for an undefined and an empty variable;
@@ -271,7 +283,7 @@ The steps below confirm each of these.
 #### The check: `scripts/check_access.py dev`
 
 It uses the Python standard library only and takes the same `dev` guard as the shell scripts: exit 2 unless the argument is exactly `dev` and the runtime directory is named `dev`. It reads the env file as text and never sources it. It refuses (exit 1) unless all of the following hold:
-- `CRM_BIND_IP` is exactly one IPv4 unicast address in dotted-quad form. It is not `0.0.0.0` (nor in `0.0.0.0/8`), not loopback, not multicast, reserved, broadcast or link-local.
+- `CRM_BIND_IP` is exactly one IPv4 unicast address in dotted-quad form, inside RFC 1918 and inside one of the `CRM_ALLOWED_SOURCES` networks. It is not `0.0.0.0` (nor in `0.0.0.0/8`), not loopback, not multicast, reserved, broadcast or link-local, and not a public address.
 - `CRM_ALLOWED_SOURCES` is one or more space-separated IPv4 CIDRs, each of the form `a.b.c.d/nn`, with no host bits set. Each one:
   - lies inside RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`);
   - is `/16` or longer;
@@ -280,6 +292,7 @@ It uses the Python standard library only and takes the same `dev` guard as the s
   `0.0.0.0/0` is therefore always refused.
 - `CRM_SITE_URL` is `http://<CRM_BIND_IP>:8180`, with the port explicit, no path other than `/`, no query and no user information. It is `http` because TLS is not implemented yet.
 - Each of the three names is assigned exactly once, in the plain `NAME=value` form, and none of them is set in the process environment, because Compose would prefer the process environment to the env file. Do not export `CRM_BIND_IP`. The acceptance tests use `CRM_EXPECTED_BIND_IP` instead.
+- The env file is `$CRM_RUNTIME_DIR/env`. If `CRM_ENV_FILE` names any other file, the check refuses, so the file it checks is the one the scripts give Compose.
 
 It prints no value from the env file. Problems are reported by variable name and entry number only.
 
@@ -297,8 +310,8 @@ scripts/backup.sh dev                        # 1. a fresh backup before the chan
 python3 scripts/check_access.py dev          # 3. must print "access settings OK"
 $DC config --quiet                           # 4. Compose accepts the file (prints nothing)
 ss -ltn 'sport = :8180'                      # 5. <CRM_BIND_IP>:8180 must be free (§6)
-$DC up -d --wait                             # 6. recreates crm-app with the new port, env and
-                                             #    access file; the data is in the bind mounts
+scripts/up.sh dev                            # 6. checks again, then recreates crm-app with the new
+                                             #    port, env and access file; the data is in the bind mounts
 # 7. The entrypoint sets siteUrl only at installation, so set it on the existing install:
 $DC exec -T -u www-data -w /var/www/html crm-app php bin/command config:set siteUrl "http://<CRM_BIND_IP>:8180"
 $DC exec -T -u www-data -w /var/www/html crm-app php bin/command clear-cache
@@ -317,7 +330,7 @@ $DC exec -T -u www-data -w /var/www/html crm-app php bin/command clear-cache
    - a request from `crm-daemon`, an unlisted source, gets `403`;
    - `crm-app` is still healthy over loopback.
 
-   Then run the full acceptance suite with `CRM_BASE_URL=http://<CRM_BIND_IP>:8180`. Those requests come from the host itself, so they succeed only if the host's own address falls inside `CRM_ALLOWED_SOURCES`.
+   Then run the full acceptance suite with `CRM_BASE_URL=http://<CRM_BIND_IP>:8180`. Those requests come from the host itself. They are admitted because `check_access.py` requires `CRM_BIND_IP`, the host's own address, to be inside `CRM_ALLOWED_SOURCES`.
 10. **Check from each authorised subnet.** From one workstation in each authorised subnet, open `http://<CRM_BIND_IP>:8180/`, log in, and follow a few links. They must stay on the LAN URL. This verifies routing and the return path for both subnets. On the host, `docker compose ... logs crm-app` shows each request's client address. It must be the workstation's own address, not a `crm-net` address, which confirms that Docker preserves the source address.
 11. **Unauthorised source.** Request the CRM from a source outside both subnets and expect `403`, or no route. Use `curl -s -o /dev/null -w '%{http_code}\n' http://<CRM_BIND_IP>:8180/`.
     - The in-stack check in step 9 always applies.
@@ -325,15 +338,29 @@ $DC exec -T -u www-data -w /var/www/html crm-app php bin/command clear-cache
     - Never widen `CRM_ALLOWED_SOURCES` to run a test.
 12. **Record the evidence** on the WO Issue, sanitised: no addresses. The CRM-001 evidence already recorded stays as it is.
 
-To roll back, run `$DC up -d --wait` from a checkout of the PR #5 head commit, with the previous env file restored. That brings back the `127.0.0.1` binding. Then set `siteUrl` back the same way. This commit's Compose file cannot be used without `CRM_BIND_IP`.
+To roll back, run `$DC up -d --wait` from a checkout of the PR #5 head commit, with the previous env file restored. That brings back the `127.0.0.1` binding. Then set `siteUrl` back the same way. This is the one raw `up` in this document: the PR #5 commit has no `scripts/up.sh` and no LAN access to check. This commit's Compose file cannot be used without `CRM_BIND_IP`.
 
-**Changing the allowed sources or the access file later.** Edit the env file, or check out the new commit, run `check_access.py dev`, then run `$DC up -d --force-recreate --wait crm-app`. The access file is bind-mounted by inode, so a checkout that replaces the file reaches the container only when the container is recreated. The checkout must stay in place while the stack runs.
+**Changing the allowed sources or the access file later.** Edit the env file, or check out the new commit, then run `scripts/up.sh dev --force-recreate crm-app`. It runs the access check first. The access file is bind-mounted by inode, so a checkout that replaces the file reaches the container only when the container is recreated. The checkout must stay in place while the stack runs.
+
+#### HTTPS for LAN access (assessment)
+
+**Options assessed** (PL, 2026-11-10):
+- **(A) TLS in `crm-app`'s own Apache.** `mod_ssl` is already loaded in the pinned image. A Git-controlled vhost conf for `:443` is mounted read-only. The certificate and key come from the runtime (root, `0600`, never in Git). `${CRM_BIND_IP}:8443:443` is published, and 8180 either redirects to HTTPS or is retired. This needs no new image and no new external code.
+- **(B) A reverse-proxy container in `crm-dev`**, for example Caddy with `tls internal`, or Traefik. This adds a new external image, which needs a register entry and review. Caddy's internal CA root must then be installed on staff devices.
+- **(C) A host-level proxy.** Rejected: the host is shared, and this is outside the CRM boundary.
+
+**Certificate source.** ACME HTTP-01 is not possible on a LAN-only address. The candidates are:
+- an organisation internal CA (preferred, if one exists);
+- ACME DNS-01 for an internal hostname under the company domain. This needs DNS API credentials held on the host;
+- self-signed. Browsers show warnings, so this is for dev only.
+
+**Recommendation:** (A), with a hostname (not an IP) and a certificate from an internal CA or DNS-01. The PO must decide the hostname and the issuer. TLS is mandatory before real data (CRM-D019).
 
 #### Residual risks
 
 - **Plain HTTP.** Passwords and session cookies cross the LAN unencrypted. **TLS is mandatory before any real data** (CRM-PBI-008), and HTTPS is preferred for any authenticated use before then.
 - **Admin interface.** Every host in the authorised subnets reaches the login page, and with it the administrator login. EspoCRM authentication is the only control inside those subnets.
 - **Address-based trust.** A compromised or spoofing host inside an authorised subnet is admitted. The TCP handshake limits blind spoofing.
-- **The host itself.** Processes on the host that connect to `<CRM_BIND_IP>` carry the host's own address. If that address is inside an authorised subnet, they are admitted, much as loopback access was before. Containers of other projects that are relayed through the `crm-net` gateway are refused. To confirm at the operator stage.
+- **The host itself.** Processes on the host that connect to `<CRM_BIND_IP>` carry the host's own address. `check_access.py` requires that address to be inside an authorised subnet, so they are admitted, much as loopback access was before. Containers of other projects that are relayed through the `crm-net` gateway are refused. To confirm at the operator stage.
 - **Docker networking changes.** If Docker's NAT mode changed, for example to `--iptables=false`, sources would appear differently. The overlap rule makes that fail closed for relayed traffic. Re-run step 9 after any Docker upgrade.
 - **IPv6.** Only an IPv4 address is published. No IPv6 access exists or is checked.

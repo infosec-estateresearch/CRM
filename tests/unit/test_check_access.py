@@ -1,9 +1,10 @@
 """scripts/check_access.py: the fail-closed LAN access check (CRM-D019).
 
-Bind addresses are RFC 5737 documentation addresses. Allowed sources have to be
-RFC 1918, which has no documentation range, so they are derived at run time from
-the validator's own RFC 1918 blocks; no private address is written here
-(TestLiteralAddresses in test_compose_policy.py enforces that).
+The bind address and the allowed sources have to be RFC 1918, which has no
+documentation range, so they are derived at run time from the validator's own
+RFC 1918 blocks; no private address is written here (TestLiteralAddresses in
+test_compose_policy.py enforces that). RFC 5737 documentation addresses serve
+as public addresses that must be refused.
 """
 
 import io
@@ -32,9 +33,14 @@ def private(block, index, prefix=24):
     return str(net)
 
 
-BIND = "192.0.2.10"
+def host(net, index):
+    """The index-th address of a network given as text, as text."""
+    return str(ipaddress.ip_network(net)[index])
+
+
 SUBNET_A = private(ONE_NINE_TWO, 201)
 SUBNET_B = private(TEN, 77 * 256 + 5)
+BIND = host(SUBNET_A, 10)        # the host's LAN address, inside subnet A
 SECRET = "s3cr3t-Value-never-printed"
 
 
@@ -57,10 +63,16 @@ class TestHelpers(unittest.TestCase):
 
 
 class TestBindIp(unittest.TestCase):
-    def test_accepts_unicast_addresses(self):
-        for ip in (BIND, "198.51.100.7", "203.0.113.254"):
+    def test_accepts_private_unicast_addresses(self):
+        for ip in (BIND, host(SUBNET_B, 254), host(private(ONE_SEVEN_TWO, 3), 1)):
             with self.subTest(ip=ip):
                 self.assertEqual(ca.validate_bind_ip(ip), [])
+
+    def test_refuses_public_addresses(self):
+        for ip in ("192.0.2.10", "198.51.100.7", "203.0.113.254"):
+            with self.subTest(ip=ip):
+                self.assertEqual(ca.validate_bind_ip(ip),
+                                 ["CRM_BIND_IP is not inside an RFC 1918 private block"])
 
     def test_refuses(self):
         refused = {
@@ -69,11 +81,13 @@ class TestBindIp(unittest.TestCase):
             "loopback": "127.0.0.1", "other loopback": "127.1.2.3",
             "multicast": "224.0.0.1", "broadcast": "255.255.255.255",
             "reserved": "240.0.0.1", "link-local": "169.254.1.1",
-            "two addresses": f"{BIND} 198.51.100.7", "comma list": f"{BIND},198.51.100.7",
+            "two addresses": f"{BIND} {host(SUBNET_B, 1)}", "comma list": f"{BIND},{BIND}",
             "CIDR": f"{BIND}/32", "with port": f"{BIND}:8180",
             "IPv6": "2001:db8::1", "IPv6 loopback": "::1", "hostname": "docker1",
-            "octet too big": "192.0.2.256", "leading zero": "192.0.2.010",
-            "three octets": "192.0.2", "integer": "3221225994", "spaces": f" {BIND} ",
+            "octet too big": BIND.rsplit(".", 1)[0] + ".256",
+            "leading zero": BIND.rsplit(".", 1)[0] + ".010",
+            "three octets": BIND.rsplit(".", 1)[0], "integer": str(int(ipaddress.ip_address(BIND))),
+            "spaces": f" {BIND} ", "public": "192.0.2.10",
         }
         for why, ip in refused.items():
             with self.subTest(why=why):
@@ -187,6 +201,33 @@ class TestEnvFile(unittest.TestCase):
             with self.subTest(over=over):
                 self.assertTrue(ca.check(env_text(**over), {}))
 
+    def test_bind_ip_must_be_inside_an_allowed_network(self):
+        self.assertEqual(ca.check(env_text(CRM_BIND_IP=host(SUBNET_B, 7),
+                                           CRM_SITE_URL=f"http://{host(SUBNET_B, 7)}:8180"), {}), [])
+        outside = host(private(ONE_NINE_TWO, 202), 10)   # private, but in neither subnet
+        errors = ca.check(env_text(CRM_BIND_IP=outside, CRM_SITE_URL=f"http://{outside}:8180"), {})
+        self.assertEqual(errors, ["CRM_BIND_IP is not inside any CRM_ALLOWED_SOURCES network"])
+        only_b = ca.check(env_text(CRM_ALLOWED_SOURCES=SUBNET_B), {})
+        self.assertEqual(only_b, ["CRM_BIND_IP is not inside any CRM_ALLOWED_SOURCES network"])
+        self.assertEqual(ca.validate_bind_in_sources(BIND, f"{SUBNET_B} {SUBNET_A}"), [])
+        # the edges of the network count as inside; the next network does not
+        net = ipaddress.ip_network(SUBNET_A)
+        self.assertEqual(ca.validate_bind_in_sources(str(net[1]), SUBNET_A), [])
+        self.assertEqual(ca.validate_bind_in_sources(str(net[-2]), SUBNET_A), [])
+        self.assertTrue(ca.validate_bind_in_sources(str(net[-1] + 1), SUBNET_A))
+
+    def test_containment_is_not_checked_on_invalid_values(self):
+        # each invalid value is reported once, not again as "not inside"
+        errors = ca.check(env_text(CRM_ALLOWED_SOURCES="0.0.0.0/0"), {})
+        self.assertNotIn("CRM_BIND_IP is not inside any CRM_ALLOWED_SOURCES network", errors)
+        self.assertTrue(errors)
+
+    def test_env_example_names(self):
+        names = ca.env_example_names()
+        self.assertIn("CRM_BIND_IP", names)
+        self.assertIn("CRM_DB_ROOT_PASSWORD", names)
+        self.assertEqual(len(names), len(set(names)))
+
     def test_unreadable_compose_subnet_fails_closed(self):
         self.assertTrue(ca.check(env_text(), {}, compose_path="/nonexistent/compose.json"))
 
@@ -250,6 +291,22 @@ class TestCommandLine(unittest.TestCase):
         res = self.run_cli("dev", extra_env={"CRM_BIND_IP": "198.51.100.7"})
         self.assertEqual(res.returncode, 1)
         self.assertIn("process environment", res.stderr)
+
+    def test_env_file_must_be_the_runtime_env(self):
+        other = os.path.join(self.tmp.name, "other.env")
+        with open(other, "w") as fh:
+            fh.write(env_text())
+        for value in (other, self.runtime + "/env.bak", self.runtime + "//env",
+                      os.path.join(self.runtime, "..", "dev", "env")):
+            with self.subTest(env_file=value):
+                res = self.run_cli("dev", extra_env={"CRM_ENV_FILE": value})
+                self.assertEqual(res.returncode, 1, res.stdout)
+                self.assertIn("the env file must be", res.stderr)
+                self.assertEqual(res.stdout, "")
+        for value in (os.path.join(self.runtime, "env"), ""):
+            with self.subTest(env_file=value):
+                res = self.run_cli("dev", extra_env={"CRM_ENV_FILE": value})
+                self.assertEqual(res.returncode, 0, res.stderr)
 
     def test_main_in_process(self):
         err, out = io.StringIO(), io.StringIO()

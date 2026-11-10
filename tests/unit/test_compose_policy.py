@@ -69,10 +69,21 @@ BROKEN = {
 BROKEN_CONF = {
     "apache_bad_all_granted.conf": {"conf_deny_by_default", "conf_no_grant"},
     "apache_bad_satisfy_any.conf": {"conf_no_grant"},
-    "apache_bad_sub_path_override.conf": {"conf_deny_by_default"},
+    "apache_bad_sub_path_override.conf": {"conf_deny_by_default", "conf_authmerging_and"},
     "apache_bad_remoteip.conf": {"conf_no_remoteip"},
-    "apache_bad_directory_only.conf": {"conf_deny_by_default"},
-    "apache_bad_location_extra_grant.conf": {"conf_deny_by_default", "conf_no_grant"},
+    "apache_bad_directory_only.conf": {"conf_deny_by_default", "conf_authmerging_and"},
+    "apache_bad_location_extra_grant.conf": {"conf_deny_by_default", "conf_no_grant",
+                                             "conf_authmerging_and"},
+    "apache_bad_no_authmerging.conf": {"conf_authmerging_and"},
+    "apache_bad_define.conf": {"conf_no_indirection"},
+    "apache_bad_undefine.conf": {"conf_no_indirection"},
+    "apache_bad_include.conf": {"conf_no_indirection"},
+    "apache_bad_include_optional.conf": {"conf_no_indirection"},
+    "apache_bad_setenv.conf": {"conf_no_indirection"},
+    "apache_bad_setenvif.conf": {"conf_no_indirection", "conf_no_remoteip"},
+    "apache_bad_passenv.conf": {"conf_no_indirection"},
+    "apache_bad_macro.conf": {"conf_no_indirection"},
+    "apache_bad_use.conf": {"conf_no_indirection"},
 }
 
 
@@ -144,6 +155,12 @@ class TestDeployedAccessConf(unittest.TestCase):
 
     def test_every_path_denied_by_default_except_loopback_and_sources(self):
         self.assertRule("conf_deny_by_default")
+
+    def test_location_ands_with_earlier_authorization(self):
+        self.assertRule("conf_authmerging_and")
+
+    def test_no_include_define_macro_or_env_override(self):
+        self.assertRule("conf_no_indirection")
 
     def test_nothing_grants_everyone(self):
         self.assertRule("conf_no_grant")
@@ -336,7 +353,8 @@ class TestAccessRules(unittest.TestCase):
 class TestConfRules(unittest.TestCase):
     """The access-file rules on small texts."""
 
-    GOOD = '<Location "/">\n    Require ip 127.0.0.1 ::1 ${CRM_ALLOWED_SOURCES}\n</Location>\n'
+    GOOD = ('<Location "/">\n    AuthMerging And\n'
+            '    Require ip 127.0.0.1 ::1 ${CRM_ALLOWED_SOURCES}\n</Location>\n')
 
     def failing(self, text):
         return {r for r, v in policy.check_conf(text).items() if v}
@@ -345,6 +363,8 @@ class TestConfRules(unittest.TestCase):
         self.assertEqual(self.failing(self.GOOD), set())
         self.assertEqual(self.failing(self.GOOD.replace('"/"', "/")), set())
         self.assertEqual(self.failing("# comment\n\n" + self.GOOD), set())
+        self.assertEqual(self.failing(self.GOOD.replace("AuthMerging And", "authmerging and")),
+                         set(), "Apache directives and their arguments are case-insensitive")
 
     def test_deny_by_default_violations(self):
         bad = [
@@ -369,6 +389,41 @@ class TestConfRules(unittest.TestCase):
                       "Order allow,deny", "AuthMerging Or", "Require   all \\\n  granted"):
             with self.subTest(extra=extra):
                 self.assertIn("conf_no_grant", self.failing(extra + "\n" + self.GOOD))
+
+    def test_authmerging_must_be_and_inside_the_location(self):
+        no_merging = self.GOOD.replace("    AuthMerging And\n", "")
+        bad = {
+            "missing": no_merging,
+            "Or": self.GOOD.replace("AuthMerging And", "AuthMerging Or"),
+            "Off": self.GOOD.replace("AuthMerging And", "AuthMerging Off"),
+            "outside the Location": "AuthMerging And\n" + no_merging,
+            "twice": self.GOOD.replace("AuthMerging And", "AuthMerging And\n    AuthMerging And"),
+            "after the Require": self.GOOD.replace(
+                "    AuthMerging And\n    Require ip 127.0.0.1 ::1 ${CRM_ALLOWED_SOURCES}\n",
+                "    Require ip 127.0.0.1 ::1 ${CRM_ALLOWED_SOURCES}\n    AuthMerging And\n"),
+            "no Location": "",
+        }
+        for why, text in bad.items():
+            with self.subTest(why=why):
+                self.assertIn("conf_authmerging_and", self.failing(text))
+        self.assertEqual(self.failing(no_merging), {"conf_authmerging_and"})
+
+    def test_indirection_and_variable_overrides_are_violations(self):
+        for extra in ("Define CRM_ALLOWED_SOURCES 0.0.0.0/0", "Define CRM_X",
+                      "UnDefine CRM_X", "undefine CRM_X",
+                      "Include /etc/apache2/x.conf", "IncludeOptional /var/www/html/data/*.conf",
+                      "include x.conf", "<Macro Open>\n</Macro>", "<macro Open $a>\n</macro>",
+                      "Use Open", "SetEnv CRM_ALLOWED_SOURCES 0.0.0.0/0",
+                      "SetEnvIfNoCase Host . crm_allowed_sources=0.0.0.0/0",
+                      "SetEnvIfExpr true CRM_ALLOWED_SOURCES=0.0.0.0/0",
+                      "PassEnv CRM_ALLOWED_SOURCES", "UnsetEnv CRM_ALLOWED_SOURCES",
+                      "RewriteRule ^ - [E=CRM_ALLOWED_SOURCES:0.0.0.0/0]",
+                      "Define \\\n  CRM_ALLOWED_SOURCES 0.0.0.0/0"):
+            with self.subTest(extra=extra):
+                self.assertIn("conf_no_indirection", self.failing(extra + "\n" + self.GOOD))
+        # other variables and the Require line itself are not indirection
+        self.assertNotIn("conf_no_indirection", self.failing("SetEnv CRM_OTHER x\n" + self.GOOD))
+        self.assertNotIn("conf_no_indirection", self.failing("# Include x.conf\n" + self.GOOD))
 
     def test_header_trust_is_a_violation(self):
         for extra in ("RemoteIPHeader X-Forwarded-For", "RemoteIPTrustedProxy 192.0.2.1",

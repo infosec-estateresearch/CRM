@@ -408,6 +408,8 @@ def check(doc, register):
 # Each conf rule takes the file's text and returns a list of violations.
 
 REQUIRE_LINE = "Require ip 127.0.0.1 ::1 ${CRM_ALLOWED_SOURCES}"
+AUTHMERGING_LINE = "AuthMerging And"
+LOCATION_BODY = [AUTHMERGING_LINE, REQUIRE_LINE]
 
 
 def load_conf(path=ACCESS_CONF_PATH):
@@ -433,9 +435,26 @@ def _directives(text):
     return out
 
 
+def _location_body(lines):
+    """(start, end) indices of the single <Location "/"> block, or an error string."""
+    opens = [i for i, l in enumerate(lines) if re.match(r"(?i)^<Location\s", l)]
+    if len(opens) != 1:
+        return f"{len(opens)} <Location> blocks, expected exactly one, for \"/\""
+    start = opens[0]
+    if not re.match(r'(?i)^<Location\s+("/"|/)\s*>$', lines[start]):
+        return f"the <Location> block is {lines[start]!r}, not for \"/\""
+    try:
+        end = next(i for i in range(start + 1, len(lines))
+                   if re.match(r"(?i)^</Location\s*>$", lines[i]))
+    except StopIteration:
+        return "the <Location \"/\"> block is not closed"
+    return start, end
+
+
 def conf_rule_deny_by_default(text):
-    """Exactly one <Location "/"> block (every URL path), and its only directive
-    is the Require ip line for loopback plus ${CRM_ALLOWED_SOURCES}. No other
+    """Exactly one <Location "/"> block (every URL path). Apart from AuthMerging
+    (conf_authmerging_and checks it), its only directive is the Require ip line
+    for loopback plus ${CRM_ALLOWED_SOURCES}. No other
     section that merges after <Directory> (<Location*>, <If*>, <Else>, <Proxy*>)
     could override it for a sub-path, and no Require stands outside it."""
     lines = _directives(text)
@@ -446,21 +465,37 @@ def conf_rule_deny_by_default(text):
     requires = [l for l in lines if re.match(r"(?i)^require\b", l)]
     if len(requires) != 1:
         return [f"{len(requires)} Require directives, expected exactly the one in <Location \"/\">"]
-    opens = [i for i, l in enumerate(lines) if re.match(r"(?i)^<Location\s", l)]
-    if len(opens) != 1:
-        return [f"{len(opens)} <Location> blocks, expected exactly one, for \"/\""]
-    start = opens[0]
-    if not re.match(r'(?i)^<Location\s+("/"|/)\s*>$', lines[start]):
-        return [f"the <Location> block is {lines[start]!r}, not for \"/\""]
-    try:
-        end = next(i for i in range(start + 1, len(lines))
-                   if re.match(r"(?i)^</Location\s*>$", lines[i]))
-    except StopIteration:
-        return ["the <Location \"/\"> block is not closed"]
-    body = lines[start + 1:end]
+    span = _location_body(lines)
+    if isinstance(span, str):
+        return [span]
+    body = [l for l in lines[span[0] + 1:span[1]]
+            if not re.match(r"(?i)^authmerging\b", l)]
     if body != [REQUIRE_LINE]:
-        return [f"the <Location \"/\"> block holds {body!r}, expected exactly [{REQUIRE_LINE!r}]"]
+        return [f"the <Location \"/\"> block holds {body!r} besides AuthMerging, "
+                f"expected exactly [{REQUIRE_LINE!r}]"]
     return []
+
+
+def conf_rule_authmerging_and(text):
+    """The <Location "/"> block is exactly [AuthMerging And, the Require line]:
+    its Require is ANDed with what applies before it (apache2.conf's
+    <Directory /var/www/> grant), so a deny there still holds. No AuthMerging
+    stands anywhere else."""
+    lines = _directives(text)
+    merging = [i for i, l in enumerate(lines) if re.match(r"(?i)^authmerging\b", l)]
+    span = _location_body(lines)
+    if isinstance(span, str):
+        return [f"no <Location \"/\"> block to hold {AUTHMERGING_LINE!r}: {span}"]
+    # directive names and the And keyword are case-insensitive in Apache
+    body = [AUTHMERGING_LINE if l.lower() == AUTHMERGING_LINE.lower() else l
+            for l in lines[span[0] + 1:span[1]]]
+    out = []
+    if len(merging) != 1 or not span[0] < merging[0] < span[1]:
+        out.append(f"{len(merging)} AuthMerging directives; expected exactly one, "
+                   "inside <Location \"/\">")
+    if body != LOCATION_BODY:
+        out.append(f"the <Location \"/\"> block holds {body!r}, expected exactly {LOCATION_BODY!r}")
+    return out
 
 
 def conf_rule_no_grant(text):
@@ -472,8 +507,10 @@ def conf_rule_no_grant(text):
         if word == "require" and (len(line.split()) < 2 or line.split()[1].lower() != "ip"):
             out.append(f"grant other than Require ip: {line!r}")
         elif word in ("allow", "deny", "order", "satisfy", "<requireany>", "<requireall>",
-                      "<requirenone>", "authmerging"):
+                      "<requirenone>"):
             out.append(f"access directive not allowed here: {line!r}")
+        elif word == "authmerging" and line.lower() != AUTHMERGING_LINE.lower():
+            out.append(f"AuthMerging other than And can widen access: {line!r}")
         elif re.search(r"(?i)\ball\s+granted\b", line):
             out.append(f"grants everyone: {line!r}")
     return out
@@ -488,10 +525,32 @@ def conf_rule_no_remoteip(text):
             for line in _directives(text) if pattern.search(line)]
 
 
+# Directives that bring in configuration from elsewhere or change what
+# ${CRM_ALLOWED_SOURCES} expands to (a Define takes precedence over the
+# environment), or that hide directives behind a macro.
+INDIRECTION = ("define", "undefine", "include", "includeoptional", "<macro", "</macro>", "use")
+
+
+def conf_rule_no_indirection(text):
+    """No Define, UnDefine, Include, IncludeOptional, <Macro> or Use, and
+    CRM_ALLOWED_SOURCES appears in no directive but the Require line, so no
+    SetEnv, SetEnvIf, PassEnv, UnsetEnv or rewrite [E=] can touch it."""
+    out = []
+    for line in _directives(text):
+        word = line.split()[0].lower()
+        if word in INDIRECTION or word.startswith("<macro"):
+            out.append(f"configuration indirection not allowed: {line!r}")
+        elif "crm_allowed_sources" in line.lower() and line != REQUIRE_LINE:
+            out.append(f"CRM_ALLOWED_SOURCES used outside the Require line: {line!r}")
+    return out
+
+
 CONF_RULES = {
     "conf_deny_by_default": conf_rule_deny_by_default,
+    "conf_authmerging_and": conf_rule_authmerging_and,
     "conf_no_grant": conf_rule_no_grant,
     "conf_no_remoteip": conf_rule_no_remoteip,
+    "conf_no_indirection": conf_rule_no_indirection,
 }
 
 

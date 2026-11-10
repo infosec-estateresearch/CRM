@@ -7,13 +7,16 @@ Run it before every `docker compose ... up`:
 
 It reads the runtime env file as text (it is never sourced or executed) and
 refuses (exit 1) unless:
-- CRM_BIND_IP is exactly one IPv4 unicast address, not 0.0.0.0 and not loopback;
+- CRM_BIND_IP is exactly one IPv4 unicast address inside RFC 1918, not
+  0.0.0.0 and not loopback, and inside one of the CRM_ALLOWED_SOURCES networks;
 - CRM_ALLOWED_SOURCES is one or more space-separated IPv4 CIDRs, each inside
   RFC 1918, each /16 or longer, none overlapping the crm-net subnet;
 - CRM_SITE_URL is http://<CRM_BIND_IP>:8180 (optionally with a trailing "/").
 Each name must be assigned exactly once, in the plain NAME=value form, and none
 may be set in the process environment, because Compose would prefer it to the
-env file.
+env file. The env file must be $CRM_RUNTIME_DIR/env: a CRM_ENV_FILE naming
+any other file is refused, so the file checked is the one the scripts give
+Compose.
 
 The dev guard is the same as the shell scripts': the first argument must be
 exactly "dev" and the runtime directory must be named "dev" (exit 2 otherwise).
@@ -31,6 +34,7 @@ import urllib.parse
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 COMPOSE_PATH = os.path.join(REPO, "deploy", "compose.json")
+ENV_EXAMPLE_PATH = os.path.join(REPO, "deploy", "env.example")
 DEFAULT_RUNTIME = "/srv/CRM/runtime/dev"
 PORT = 8180
 MIN_PREFIX = 16
@@ -71,7 +75,28 @@ def validate_bind_ip(value):
         return ["CRM_BIND_IP is a loopback address; LAN access needs the host's LAN address"]
     if addr.is_multicast or addr.is_reserved or addr.is_link_local:
         return ["CRM_BIND_IP is not a unicast LAN address (multicast, reserved, broadcast or link-local)"]
+    if not any(addr in block for block in RFC1918):
+        return ["CRM_BIND_IP is not inside an RFC 1918 private block"]
     return []
+
+
+def validate_bind_in_sources(bind_ip, sources):
+    """The bind address must lie inside one of the allowed networks.
+
+    Call only with values that passed validate_bind_ip and validate_sources."""
+    addr = ipaddress.IPv4Address(bind_ip)
+    if not any(addr in ipaddress.IPv4Network(n) for n in sources.split()):
+        return ["CRM_BIND_IP is not inside any CRM_ALLOWED_SOURCES network"]
+    return []
+
+
+def env_example_names(path=ENV_EXAMPLE_PATH):
+    """Every variable name deploy/env.example assigns (NAME= lines), in order.
+
+    The same list scripts/lib/common.sh reads for CRM_ENV_NAMES."""
+    with open(path, encoding="utf-8") as fh:
+        return [m.group(1) for m in
+                (re.match(r"^([A-Z][A-Z0-9_]*)=", line) for line in fh) if m]
 
 
 def validate_sources(value, avoid=()):
@@ -179,10 +204,15 @@ def check(text, environ, compose_path=COMPOSE_PATH):
         return errors + [f"cannot read the crm-net subnet from {compose_path}: {type(err).__name__}"]
     values, env_errors = read_env_values(text)
     errors += env_errors
+    bind_errors = sources_errors = ["missing"]
     if "CRM_BIND_IP" in values:
-        errors += validate_bind_ip(values["CRM_BIND_IP"])
+        bind_errors = validate_bind_ip(values["CRM_BIND_IP"])
+        errors += bind_errors
     if "CRM_ALLOWED_SOURCES" in values:
-        errors += validate_sources(values["CRM_ALLOWED_SOURCES"], avoid)
+        sources_errors = validate_sources(values["CRM_ALLOWED_SOURCES"], avoid)
+        errors += sources_errors
+    if not bind_errors and not sources_errors:
+        errors += validate_bind_in_sources(values["CRM_BIND_IP"], values["CRM_ALLOWED_SOURCES"])
     if "CRM_SITE_URL" in values:
         bind = values.get("CRM_BIND_IP")
         errors += validate_site_url(values["CRM_SITE_URL"],
@@ -203,7 +233,11 @@ def main(argv=None, environ=None):
         print(f"{prog()}: refusing to run: runtime directory is not a dev runtime: {runtime}",
               file=sys.stderr)
         return 2
-    env_file = environ.get("CRM_ENV_FILE") or os.path.join(runtime, "env")
+    env_file = os.path.join(runtime, "env")
+    if (environ.get("CRM_ENV_FILE") or env_file) != env_file:  # empty = unset, as in the shell
+        print(f"{prog()}: refusing to run: the env file must be {env_file} "
+              f"(CRM_ENV_FILE is {environ['CRM_ENV_FILE']})", file=sys.stderr)
+        return 1
     try:
         with open(env_file, encoding="utf-8") as fh:
             text = fh.read()
