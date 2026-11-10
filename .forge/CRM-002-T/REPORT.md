@@ -1,0 +1,7 @@
+# CRM-002-T - DELIVERED
+Repository: infosec-estateresearch/CRM   Branch: forge/CRM-002-T   Candidate: 211a5a58de6eec36d010ef926aac5d607965aa6f   Base: 76a3fdaa5782558ab708cb53c2d3341481f9bde6 (CRM-002-S DELIVERED)   WO: work-orders/CRM-002-T.md v1.0
+Change: hostcheck.parse_legacy_env reads the two target names with the consumer's literal semantics: strip the line, split at the first '=', strip the value. It refuses quotes, $, backtick, backslash, whitespace or control characters inside a value, an export prefix, duplicates and empty values. Across the whole file it refuses CR, line continuation and non-LF line breaks. Error messages give only a line number and a reason code.
+Tests: python3 -I -B -m unittest discover -s tests/migrate -t . -v -> Ran 289, OK (skipped=1). A differential test against a reference implementation of the consumer loader (400 generated entries) agrees on all of them, and 100 refused entries are refused. Engineer mutation run: 14 mutants, 13 killed, and 1 equivalent (comment skip). The Auditor's independent mutation run agreed.
+Reviews: round 1 Auditor, Tester and DevSecOps PASS.
+Advisories: the file is decoded as strict UTF-8 with no BOM handling, and printable non-ASCII is accepted. The PL verified the operator file has printable ASCII target values and no BOM. `hostcheck legacy-credentials` writes credential JSON to stdout, by design, for the container pipe; it must never be run in a terminal, and the PL's operator check uses an external wrapper that prints only lengths.
+Not run: O1, L1-L3.

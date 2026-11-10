@@ -1,0 +1,191 @@
+{
+  "base": "forge/CRM-002-S",
+  "base_sha": "76a3fdaa5782558ab708cb53c2d3341481f9bde6",
+  "branch": "forge/CRM-002-T",
+  "candidate": "211a5a58de6eec36d010ef926aac5d607965aa6f",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-10T19:08:06Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T19:08:14Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T19:14:35Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r1: consumer-literal parser, differential test vs reference loader (400 entries), refusals kept; 289 OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T19:14:54Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "211a5a58de6eec36d010ef926aac5d607965aa6f",
+      "t": "2026-11-10T19:14:55Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "211a5a58de6eec36d010ef926aac5d607965aa6f",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-10T19:15:10Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "211a5a58de6eec36d010ef926aac5d607965aa6f",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-10T19:15:10Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "211a5a58de6eec36d010ef926aac5d607965aa6f",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-10T19:15:10Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-10T19:20:16Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-10T19:20:16Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-10T19:20:16Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "211a5a58de6eec36d010ef926aac5d607965aa6f",
+      "findings": [
+        {
+          "key": "mutation-evidence-not-committed",
+          "severity": "advisory"
+        },
+        {
+          "key": "bom-not-refused",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-10T19:20:41Z",
+      "type": "result"
+    },
+    {
+      "candidate": "211a5a58de6eec36d010ef926aac5d607965aa6f",
+      "findings": [
+        {
+          "key": "no-counts-only-mode",
+          "severity": "advisory"
+        },
+        {
+          "key": "consumer-encoding-assumption",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-10T19:20:41Z",
+      "type": "result"
+    },
+    {
+      "candidate": "211a5a58de6eec36d010ef926aac5d607965aa6f",
+      "findings": [
+        {
+          "key": "no-counts-only-mode",
+          "severity": "advisory"
+        },
+        {
+          "key": "bom-decoding-assumption",
+          "severity": "advisory"
+        },
+        {
+          "key": "base-report-characteristic",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-10T19:20:41Z",
+      "type": "result"
+    },
+    {
+      "note": "Candidate 211a5a5: all three PASS at round 1. Encoding/BOM advisories: PL verified the real targets are printable ASCII and there is no BOM. Counts-only operator check done by the PL with an external wrapper that prints only lengths.",
+      "outcome": "DELIVERED",
+      "t": "2026-11-10T19:20:41Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-002-T",
+  "host": "docker1",
+  "known_commit": "76a3fdaa5782558ab708cb53c2d3341481f9bde6",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-002-T",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-002-T",
+  "wo": "CRM-002-T",
+  "worktree": "/srv/CRM/worktrees/CRM-002-T"
+}
