@@ -1,0 +1,1364 @@
+{
+  "contract": "crm-migrate source-field contract",
+  "contractVersion": 2,
+  "workOrder": "CRM-002 v1.2",
+  "notes": [
+    "SOQL is built only from this file. Compound address fields are never selected; only their components.",
+    "HtmlBody, BccAddress and attachment content are excluded (D5).",
+    "referenceMatch 'superset' marks polymorphic fields whose describe referenceTo is org-dependent: the listed targets must be present.",
+    "Types are the expected Salesforce describe types; uncertain ones are listed in docs/MIGRATION.md and confirmed at L1."
+  ],
+  "waivers": [],
+  "objects": [
+    {
+      "name": "User",
+      "ownerCheck": false,
+      "softDelete": false,
+      "changeKey": "SystemModstamp",
+      "fields": [
+        {
+          "name": "Id",
+          "type": "id",
+          "purpose": "M2 key; R12 named users (User.sfId)",
+          "required": true
+        },
+        {
+          "name": "FirstName",
+          "type": "string",
+          "purpose": "R12 named users",
+          "required": true
+        },
+        {
+          "name": "LastName",
+          "type": "string",
+          "purpose": "R12 named users",
+          "required": true
+        },
+        {
+          "name": "Name",
+          "type": "string",
+          "purpose": "R12 named users",
+          "required": true
+        },
+        {
+          "name": "Email",
+          "type": "email",
+          "purpose": "R12 named users",
+          "required": true
+        },
+        {
+          "name": "Username",
+          "type": "string",
+          "purpose": "R12 named users",
+          "required": true
+        },
+        {
+          "name": "Alias",
+          "type": "string",
+          "purpose": "M4 lead-source initials lookup (D7)",
+          "required": true
+        },
+        {
+          "name": "IsActive",
+          "type": "boolean",
+          "purpose": "R12 inactive legacy users (D5); M3 owner classes",
+          "required": true
+        },
+        {
+          "name": "ProfileId",
+          "type": "reference",
+          "purpose": "R12 access model",
+          "referenceTo": [
+            "Profile"
+          ],
+          "required": true
+        },
+        {
+          "name": "UserRoleId",
+          "type": "reference",
+          "purpose": "R12 access model",
+          "referenceTo": [
+            "UserRole"
+          ],
+          "required": true
+        },
+        {
+          "name": "UserType",
+          "type": "picklist",
+          "purpose": "R12 access model",
+          "required": true
+        },
+        {
+          "name": "CreatedDate",
+          "type": "datetime",
+          "purpose": "M2 provenance",
+          "required": true
+        },
+        {
+          "name": "LastLoginDate",
+          "type": "datetime",
+          "purpose": "R12 inactive legacy users (D5)",
+          "required": true
+        },
+        {
+          "name": "SystemModstamp",
+          "type": "datetime",
+          "purpose": "M3 change key for catch-up passes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "Profile",
+      "ownerCheck": false,
+      "softDelete": false,
+      "changeKey": "SystemModstamp",
+      "fields": [
+        {
+          "name": "Id",
+          "type": "id",
+          "purpose": "M2 key",
+          "required": true
+        },
+        {
+          "name": "Name",
+          "type": "string",
+          "purpose": "R12 access model",
+          "required": true
+        },
+        {
+          "name": "UserLicenseId",
+          "type": "reference",
+          "purpose": "R12 access model",
+          "referenceTo": [
+            "UserLicense"
+          ],
+          "required": true
+        },
+        {
+          "name": "SystemModstamp",
+          "type": "datetime",
+          "purpose": "M3 change key for catch-up passes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "UserRole",
+      "ownerCheck": false,
+      "softDelete": false,
+      "changeKey": "SystemModstamp",
+      "fields": [
+        {
+          "name": "Id",
+          "type": "id",
+          "purpose": "M2 key",
+          "required": true
+        },
+        {
+          "name": "Name",
+          "type": "string",
+          "purpose": "R12 access model",
+          "required": true
+        },
+        {
+          "name": "ParentRoleId",
+          "type": "reference",
+          "purpose": "R12 access model",
+          "referenceTo": [
+            "UserRole"
+          ],
+          "required": true
+        },
+        {
+          "name": "SystemModstamp",
+          "type": "datetime",
+          "purpose": "M3 change key for catch-up passes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "Account",
+      "ownerCheck": true,
+      "softDelete": true,
+      "changeKey": "SystemModstamp",
+      "fields": [
+        {
+          "name": "Id",
+          "type": "id",
+          "purpose": "M2 key (Account.sfId); R1 firms",
+          "required": true
+        },
+        {
+          "name": "Name",
+          "type": "string",
+          "purpose": "R1 firms; R2 same-name branches",
+          "required": true
+        },
+        {
+          "name": "ParentId",
+          "type": "reference",
+          "purpose": "R1 head office and branch hierarchy",
+          "referenceTo": [
+            "Account"
+          ],
+          "required": true
+        },
+        {
+          "name": "MasterRecordId",
+          "type": "reference",
+          "purpose": "M3 merged versus deleted",
+          "referenceTo": [
+            "Account"
+          ],
+          "required": false
+        },
+        {
+          "name": "Type",
+          "type": "picklist",
+          "purpose": "R3 tier",
+          "required": true
+        },
+        {
+          "name": "Industry",
+          "type": "picklist",
+          "purpose": "R3 industry",
+          "required": true
+        },
+        {
+          "name": "Phone",
+          "type": "phone",
+          "purpose": "R1 firm contact details; R6 search",
+          "required": true
+        },
+        {
+          "name": "Website",
+          "type": "url",
+          "purpose": "R1 firm contact details",
+          "required": true
+        },
+        {
+          "name": "Description",
+          "type": "textarea",
+          "purpose": "R3 practice management system",
+          "required": true
+        },
+        {
+          "name": "AccountSource",
+          "type": "picklist",
+          "purpose": "M1 mapping",
+          "required": true
+        },
+        {
+          "name": "OwnerId",
+          "type": "reference",
+          "purpose": "R12 ownership; M3 owner reconciliation",
+          "referenceTo": [
+            "User"
+          ],
+          "required": true
+        },
+        {
+          "name": "ShippingStreet",
+          "type": "textarea",
+          "purpose": "R4 firm address (shipping)",
+          "required": true
+        },
+        {
+          "name": "ShippingCity",
+          "type": "string",
+          "purpose": "R4 firm address (shipping)",
+          "required": true
+        },
+        {
+          "name": "ShippingState",
+          "type": "string",
+          "purpose": "R4 firm address (shipping)",
+          "required": true
+        },
+        {
+          "name": "ShippingPostalCode",
+          "type": "string",
+          "purpose": "R4 firm address (shipping)",
+          "required": true
+        },
+        {
+          "name": "ShippingCountry",
+          "type": "string",
+          "purpose": "R4 firm address (shipping)",
+          "required": true
+        },
+        {
+          "name": "BillingStreet",
+          "type": "textarea",
+          "purpose": "R4 billing address (cross-check)",
+          "required": true
+        },
+        {
+          "name": "BillingCity",
+          "type": "string",
+          "purpose": "R4 billing address (cross-check)",
+          "required": true
+        },
+        {
+          "name": "BillingState",
+          "type": "string",
+          "purpose": "R4 billing address (cross-check)",
+          "required": true
+        },
+        {
+          "name": "BillingPostalCode",
+          "type": "string",
+          "purpose": "R4 billing address (cross-check)",
+          "required": true
+        },
+        {
+          "name": "BillingCountry",
+          "type": "string",
+          "purpose": "R4 billing address (cross-check)",
+          "required": true
+        },
+        {
+          "name": "NumberOfEmployees",
+          "type": "int",
+          "purpose": "M1 mapping",
+          "required": true
+        },
+        {
+          "name": "LastActivityDate",
+          "type": "date",
+          "purpose": "M4 firms with no activity (D12)",
+          "required": true
+        },
+        {
+          "name": "TLP__c",
+          "type": "picklist",
+          "purpose": "R3 learning platform access",
+          "required": true
+        },
+        {
+          "name": "Interested_in_integration__c",
+          "type": "boolean",
+          "purpose": "M1 mapping (custom field)",
+          "required": true
+        },
+        {
+          "name": "Bankruptcy_Special_Rate__c",
+          "type": "boolean",
+          "purpose": "M1 mapping (custom field)",
+          "required": true
+        },
+        {
+          "name": "IsDeleted",
+          "type": "boolean",
+          "purpose": "M3 deletion class (current versus soft-deleted)",
+          "required": true
+        },
+        {
+          "name": "CreatedDate",
+          "type": "datetime",
+          "purpose": "M2 provenance (sfCreatedDate)",
+          "required": true
+        },
+        {
+          "name": "CreatedById",
+          "type": "reference",
+          "purpose": "M2 provenance (sfCreatedById)",
+          "referenceTo": [
+            "User"
+          ],
+          "required": true
+        },
+        {
+          "name": "LastModifiedDate",
+          "type": "datetime",
+          "purpose": "M3 reconciliation",
+          "required": true
+        },
+        {
+          "name": "SystemModstamp",
+          "type": "datetime",
+          "purpose": "M3 change key for catch-up passes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "Contact",
+      "ownerCheck": true,
+      "softDelete": true,
+      "changeKey": "SystemModstamp",
+      "fields": [
+        {
+          "name": "Id",
+          "type": "id",
+          "purpose": "M2 key; R5 contacts",
+          "required": true
+        },
+        {
+          "name": "AccountId",
+          "type": "reference",
+          "purpose": "R5 contacts at firms",
+          "referenceTo": [
+            "Account"
+          ],
+          "required": true
+        },
+        {
+          "name": "MasterRecordId",
+          "type": "reference",
+          "purpose": "M3 merged versus deleted",
+          "referenceTo": [
+            "Contact"
+          ],
+          "required": false
+        },
+        {
+          "name": "FirstName",
+          "type": "string",
+          "purpose": "R5 contacts",
+          "required": true
+        },
+        {
+          "name": "LastName",
+          "type": "string",
+          "purpose": "R5 contacts",
+          "required": true
+        },
+        {
+          "name": "Salutation",
+          "type": "picklist",
+          "purpose": "R5 contacts",
+          "required": true
+        },
+        {
+          "name": "Title",
+          "type": "string",
+          "purpose": "R5 contacts",
+          "required": true
+        },
+        {
+          "name": "Department",
+          "type": "string",
+          "purpose": "R5 contacts",
+          "required": true
+        },
+        {
+          "name": "Email",
+          "type": "email",
+          "purpose": "R5 contacts; duplicate warnings",
+          "required": true
+        },
+        {
+          "name": "Phone",
+          "type": "phone",
+          "purpose": "R5 contacts; R6 search",
+          "required": true
+        },
+        {
+          "name": "MobilePhone",
+          "type": "phone",
+          "purpose": "R5 contacts",
+          "required": true
+        },
+        {
+          "name": "MailingStreet",
+          "type": "textarea",
+          "purpose": "R5 contact address",
+          "required": true
+        },
+        {
+          "name": "MailingCity",
+          "type": "string",
+          "purpose": "R5 contact address",
+          "required": true
+        },
+        {
+          "name": "MailingState",
+          "type": "string",
+          "purpose": "R5 contact address",
+          "required": true
+        },
+        {
+          "name": "MailingPostalCode",
+          "type": "string",
+          "purpose": "R5 contact address",
+          "required": true
+        },
+        {
+          "name": "MailingCountry",
+          "type": "string",
+          "purpose": "R5 contact address",
+          "required": true
+        },
+        {
+          "name": "OwnerId",
+          "type": "reference",
+          "purpose": "R12 ownership; M3 owner reconciliation",
+          "referenceTo": [
+            "User"
+          ],
+          "required": true
+        },
+        {
+          "name": "IsDeleted",
+          "type": "boolean",
+          "purpose": "M3 deletion class (current versus soft-deleted)",
+          "required": true
+        },
+        {
+          "name": "CreatedDate",
+          "type": "datetime",
+          "purpose": "M2 provenance (sfCreatedDate)",
+          "required": true
+        },
+        {
+          "name": "CreatedById",
+          "type": "reference",
+          "purpose": "M2 provenance (sfCreatedById)",
+          "referenceTo": [
+            "User"
+          ],
+          "required": true
+        },
+        {
+          "name": "LastModifiedDate",
+          "type": "datetime",
+          "purpose": "M3 reconciliation",
+          "required": true
+        },
+        {
+          "name": "SystemModstamp",
+          "type": "datetime",
+          "purpose": "M3 change key for catch-up passes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "Opportunity",
+      "ownerCheck": true,
+      "softDelete": true,
+      "changeKey": "SystemModstamp",
+      "fields": [
+        {
+          "name": "Id",
+          "type": "id",
+          "purpose": "M2 key; R7 enquiries",
+          "required": true
+        },
+        {
+          "name": "AccountId",
+          "type": "reference",
+          "purpose": "R7 enquiry firm",
+          "referenceTo": [
+            "Account"
+          ],
+          "required": true
+        },
+        {
+          "name": "Name",
+          "type": "string",
+          "purpose": "R7 enquiry; M4 reference parsing (D8)",
+          "required": true
+        },
+        {
+          "name": "StageName",
+          "type": "picklist",
+          "purpose": "R7 stage (sfStageName, D1)",
+          "required": true
+        },
+        {
+          "name": "Amount",
+          "type": "currency",
+          "purpose": "R7 quoted fee",
+          "required": true
+        },
+        {
+          "name": "Probability",
+          "type": "percent",
+          "purpose": "R7 stage mapping evidence",
+          "required": true
+        },
+        {
+          "name": "CloseDate",
+          "type": "date",
+          "purpose": "R7 legacy stale flag (D2)",
+          "required": true
+        },
+        {
+          "name": "Type",
+          "type": "picklist",
+          "purpose": "R7 new or existing business",
+          "required": true
+        },
+        {
+          "name": "LeadSource",
+          "type": "picklist",
+          "purpose": "R7 introduced-by and channel (D7)",
+          "required": true
+        },
+        {
+          "name": "Description",
+          "type": "textarea",
+          "purpose": "R7 enquiry detail",
+          "required": true
+        },
+        {
+          "name": "OwnerId",
+          "type": "reference",
+          "purpose": "R12 enquiry owner; M3 owner reconciliation",
+          "referenceTo": [
+            "User"
+          ],
+          "required": true
+        },
+        {
+          "name": "IsClosed",
+          "type": "boolean",
+          "purpose": "R7 stage mapping",
+          "required": true
+        },
+        {
+          "name": "IsWon",
+          "type": "boolean",
+          "purpose": "R7 stage mapping",
+          "required": true
+        },
+        {
+          "name": "Loss_Reason__c",
+          "type": "picklist",
+          "purpose": "R7 loss reason (D3)",
+          "required": true
+        },
+        {
+          "name": "Paid_geneology_enquiry__c",
+          "type": "picklist",
+          "purpose": "R7 enquiry category",
+          "required": true
+        },
+        {
+          "name": "Opportunity_Service__c",
+          "type": "picklist",
+          "purpose": "R7 service type reference list",
+          "required": false
+        },
+        {
+          "name": "Post_code__c",
+          "type": "string",
+          "purpose": "R7 postcode",
+          "required": false
+        },
+        {
+          "name": "Key_Information__c",
+          "type": "textarea",
+          "purpose": "R7 key information",
+          "required": false
+        },
+        {
+          "name": "IsDeleted",
+          "type": "boolean",
+          "purpose": "M3 deletion class (current versus soft-deleted)",
+          "required": true
+        },
+        {
+          "name": "CreatedDate",
+          "type": "datetime",
+          "purpose": "M2 provenance (sfCreatedDate)",
+          "required": true
+        },
+        {
+          "name": "CreatedById",
+          "type": "reference",
+          "purpose": "M2 provenance (sfCreatedById)",
+          "referenceTo": [
+            "User"
+          ],
+          "required": true
+        },
+        {
+          "name": "LastModifiedDate",
+          "type": "datetime",
+          "purpose": "M3 reconciliation",
+          "required": true
+        },
+        {
+          "name": "SystemModstamp",
+          "type": "datetime",
+          "purpose": "M3 change key for catch-up passes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "OpportunityContactRole",
+      "ownerCheck": false,
+      "softDelete": true,
+      "changeKey": "SystemModstamp",
+      "fields": [
+        {
+          "name": "Id",
+          "type": "id",
+          "purpose": "M2 key; R7 enquiry contacts",
+          "required": true
+        },
+        {
+          "name": "OpportunityId",
+          "type": "reference",
+          "purpose": "R7 enquiry contacts",
+          "referenceTo": [
+            "Opportunity"
+          ],
+          "required": true
+        },
+        {
+          "name": "ContactId",
+          "type": "reference",
+          "purpose": "R7 enquiry contacts",
+          "referenceTo": [
+            "Contact"
+          ],
+          "required": true
+        },
+        {
+          "name": "Role",
+          "type": "picklist",
+          "purpose": "R7 enquiry contact role",
+          "required": true
+        },
+        {
+          "name": "IsPrimary",
+          "type": "boolean",
+          "purpose": "R7 enquiry contacts",
+          "required": true
+        },
+        {
+          "name": "IsDeleted",
+          "type": "boolean",
+          "purpose": "M3 deletion class (current versus soft-deleted)",
+          "required": true
+        },
+        {
+          "name": "CreatedDate",
+          "type": "datetime",
+          "purpose": "M2 provenance",
+          "required": true
+        },
+        {
+          "name": "SystemModstamp",
+          "type": "datetime",
+          "purpose": "M3 change key for catch-up passes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "Task",
+      "ownerCheck": true,
+      "softDelete": true,
+      "changeKey": "SystemModstamp",
+      "fields": [
+        {
+          "name": "Id",
+          "type": "id",
+          "purpose": "M2 key; R9 activities",
+          "required": true
+        },
+        {
+          "name": "AccountId",
+          "type": "reference",
+          "purpose": "R9 activity firm",
+          "referenceTo": [
+            "Account"
+          ],
+          "required": true
+        },
+        {
+          "name": "WhoId",
+          "type": "reference",
+          "purpose": "R9 activity contact",
+          "referenceTo": [
+            "Contact",
+            "Lead"
+          ],
+          "required": true
+        },
+        {
+          "name": "WhatId",
+          "type": "reference",
+          "purpose": "R9 activity parent (enquiry or firm)",
+          "referenceTo": [
+            "Account",
+            "Opportunity"
+          ],
+          "referenceMatch": "superset",
+          "required": true
+        },
+        {
+          "name": "OwnerId",
+          "type": "reference",
+          "purpose": "R9 assigned user; M3 owner reconciliation",
+          "referenceTo": [
+            "Group",
+            "User"
+          ],
+          "required": true
+        },
+        {
+          "name": "Subject",
+          "type": "combobox",
+          "purpose": "R9 activities",
+          "required": true
+        },
+        {
+          "name": "Status",
+          "type": "picklist",
+          "purpose": "R9 activities",
+          "required": true
+        },
+        {
+          "name": "Priority",
+          "type": "picklist",
+          "purpose": "R9 activities",
+          "required": true
+        },
+        {
+          "name": "ActivityDate",
+          "type": "date",
+          "purpose": "R9 follow-ups",
+          "required": true
+        },
+        {
+          "name": "Description",
+          "type": "textarea",
+          "purpose": "R9 activities; R11 logged email body",
+          "required": true
+        },
+        {
+          "name": "TaskSubtype",
+          "type": "picklist",
+          "purpose": "R9 call, email or task",
+          "required": true
+        },
+        {
+          "name": "CallType",
+          "type": "picklist",
+          "purpose": "R9 calls",
+          "required": true
+        },
+        {
+          "name": "CallDurationInSeconds",
+          "type": "int",
+          "purpose": "R9 calls",
+          "required": true
+        },
+        {
+          "name": "CallDisposition",
+          "type": "string",
+          "purpose": "R9 calls",
+          "required": true
+        },
+        {
+          "name": "CompletedDateTime",
+          "type": "datetime",
+          "purpose": "R9 activities",
+          "required": true
+        },
+        {
+          "name": "IsClosed",
+          "type": "boolean",
+          "purpose": "R9 open work",
+          "required": true
+        },
+        {
+          "name": "IsArchived",
+          "type": "boolean",
+          "purpose": "M3 archived activities (queryAll only)",
+          "required": false
+        },
+        {
+          "name": "IsRecurrence",
+          "type": "boolean",
+          "purpose": "R9 recurrence",
+          "required": true
+        },
+        {
+          "name": "IsDeleted",
+          "type": "boolean",
+          "purpose": "M3 deletion class (current versus soft-deleted)",
+          "required": true
+        },
+        {
+          "name": "CreatedDate",
+          "type": "datetime",
+          "purpose": "M2 provenance (sfCreatedDate)",
+          "required": true
+        },
+        {
+          "name": "CreatedById",
+          "type": "reference",
+          "purpose": "M2 provenance (sfCreatedById)",
+          "referenceTo": [
+            "User"
+          ],
+          "required": true
+        },
+        {
+          "name": "LastModifiedDate",
+          "type": "datetime",
+          "purpose": "M3 reconciliation",
+          "required": true
+        },
+        {
+          "name": "SystemModstamp",
+          "type": "datetime",
+          "purpose": "M3 change key for catch-up passes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "Event",
+      "ownerCheck": true,
+      "softDelete": true,
+      "changeKey": "SystemModstamp",
+      "fields": [
+        {
+          "name": "Id",
+          "type": "id",
+          "purpose": "M2 key; R9 activities",
+          "required": true
+        },
+        {
+          "name": "AccountId",
+          "type": "reference",
+          "purpose": "R9 activity firm",
+          "referenceTo": [
+            "Account"
+          ],
+          "required": true
+        },
+        {
+          "name": "WhoId",
+          "type": "reference",
+          "purpose": "R9 activity contact",
+          "referenceTo": [
+            "Contact",
+            "Lead"
+          ],
+          "required": true
+        },
+        {
+          "name": "WhatId",
+          "type": "reference",
+          "purpose": "R9 activity parent (enquiry or firm)",
+          "referenceTo": [
+            "Account",
+            "Opportunity"
+          ],
+          "referenceMatch": "superset",
+          "required": true
+        },
+        {
+          "name": "OwnerId",
+          "type": "reference",
+          "purpose": "R9 assigned user; M3 owner reconciliation",
+          "referenceTo": [
+            "Calendar",
+            "User"
+          ],
+          "required": true
+        },
+        {
+          "name": "Subject",
+          "type": "combobox",
+          "purpose": "R9 meetings and presentations",
+          "required": true
+        },
+        {
+          "name": "Type",
+          "type": "picklist",
+          "purpose": "R9 meeting type (D10)",
+          "required": true
+        },
+        {
+          "name": "Location",
+          "type": "string",
+          "purpose": "R9 meetings",
+          "required": true
+        },
+        {
+          "name": "Description",
+          "type": "textarea",
+          "purpose": "R9 meetings",
+          "required": true
+        },
+        {
+          "name": "StartDateTime",
+          "type": "datetime",
+          "purpose": "R9 calendar",
+          "required": true
+        },
+        {
+          "name": "EndDateTime",
+          "type": "datetime",
+          "purpose": "R9 calendar",
+          "required": true
+        },
+        {
+          "name": "ActivityDateTime",
+          "type": "datetime",
+          "purpose": "R9 calendar",
+          "required": true
+        },
+        {
+          "name": "IsAllDayEvent",
+          "type": "boolean",
+          "purpose": "R9 calendar",
+          "required": true
+        },
+        {
+          "name": "DurationInMinutes",
+          "type": "int",
+          "purpose": "R9 calendar",
+          "required": true
+        },
+        {
+          "name": "IsArchived",
+          "type": "boolean",
+          "purpose": "M3 archived activities (queryAll only)",
+          "required": false
+        },
+        {
+          "name": "IsRecurrence",
+          "type": "boolean",
+          "purpose": "R9 recurrence",
+          "required": true
+        },
+        {
+          "name": "IsDeleted",
+          "type": "boolean",
+          "purpose": "M3 deletion class (current versus soft-deleted)",
+          "required": true
+        },
+        {
+          "name": "CreatedDate",
+          "type": "datetime",
+          "purpose": "M2 provenance (sfCreatedDate)",
+          "required": true
+        },
+        {
+          "name": "CreatedById",
+          "type": "reference",
+          "purpose": "M2 provenance (sfCreatedById)",
+          "referenceTo": [
+            "User"
+          ],
+          "required": true
+        },
+        {
+          "name": "LastModifiedDate",
+          "type": "datetime",
+          "purpose": "M3 reconciliation",
+          "required": true
+        },
+        {
+          "name": "SystemModstamp",
+          "type": "datetime",
+          "purpose": "M3 change key for catch-up passes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "EmailMessage",
+      "ownerCheck": false,
+      "softDelete": true,
+      "changeKey": "SystemModstamp",
+      "fields": [
+        {
+          "name": "Id",
+          "type": "id",
+          "purpose": "M2 key; R11 historic emails",
+          "required": true
+        },
+        {
+          "name": "ParentId",
+          "type": "reference",
+          "purpose": "R11 email parent",
+          "referenceTo": [
+            "Case"
+          ],
+          "required": true
+        },
+        {
+          "name": "ActivityId",
+          "type": "reference",
+          "purpose": "R11 email task link",
+          "referenceTo": [
+            "Task"
+          ],
+          "required": true
+        },
+        {
+          "name": "RelatedToId",
+          "type": "reference",
+          "purpose": "R11 email to enquiry or firm",
+          "referenceTo": [
+            "Account",
+            "Opportunity"
+          ],
+          "referenceMatch": "superset",
+          "required": true
+        },
+        {
+          "name": "Subject",
+          "type": "string",
+          "purpose": "R11 historic emails",
+          "required": true
+        },
+        {
+          "name": "TextBody",
+          "type": "textarea",
+          "purpose": "R11 email body (body only, D5)",
+          "required": true
+        },
+        {
+          "name": "FromName",
+          "type": "string",
+          "purpose": "R11 email headers",
+          "required": true
+        },
+        {
+          "name": "FromAddress",
+          "type": "email",
+          "purpose": "R11 email headers",
+          "required": true
+        },
+        {
+          "name": "ToAddress",
+          "type": "string",
+          "purpose": "R11 email headers",
+          "required": true
+        },
+        {
+          "name": "CcAddress",
+          "type": "string",
+          "purpose": "R11 email headers",
+          "required": true
+        },
+        {
+          "name": "MessageDate",
+          "type": "datetime",
+          "purpose": "R11 email headers",
+          "required": true
+        },
+        {
+          "name": "Incoming",
+          "type": "boolean",
+          "purpose": "R11 direction",
+          "required": true
+        },
+        {
+          "name": "Status",
+          "type": "picklist",
+          "purpose": "R11 archived status",
+          "required": true
+        },
+        {
+          "name": "MessageIdentifier",
+          "type": "string",
+          "purpose": "R10 Message-ID de-duplication",
+          "required": false
+        },
+        {
+          "name": "ThreadIdentifier",
+          "type": "string",
+          "purpose": "R11 threading",
+          "required": false
+        },
+        {
+          "name": "HasAttachment",
+          "type": "boolean",
+          "purpose": "R11 attachment names only (D5)",
+          "required": true
+        },
+        {
+          "name": "IsDeleted",
+          "type": "boolean",
+          "purpose": "M3 deletion class (current versus soft-deleted)",
+          "required": true
+        },
+        {
+          "name": "CreatedDate",
+          "type": "datetime",
+          "purpose": "M2 provenance (sfCreatedDate)",
+          "required": true
+        },
+        {
+          "name": "CreatedById",
+          "type": "reference",
+          "purpose": "M2 provenance (sfCreatedById)",
+          "referenceTo": [
+            "User"
+          ],
+          "required": true
+        },
+        {
+          "name": "LastModifiedDate",
+          "type": "datetime",
+          "purpose": "M3 reconciliation",
+          "required": true
+        },
+        {
+          "name": "SystemModstamp",
+          "type": "datetime",
+          "purpose": "M3 change key for catch-up passes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "EmailMessageRelation",
+      "ownerCheck": false,
+      "softDelete": false,
+      "changeKey": "SystemModstamp",
+      "fields": [
+        {
+          "name": "Id",
+          "type": "id",
+          "purpose": "M2 key; R11 sender and recipient matching",
+          "required": true
+        },
+        {
+          "name": "EmailMessageId",
+          "type": "reference",
+          "purpose": "R11 sender and recipient matching",
+          "referenceTo": [
+            "EmailMessage"
+          ],
+          "required": true
+        },
+        {
+          "name": "RelationId",
+          "type": "reference",
+          "purpose": "R11 sender and recipient matching",
+          "referenceTo": [
+            "Contact",
+            "User"
+          ],
+          "referenceMatch": "superset",
+          "required": true
+        },
+        {
+          "name": "RelationType",
+          "type": "picklist",
+          "purpose": "R11 sender and recipient matching",
+          "required": true
+        },
+        {
+          "name": "RelationAddress",
+          "type": "email",
+          "purpose": "R11 unknown senders allowed",
+          "required": true
+        },
+        {
+          "name": "RelationObjectType",
+          "type": "string",
+          "purpose": "R11 sender and recipient matching",
+          "required": true
+        },
+        {
+          "name": "CreatedDate",
+          "type": "datetime",
+          "purpose": "M2 provenance",
+          "required": true
+        },
+        {
+          "name": "SystemModstamp",
+          "type": "datetime",
+          "purpose": "M3 change key for catch-up passes",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "Note",
+      "ownerCheck": true,
+      "softDelete": true,
+      "changeKey": "SystemModstamp",
+      "fields": [
+        {
+          "name": "Id",
+          "type": "id",
+          "purpose": "M2 key; M5 legacy notes (D6)",
+          "required": true
+        },
+        {
+          "name": "ParentId",
+          "type": "reference",
+          "purpose": "M5 legacy notes parent",
+          "referenceTo": [
+            "Account",
+            "Contact",
+            "Opportunity"
+          ],
+          "referenceMatch": "superset",
+          "required": true
+        },
+        {
+          "name": "Title",
+          "type": "string",
+          "purpose": "M5 legacy notes",
+          "required": true
+        },
+        {
+          "name": "Body",
+          "type": "textarea",
+          "purpose": "M5 legacy notes",
+          "required": true
+        },
+        {
+          "name": "OwnerId",
+          "type": "reference",
+          "purpose": "M5 legacy notes; M3 owner reconciliation",
+          "referenceTo": [
+            "User"
+          ],
+          "required": true
+        },
+        {
+          "name": "IsPrivate",
+          "type": "boolean",
+          "purpose": "M5 private notes visibility",
+          "required": true
+        },
+        {
+          "name": "IsDeleted",
+          "type": "boolean",
+          "purpose": "M3 deletion class (current versus soft-deleted)",
+          "required": true
+        },
+        {
+          "name": "CreatedDate",
+          "type": "datetime",
+          "purpose": "M2 provenance",
+          "required": true
+        },
+        {
+          "name": "LastModifiedDate",
+          "type": "datetime",
+          "purpose": "M3 reconciliation",
+          "required": true
+        },
+        {
+          "name": "SystemModstamp",
+          "type": "datetime",
+          "purpose": "M3 change key for catch-up passes",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

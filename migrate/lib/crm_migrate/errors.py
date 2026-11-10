@@ -1,0 +1,102 @@
+"""Exceptions whose text is safe to print.
+
+An exception message never contains a record value, a response body, a token or a
+secret. It is built only from a fixed code, an HTTP status, a validated Salesforce
+``errorCode`` and an optional detail that must match a conservative character set
+(contract object and field names, counts).
+"""
+
+import re
+
+_DETAIL_RE = re.compile(r"^[A-Za-z0-9_.,:=/ ()<>\[\]-]{0,400}$")
+_SF_ERROR_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+
+
+def safe_sf_error_code(value):
+    """Return a Salesforce errorCode if it has the documented shape, else ``UNKNOWN``."""
+    if isinstance(value, str) and _SF_ERROR_RE.match(value):
+        return value
+    return "UNKNOWN"
+
+
+class MigrateError(Exception):
+    """Base error. ``code`` is a fixed identifier from this package."""
+
+    code = "error"
+    exit_code = 1
+
+    def __init__(self, code=None, *, detail=None, status=None, sf_error=None):
+        self.code = code or type(self).code
+        self.status = status if isinstance(status, int) else None
+        self.sf_error = safe_sf_error_code(sf_error) if sf_error is not None else None
+        if detail is not None and not (isinstance(detail, str) and _DETAIL_RE.match(detail)):
+            detail = "<redacted>"
+        self.detail = detail
+        super().__init__(self.safe_message())
+
+    def safe_message(self):
+        parts = [f"code={self.code}"]
+        if self.status is not None:
+            parts.append(f"status={self.status}")
+        if self.sf_error is not None:
+            parts.append(f"sf_error={self.sf_error}")
+        if self.detail:
+            parts.append(f"detail={self.detail}")
+        return " ".join(parts)
+
+
+class ConfigError(MigrateError):
+    code = "config_error"
+    exit_code = 2
+
+
+class ContractError(MigrateError):
+    code = "contract_error"
+    exit_code = 2
+
+
+class RefusedRequest(MigrateError):
+    """A request outside the read-only allowlist. Raised before any transport call."""
+
+    code = "request_refused"
+    exit_code = 4
+
+
+class OriginError(MigrateError):
+    code = "origin_refused"
+    exit_code = 4
+
+
+class RedirectRefused(MigrateError):
+    code = "redirect_refused"
+    exit_code = 4
+
+
+class ResponseTooLarge(MigrateError):
+    code = "response_too_large"
+    exit_code = 4
+
+
+class HttpError(MigrateError):
+    code = "http_error"
+    exit_code = 4
+
+
+class ProtocolError(MigrateError):
+    code = "protocol_error"
+    exit_code = 4
+
+
+class GateFailed(MigrateError):
+    code = "metadata_gate_failed"
+    exit_code = 3
+
+
+class OutputError(MigrateError):
+    code = "output_error"
+    exit_code = 2
+
+
+class SnapshotError(MigrateError):
+    code = "snapshot_error"
+    exit_code = 5

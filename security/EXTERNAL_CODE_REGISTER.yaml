@@ -23,3 +23,11 @@ candidates:
     licence: GPL-2.0
     usage: CRM database, dev environment, CRM-001
     approval: none
+  - name: python
+    origin: https://hub.docker.com/_/python   # image: docker.io/library/python
+    version: "3.13.9-slim-trixie"
+    digest: "sha256:326df678c20c78d465db501563f3492d17c42a4afe33a1f2bf5406a1d56b0e86"   # pinned in deploy/migrate/compose.json
+    licence: PSF-2.0
+    usage: crm-migrate extractor (CRM-002)
+    approval: none
+    notes: "Used unmodified; no image is built. Runs python -I -B with the read-only migrate/ mount; standard library only."
