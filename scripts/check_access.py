@@ -285,6 +285,7 @@ def validate_upstream_sources(value):
         return ["CRM_BETA_UPSTREAM_SOURCES is empty"]
     if not re.fullmatch(r"[0-9./ ]+", value):
         return ["CRM_BETA_UPSTREAM_SOURCES may contain only IPv4 /32s separated by spaces"]
+    # Exactly a.b.c.d or a.b.c.d/32 per entry (a bare trailing "/" is refused).
     tokens = value.split()
     out = []
     if len(tokens) > MAX_UPSTREAM_SOURCES:
@@ -292,10 +293,11 @@ def validate_upstream_sources(value):
                    f"{MAX_UPSTREAM_SOURCES} are allowed")
     for i, token in enumerate(tokens, start=1):
         where = f"CRM_BETA_UPSTREAM_SOURCES entry {i}"
-        address, _, prefix = token.partition("/")
-        if prefix not in ("", "32"):
-            out.append(f"{where} is not a single host (/32)")
+        m = re.fullmatch(r"([0-9.]+)(/32)?", token)
+        if not m:
+            out.append(f"{where} is not a single host (exactly a.b.c.d or a.b.c.d/32)")
             continue
+        address = m.group(1)
         addr = _ipv4(address)
         if addr is None:
             out.append(f"{where} is not an IPv4 address")
@@ -335,6 +337,60 @@ def validate_beta(values):
     return errors
 
 
+# Bind sources deploy/beta/compose.json may use: the env-file path variables
+# (checked against $CRM_RUNTIME_DIR by require_runtime_paths and the resolved
+# config by require_compose_mounts), literal paths under the beta runtime, and
+# relative paths inside the release directory.
+BETA_BIND_VAR = re.compile(r"\$\{CRM_(DB|DATA|CUSTOM|CLIENT_CUSTOM)_DIR:\?[^}]*\}")
+
+
+def _bind_source_ok(src):
+    if not isinstance(src, str) or "docker.sock" in src or ".." in src.split("/"):
+        return False
+    if BETA_BIND_VAR.fullmatch(src):
+        return True
+    if src.startswith(BETA_DEFAULT_RUNTIME + "/") and "$" not in src:
+        return True
+    return src.startswith("./") and "$" not in src and "//" not in src
+
+
+def _beta_resources_errors(doc, services):
+    """No external or named networks/volumes, no bind source outside the beta
+    runtime or the release directory, never docker.sock."""
+    out = []
+    for kind in ("networks", "volumes"):
+        top = doc.get(kind) or {}
+        if not isinstance(top, dict):
+            out.append(f"beta compose top-level {kind} is not a mapping")
+            continue
+        for name, spec in top.items():
+            if spec is not None and not isinstance(spec, dict):
+                out.append(f"beta compose {kind[:-1]} {name}: not a mapping")
+            elif spec and ("external" in spec or "name" in spec):
+                out.append(f"beta compose {kind[:-1]} {name}: external or named {kind} are refused")
+    if doc.get("volumes"):
+        out.append("beta compose declares named volumes; crm-beta uses bind mounts only")
+    if "docker.sock" in json.dumps(doc):
+        out.append("beta compose mentions docker.sock")
+    for name, svc in services.items():
+        if not isinstance(svc, dict):
+            continue
+        for vol in svc.get("volumes") or []:
+            if isinstance(vol, str):
+                src, typ = vol.split(":", 1)[0], ("bind" if vol[:1] in "./$~" else "volume")
+            elif isinstance(vol, dict):
+                src, typ = vol.get("source"), vol.get("type")
+            else:
+                out.append(f"{name}: unreadable volume entry")
+                continue
+            if typ != "bind":
+                out.append(f"{name}: {typ!r} mount refused; crm-beta uses bind mounts only")
+            elif not _bind_source_ok(src):
+                out.append(f"{name}: bind source {src!r} is outside the beta runtime and the "
+                           "release directory")
+    return out
+
+
 def check_beta_compose(doc):
     """The beta bind policy, on deploy/beta/compose.json: crm-app publishes
     exactly 127.0.0.1:${CRM_BETA_APP_PORT}:80, the edge runs hardened on the host
@@ -358,6 +414,7 @@ def check_beta_compose(doc):
             out.append(f"{name}: publishes ports; only crm-app may (on loopback)")
         if svc.get("network_mode") == "host" and name != EDGE_SERVICE:
             out.append(f"{name}: network_mode host is allowed for {EDGE_SERVICE} only")
+    out += _beta_resources_errors(doc, services)
     edge = services.get(EDGE_SERVICE)
     if not isinstance(edge, dict):
         return out + [f"{EDGE_SERVICE} service missing"]
@@ -371,26 +428,82 @@ def check_beta_compose(doc):
         out.append(f"{EDGE_SERVICE} adds capabilities; its port is unprivileged, so none are needed")
     if "no-new-privileges:true" not in (edge.get("security_opt") or []):
         out.append(f"{EDGE_SERVICE} must set no-new-privileges")
-    if edge.get("user") in ("root", "0", "0:0"):
-        out.append(f"{EDGE_SERVICE} must not run as root")
+    user = edge.get("user")
+    uid = str(user).split(":", 1)[0].strip() if user is not None else ""
+    if user is None or uid == "":
+        out.append(f"{EDGE_SERVICE} must set a non-root user")
+    elif uid == "root" or re.fullmatch(r"\+?0+", uid):
+        out.append(f"{EDGE_SERVICE} must not run as root (uid 0 in any form)")
     if edge.get("privileged"):
         out.append(f"{EDGE_SERVICE} must not be privileged")
     return out
 
 
 def _edge_lines(text):
+    """Non-comment lines, each with any run of spaces or tabs as one space."""
     out = []
     for raw in text.splitlines():
-        line = raw.split("#", 1)[0].strip()
+        line = " ".join(raw.split("#", 1)[0].split())
         if line:
             out.append(line)
+    return out
+
+
+# The sections and directives the template uses; nothing else is accepted.
+EDGE_SECTIONS = {
+    "global": {"log", "maxconn"},
+    "defaults": {"mode", "log", "option", "timeout"},
+    "frontend crm_beta_edge": {"bind", "acl", "http-request", "default_backend"},
+    "backend crm_beta_app": {"option", "server"},
+}
+EDGE_OPTIONS = {"defaults": {"option httplog"}, "backend crm_beta_app": {"option forwardfor"}}
+EDGE_HTTP_REQUEST_ACTIONS = {"del-header", "deny"}
+
+
+def _edge_structure_errors(lines):
+    out, section, seen = [], None, []
+    for line in lines:
+        word = line.split()[0]
+        if word in ("global", "defaults", "frontend", "backend", "listen", "userlist",
+                    "peers", "resolvers", "mailers", "program", "cache", "ring",
+                    "http-errors", "fcgi-app"):
+            section = line
+            if section not in EDGE_SECTIONS:
+                out.append(f"edge section not allowed: {line}")
+            elif section in seen:
+                out.append(f"edge section repeated: {line}")
+            seen.append(section)
+            continue
+        if section is None:
+            out.append(f"edge directive outside any section: {line}")
+            continue
+        allowed = EDGE_SECTIONS.get(section)
+        if allowed is None:
+            continue  # the section itself is already refused
+        if word == "use_backend":
+            out.append("edge must not use use_backend (only default_backend crm_beta_app)")
+        elif word not in allowed:
+            out.append(f"edge directive not allowed in '{section}': {word}")
+        elif word == "option" and line not in EDGE_OPTIONS.get(section, set()):
+            out.append(f"edge option not allowed in '{section}': {line}")
+        elif word == "http-request":
+            action = line.split()[1] if len(line.split()) > 1 else ""
+            if action not in EDGE_HTTP_REQUEST_ACTIONS:
+                out.append(f"edge http-request action not allowed: {action or '<none>'}")
+        elif word == "default_backend" and line != "default_backend crm_beta_app":
+            out.append("edge default_backend must be crm_beta_app")
+        elif word == "mode" and line != "mode http":
+            out.append(f"edge must run in mode http, not '{line}'")
+    if set(seen) != set(EDGE_SECTIONS):
+        out.append("edge must have exactly the sections global, defaults, "
+                   "frontend crm_beta_edge and backend crm_beta_app")
     return out
 
 
 def check_edge_config(text):
     """The edge policy, on rendered HAProxy configuration text. [] = acceptable."""
     lines = _edge_lines(text)
-    out = []
+    out = _edge_structure_errors(lines)
     binds = [l for l in lines if l.split()[0] == "bind"]
     if len(binds) != 1:
         out.append(f"edge must have exactly one bind line (found {len(binds)})")
@@ -430,8 +543,6 @@ def check_edge_config(text):
         if re.search(r"(?i)x-forwarded|forwarded", l) and "set-header" in l \
                 and not l.endswith(" if trusted_upstream"):
             out.append("a forwarded header is set without the trusted_upstream condition")
-    if "http-request set-header X-Forwarded-Proto https if trusted_upstream" not in lines:
-        out.append("edge must set X-Forwarded-Proto https for trusted sources")
     if any(l.startswith("tcp-request") or l.startswith("http-request allow") for l in lines):
         out.append("edge must not use tcp-request or http-request allow rules")
     fwd = [l for l in lines if l.startswith("option forwardfor")]
@@ -439,6 +550,8 @@ def check_edge_config(text):
         out.append("edge must have exactly one plain 'option forwardfor' (after the deny, so "
                    "only trusted requests carry it)")
     servers = [l.split() for l in lines if l.startswith("server ")]
+    if len(servers) > 1:
+        out.append(f"edge must have exactly one server (found {len(servers)})")
     if len(servers) != 1 or len(servers[0]) < 3 or not re.fullmatch(
             r"127\.0\.0\.1:[0-9]{4,5}", servers[0][2]) \
             or validate_port("edge server port", servers[0][2].rsplit(":", 1)[1]):

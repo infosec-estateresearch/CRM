@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
 # Clean-host deploy of a release bundle into crm-beta (CRM-007, PBI-017).
-# Run as root at the operator stage. In order, any failure stops the deploy:
-#  1. verify the bundle and its RELEASE.json (scripts/release.py verify);
+# Run as root at the operator stage. --sha256 HEX (the bundle digest from the
+# release record) is mandatory: RELEASE.json sits inside the bundle and is not
+# signed, so only that outside digest anchors it. Without a well-formed
+# --sha256 the script stops before step 1 (no docker call, no deploy dir).
+# In order, any failure stops the deploy:
+#  1. copy the bundle into a root-only private temp file, check the copy's
+#     sha256 against --sha256, verify that same copy (scripts/release.py
+#     verify --sha256); every later step uses only the copy;
 #  2. refuse a non-empty beta runtime unless --upgrade: "empty" means nothing
 #     but the operator's env file (root, 0600) is in /srv/CRM/runtime/beta;
-#  3. unpack into /srv/CRM/deploy/<shortsha>, root-owned and read-only;
+#  3. unpack the copy into /srv/CRM/deploy/<shortsha>, root-owned and read-only,
+#     after re-checking every unpacked file against RELEASE.json (release.py
+#     verify-tree: no extra, missing or changed file); with --upgrade and an
+#     existing /srv/CRM/deploy/<shortsha>, that tree is re-checked the same way
+#     and any difference or extra file refuses the deploy;
 #  4. create the runtime (root 0700: db, data, custom, client/custom, backups);
 #  5. from the unpacked release: check_access.py beta --render (edge config),
 #     up.sh beta, deploy_custom.sh beta;
@@ -21,16 +31,34 @@
 #
 # Every step is a function, so tests/unit/test_beta.py can source this file
 # (nothing runs when sourced) and drive one step with stubbed docker/python3.
-# Usage: scripts/deploy_release.sh beta <bundle> [--sha256 HEX] [--upgrade]
+# Usage: scripts/deploy_release.sh beta <bundle> --sha256 HEX [--upgrade]
 set -euo pipefail
 # shellcheck source=lib/common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
 # Bundle verification, from the checkout running this script (never from the
 # bundle itself, which is not yet trusted).
+# verify_bundle <bundle> <sha256> <private dir>: copies the bundle into the
+# root-only private directory (0700, file 0600), checks the copy's sha256 and
+# verifies that same copy. Prints the copy's path; later steps read only it.
 verify_bundle() {
-    python3 -I "$CRM_REPO_DIR/scripts/release.py" verify "$1" "${@:2}" \
+    local bundle=$1 sha=$2 dir=$3 copy got
+    [ -f "$bundle" ] && [ ! -L "$bundle" ] || die "refusing to deploy: not a regular file: $bundle"
+    [ -d "$dir" ] && [ ! -L "$dir" ] && [ "$(stat -c '%a' -- "$dir")" = 700 ] \
+        || die "refusing to deploy: the private staging directory is not 0700: $dir"
+    copy="$dir/$(basename -- "$bundle")"
+    (umask 077 && cp -- "$bundle" "$copy") || die "refusing to deploy: cannot copy the bundle"
+    chmod 0600 -- "$copy"
+    got=$(sha256sum < "$copy" | cut -d" " -f1)
+    [ "$got" = "$sha" ] || die "refusing to deploy: the bundle's sha256 does not match --sha256"
+    python3 -I "$CRM_REPO_DIR/scripts/release.py" verify "$copy" --sha256 "$sha" >&2 \
         || die "refusing to deploy: the bundle failed verification"
+    echo "$copy"
+}
+
+# verify_tree <dir> <bundle copy> <sha256>: exactly the bundle's files.
+verify_tree() {
+    python3 -I "$CRM_REPO_DIR/scripts/release.py" verify-tree "$1" "$2" --sha256 "$3" >&2
 }
 
 # The runtime holds only the operator's env file (root, 0600) unless --upgrade.
@@ -49,17 +77,26 @@ check_runtime_empty() {
     fi
 }
 
-# unpack_release <bundle> <short> <upgrade>: prints the release directory.
+# unpack_release <bundle copy> <short> <upgrade> <sha256>: prints the release directory.
 unpack_release() {
-    local bundle=$1 short=$2 upgrade=$3 dest staging
+    local bundle=$1 short=$2 upgrade=$3 sha=$4 dest staging
     dest="$CRM_DEPLOY_ROOT/$short"
     umask 022
     mkdir -p -- "$CRM_DEPLOY_ROOT"
     if [ -e "$dest" ] || [ -L "$dest" ]; then
         [ -n "$upgrade" ] || die "refusing to deploy: $dest already exists"
+        verify_tree "$dest" "$bundle" "$sha" \
+            || die "refusing to deploy: the existing $dest differs from the bundle's RELEASE.json"
     else
-        staging=$(mktemp -d "$CRM_DEPLOY_ROOT/.unpack-XXXXXX")
+        staging=$(umask 077 && mktemp -d "$CRM_DEPLOY_ROOT/.unpack-XXXXXX")
         tar -xzf "$bundle" -C "$staging" --no-same-owner --no-same-permissions
+        if [ "$(ls -A -- "$staging")" != "crm-release-$short" ] \
+                || ! verify_tree "$staging/crm-release-$short" "$bundle" "$sha"; then
+            chmod -R u+w -- "$staging"
+            rm -rf -- "$staging"
+            die "refusing to deploy: the unpacked files differ from the bundle's RELEASE.json"
+        fi
+        chmod 0755 -- "$staging"
         mv -T -- "$staging/crm-release-$short" "$dest"
         rmdir -- "$staging"
         chown -R 0:0 -- "$dest"
@@ -183,22 +220,26 @@ print(json.dumps(m, indent=2, sort_keys=True))
 }
 
 main() {
-    local bundle upgrade= sha=() short dest report
+    local bundle upgrade= sha= short dest report copy
     [ "${1:-}" = beta ] || {
         echo "$(basename "$0"): refusing to run: target environment must be 'beta' (got '${1:-<none>}')" >&2
         exit 2
     }
     bundle=${2:-}
-    [ -n "$bundle" ] || die "usage: $(basename "$0") beta <bundle> [--sha256 HEX] [--upgrade]"
+    [ -n "$bundle" ] || die "usage: $(basename "$0") beta <bundle> --sha256 HEX [--upgrade]"
     shift 2
     while [ $# -gt 0 ]; do
         case "$1" in
             --upgrade) upgrade=1 ;;
-            --sha256) sha=(--sha256 "${2:?--sha256 needs a value}"); shift ;;
+            --sha256) [ $# -ge 2 ] || die "--sha256 needs a value"; sha=$2; shift ;;
             *) die "unknown argument: $1" ;;
         esac
         shift
     done
+    # The bundle's digest from the release record anchors it (RELEASE.json is
+    # inside the bundle and unsigned): mandatory and well-formed, before step 1.
+    [[ "$sha" =~ ^[0-9a-f]{64}$ ]] \
+        || die "refusing to deploy: --sha256 HEX (64 lower-case hex digits, from the release record) is required"
     [ "$(id -u)" = 0 ] || die "refusing to run: deploy_release.sh must run as root"
     CRM_RUNTIME_DIR=${CRM_RUNTIME_DIR:-/srv/CRM/runtime/beta}
     [ "$(basename "$CRM_RUNTIME_DIR")" = beta ] || {
@@ -208,10 +249,12 @@ main() {
     CRM_DEPLOY_ROOT=${CRM_DEPLOY_ROOT:-/srv/CRM/deploy}
     [ "$(basename "$CRM_DEPLOY_ROOT")" = deploy ] || die "refusing to run: deploy root is not named deploy: $CRM_DEPLOY_ROOT"
 
-    verify_bundle "$bundle" "${sha[@]}"                       # 1
+    CRM_STAGE_DIR=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/crm-deploy-XXXXXX")
+    trap 'rm -rf -- "$CRM_STAGE_DIR"' EXIT
+    copy=$(verify_bundle "$bundle" "$sha" "$CRM_STAGE_DIR")  # 1
     short=$(basename "$bundle" .tar.gz); short=${short#crm-release-}
     check_runtime_empty "$upgrade"                           # 2
-    dest=$(unpack_release "$bundle" "$short" "$upgrade")     # 3
+    dest=$(unpack_release "$copy" "$short" "$upgrade" "$sha")  # 3
     make_runtime                                             # 4
     load_env_names "$dest/deploy/beta/env.example"
     CRM_BETA_ENV_NAMES=("${CRM_ENV_NAMES[@]}")
@@ -221,7 +264,7 @@ main() {
     start_stack "$dest"
     configure_site "$dest"                                   # 6
     provision_and_accept "$dest"                             # 7
-    report=$(write_report "$dest" "$bundle" "$upgrade")      # 8
+    report=$(write_report "$dest" "$copy" "$upgrade")        # 8
     echo "deployed $short to crm-beta; report: $report"
 }
 

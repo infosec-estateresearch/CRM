@@ -127,8 +127,9 @@ require_access() {
 }
 
 # Fail closed unless $CRM_RUNTIME_DIR is an absolute path with no symlink in it
-# and the env file's bind-mount sources are exactly its data/, custom/ and
-# client/custom/, so the scripts and Compose work on the same directories.
+# and the env file's bind-mount sources are exactly its db/, data/, custom/ and
+# client/custom/, so the scripts and Compose work on the same directories (for
+# both targets: beta's database is never dev's, and the reverse).
 # The env file is read as text, never sourced. Then what Compose itself
 # resolves is checked too (require_compose_mounts), which is authoritative.
 require_runtime_paths() {
@@ -145,8 +146,9 @@ require_runtime_paths() {
     canon=$(realpath -e -- "$CRM_RUNTIME_DIR") || die "runtime directory missing: $CRM_RUNTIME_DIR"
     [ "$canon" = "$CRM_RUNTIME_DIR" ] \
         || die "runtime directory is not canonical (symlink, '.', '..' or trailing '/'): $CRM_RUNTIME_DIR -> $canon"
-    for name in CRM_DATA_DIR CRM_CUSTOM_DIR CRM_CLIENT_CUSTOM_DIR; do
+    for name in CRM_DB_DIR CRM_DATA_DIR CRM_CUSTOM_DIR CRM_CLIENT_CUSTOM_DIR; do
         case "$name" in
+            CRM_DB_DIR) rel=db ;;
             CRM_DATA_DIR) rel=data ;;
             CRM_CUSTOM_DIR) rel=custom ;;
             *) rel=client/custom ;;
@@ -174,8 +176,9 @@ require_runtime_paths() {
 }
 
 # Authoritative check: the bind sources Compose itself resolves for data/,
-# custom/ and client/custom/ on crm-app and crm-daemon must be exactly
-# $CRM_RUNTIME_DIR/{data,custom,client/custom} (only "." and repeated or
+# custom/ and client/custom/ on crm-app and crm-daemon, and for /var/lib/mysql
+# on crm-db, must be exactly $CRM_RUNTIME_DIR/{data,custom,client/custom,db}
+# (only "." and repeated or
 # trailing "/" may differ; no "..", no symlink). The resolved config holds the
 # secrets, so it goes straight from Compose into the parser, is never printed
 # or stored, and the parser reports only mount targets and sources.
@@ -190,11 +193,11 @@ try:
 except Exception:
     sys.exit("compose config did not produce a readable document")
 bad = []
-for svc in ("crm-app", "crm-daemon"):
+for svc, wanted in (("crm-app", want), ("crm-daemon", want), ("crm-db", {"/var/lib/mysql": "db"})):
     vols = services.get(svc)
     vols = vols.get("volumes") if isinstance(vols, dict) else None
     vols = vols if isinstance(vols, list) else []
-    for target, rel in want.items():
+    for target, rel in wanted.items():
         expected = runtime + "/" + rel
         found = [v for v in vols if isinstance(v, dict) and v.get("target") == target]
         if len(found) != 1:

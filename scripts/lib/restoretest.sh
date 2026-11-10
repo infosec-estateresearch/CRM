@@ -6,8 +6,10 @@
 #
 # Isolation (each is a guard below, unit-tested in tests/unit/test_beta.py):
 # - the project name, the Compose file and the runtime path are constants,
-#   never derived from input; the runtime path may be overridden (tests) only
-#   with another directory named beta-restoretest;
+#   never derived from input; the runtime path's parent must be exactly
+#   /srv/CRM/runtime. A test-only override (another directory named
+#   beta-restoretest) is allowed only under the tmp root /tmp, as a sibling of
+#   $CRM_RUNTIME_DIR;
 # - deploy/beta/restoretest/compose.json must pass the isolation policy
 #   (`check_access.py restoretest`): one crm-db, no published or exposed port,
 #   no bind mount, its own project-scoped volume and internal network;
@@ -20,6 +22,8 @@
 CRM_RT_PROJECT=crm-beta-restoretest
 CRM_RT_COMPOSE_FILE=$CRM_REPO_DIR/deploy/beta/restoretest/compose.json
 CRM_RT_DEFAULT_DIR=/srv/CRM/runtime/beta-restoretest
+CRM_RT_PARENT=/srv/CRM/runtime
+CRM_RT_TEST_ROOT=/tmp
 CRM_RT_SECRET_NAME=CRM_RESTORETEST_DB_ROOT_PASSWORD
 # The EspoCRM tables fingerprinted (live rows, deleted = 0).
 CRM_RT_TABLES=(account contact opportunity call meeting task email user team role)
@@ -51,6 +55,15 @@ rt_guard() {
         *) rt_refuse "runtime directory must be an absolute path: $CRM_RT_DIR" ;;
     esac
     parent=$(dirname -- "$CRM_RT_DIR")
+    case "$parent" in
+        "$CRM_RT_PARENT") ;;
+        "$CRM_RT_TEST_ROOT"/*)
+            # Test-only override: under the tmp root, next to the (test) beta runtime.
+            [ "$parent" = "$(dirname -- "$CRM_RUNTIME_DIR")" ] \
+                || rt_refuse "a test override of $CRM_RT_DIR must sit next to $CRM_RUNTIME_DIR"
+            ;;
+        *) rt_refuse "the parent of $CRM_RT_DIR must be exactly $CRM_RT_PARENT" ;;
+    esac
     [ "$(realpath -e -- "$parent" 2>/dev/null)" = "$parent" ] \
         || rt_refuse "the parent of $CRM_RT_DIR must exist and be canonical (no symlink)"
     case "$CRM_RT_DIR/" in
@@ -108,7 +121,7 @@ rt_count() {
 
 # rt_run <verified backup directory>
 rt_run() {
-    local backup=$1 dir table n start
+    local backup=$1 dir table n start missing=0
     start=$(date +%s)
     umask 077
     mkdir -m 0700 -- "$CRM_RT_DIR" || rt_refuse "cannot create $CRM_RT_DIR"
@@ -133,6 +146,7 @@ rt_run() {
     for table in "${CRM_RT_TABLES[@]}"; do
         n=$(rt_count "$table")
         echo "  table $table: $n"
+        [ "$n" != missing ] || missing=$((missing + 1))
     done
     for dir in "${CRM_PERSISTENT_DIRS[@]}"; do
         n=$(find "$CRM_RT_DIR/files/$dir" -type f | wc -l)
@@ -141,5 +155,7 @@ rt_run() {
 
     trap - EXIT
     rt_teardown || die "restore test: teardown of $CRM_RT_PROJECT failed"
+    [ "$missing" -eq 0 ] \
+        || die "restore test FAILED: $missing table count(s) missing; $CRM_RT_PROJECT removed"
     echo "restore test completed in $(( $(date +%s) - start ))s; $CRM_RT_PROJECT removed"
 }

@@ -2,6 +2,8 @@
 # fail-closed by `scripts/check_access.py beta --render` into
 # /srv/CRM/runtime/beta/edge/haproxy.cfg. Never edit the rendered file.
 # The edge runs on the host network, so `src` is the real peer address.
+# No X-Forwarded-Proto: crm-app's Apache discards it and sets HTTPS itself
+# (deploy/beta/apache/crm-proxy.conf).
 global
     log stdout format raw local0 notice
     maxconn 256
@@ -21,7 +23,6 @@ frontend crm_beta_edge
     acl trusted_upstream src @CRM_BETA_UPSTREAM_SOURCES@
     http-request del-header X-Forwarded-For if !trusted_upstream
     http-request deny deny_status 403 if !trusted_upstream
-    http-request set-header X-Forwarded-Proto https if trusted_upstream
     default_backend crm_beta_app
 
 backend crm_beta_app

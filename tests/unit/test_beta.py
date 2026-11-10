@@ -111,6 +111,46 @@ class TestBetaBindPolicy(unittest.TestCase):
             lambda d: d.__setitem__("name", "crm-dev"),
             lambda d: d["services"].pop("crm-beta-edge"),
         ]
+        edge = lambda d: d["services"]["crm-beta-edge"]  # noqa: E731
+        vol = {"type": "bind", "target": "/x"}
+        named = {
+            "external network": lambda d: d["networks"]["crm-beta-net"].__setitem__("external", True),
+            "named network": lambda d: d["networks"]["crm-beta-net"].__setitem__("name", "crm-dev_crm-net"),
+            "named volume": lambda d: d.__setitem__("volumes", {"v": {}}),
+            "external volume": lambda d: d.__setitem__("volumes", {"v": {"external": True}}),
+            "volume mount": lambda d: d["services"]["crm-db"]["volumes"].append(
+                {"type": "volume", "source": "v", "target": "/y"}),
+            "bind outside runtime": lambda d: d["services"]["crm-app"]["volumes"].append(
+                dict(vol, source="/srv/CRM/runtime/dev/data")),
+            "bind via ..": lambda d: d["services"]["crm-app"]["volumes"].append(
+                dict(vol, source="/srv/CRM/runtime/beta/../dev")),
+            "bind release escape": lambda d: d["services"]["crm-app"]["volumes"].append(
+                dict(vol, source="./../../etc")),
+            "bind other variable": lambda d: d["services"]["crm-app"]["volumes"].append(
+                dict(vol, source="${HOME}")),
+            "short-form bind": lambda d: d["services"]["crm-app"]["volumes"].append("/etc:/x"),
+            "docker.sock": lambda d: edge(d)["volumes"].append(
+                dict(vol, source="/var/run/docker.sock")),
+            "docker.sock in runtime": lambda d: edge(d)["volumes"].append(
+                dict(vol, source="/srv/CRM/runtime/beta/docker.sock")),
+            "no edge user": lambda d: edge(d).pop("user"),
+            "empty edge user": lambda d: edge(d).__setitem__("user", ""),
+            "uid 0": lambda d: edge(d).__setitem__("user", "0"),
+            "uid 00": lambda d: edge(d).__setitem__("user", "00"),
+            "uid 0 with group": lambda d: edge(d).__setitem__("user", "0:99"),
+            "root with group": lambda d: edge(d).__setitem__("user", "root:haproxy"),
+            "uid 0 as int": lambda d: edge(d).__setitem__("user", 0),
+            "uid 0 with spaces": lambda d: edge(d).__setitem__("user", " 0"),
+        }
+        for name, mutate in named.items():
+            with self.subTest(mutation=name):
+                d = self.doc()
+                mutate(d)
+                self.assertNotEqual(ca.check_beta_compose(d), [])
+        for user in ("haproxy", "99", "99:99"):
+            d = self.doc()
+            edge(d)["user"] = user
+            self.assertEqual(ca.check_beta_compose(d), [], user)
         for i, mutate in enumerate(mutations):
             with self.subTest(mutation=i):
                 d = self.doc()
@@ -142,8 +182,6 @@ class TestEdgePolicy(unittest.TestCase):
             "0.0.0.0/0 source": good.replace(acl, "acl trusted_upstream src 0.0.0.0/0"),
             "missing source list": good.replace(acl, "acl trusted_upstream src"),
             "no acl": good.replace(acl, ""),
-            "forwarded header from any source": good.replace(
-                "X-Forwarded-Proto https if trusted_upstream", "X-Forwarded-Proto https"),
             "no deny": good.replace("http-request deny deny_status 403 if !trusted_upstream\n", ""),
             "untrusted xff kept": good.replace(
                 "http-request del-header X-Forwarded-For if !trusted_upstream\n", ""),
@@ -157,11 +195,72 @@ class TestEdgePolicy(unittest.TestCase):
             "server elsewhere": good.replace("127.0.0.1:8280", f"{UP1}:8280"),
             "no timeouts": good.replace("timeout http-request 10s", ""),
             "mode tcp": good.replace("mode http", "mode tcp"),
+            "mode tcp, tabs": good.replace("mode http", "mode\t \ttcp"),
+            "allow rule, spaced": good.replace("default_backend", "http-request   allow\n    default_backend"),
+            "allow rule, tab": good.replace("default_backend", "http-request\tallow if TRUE\n    default_backend"),
+            "second server": good.replace("server crm_app 127.0.0.1:8280",
+                                          "server crm_app 127.0.0.1:8280\n    server b 127.0.0.1:8281"),
+            "use_backend": good.replace("default_backend crm_beta_app",
+                                        "use_backend crm_beta_app if trusted_upstream\n    default_backend crm_beta_app"),
+            "unknown directive": good.replace("maxconn 256", "maxconn 256\n    stats socket /tmp/s"),
+            "unknown section": good + "\nlisten stats\n    bind 127.0.0.1:9000\n",
+            "second frontend": good + "\nfrontend crm_beta_edge\n    bind 127.0.0.1:9000\n",
+            "directive before a section": "maxconn 1\n" + good,
+            "set-header": good.replace("default_backend", "http-request set-header X-A b\n    default_backend"),
+            "trailing slash source": good.replace(acl, f"acl trusted_upstream src {UP1}/ {UP2}/32"),
         }
         for name, text in fixtures.items():
             with self.subTest(fixture=name):
                 self.assertNotEqual(text, good)
                 self.assertNotEqual(ca.check_edge_config(text), [])
+
+    def test_whitespace_is_normalised_before_matching(self):
+        good = rendered()
+        spaced = good.replace("    http-request deny deny_status 403",
+                              "\thttp-request  deny\tdeny_status   403")
+        self.assertNotEqual(spaced, good)
+        self.assertEqual(ca.check_edge_config(spaced), [])
+
+    def test_each_rule_reports_its_own_error(self):
+        """Message-specific: removing any one rule makes its case fail."""
+        good = rendered()
+        cases = {
+            "a forwarded header is set without the trusted_upstream condition":
+                good.replace("http-request deny deny_status 403 if !trusted_upstream",
+                             "http-request deny deny_status 403 if !trusted_upstream\n"
+                             f"    http-request set-header X-Forwarded-For {UP1}"),
+            "exactly one server (found 2)": good.replace(
+                "server crm_app 127.0.0.1:8280",
+                "server crm_app 127.0.0.1:8280\n    server b 127.0.0.1:8281"),
+            "must not use use_backend": good.replace(
+                "default_backend crm_beta_app", "use_backend crm_beta_app\n    default_backend crm_beta_app"),
+            "must run in mode http, not 'mode tcp'": good.replace("mode http", "mode  tcp"),
+            "directive not allowed in 'global': stats": good.replace(
+                "maxconn 256", "maxconn 256\n    stats socket /tmp/s"),
+            "http-request action not allowed: allow": good.replace(
+                "default_backend", "http-request\tallow\n    default_backend"),
+            "must not use tcp-request or http-request allow": good.replace(
+                "default_backend", "http-request  allow\n    default_backend"),
+            "section not allowed: listen stats": good + "\nlisten stats\n",
+            "section repeated": good + "\nglobal\n",
+            "outside any section": "maxconn 1\n" + good,
+        }
+        for needle, text in cases.items():
+            with self.subTest(rule=needle):
+                self.assertTrue(any(needle in e for e in ca.check_edge_config(text)),
+                                ca.check_edge_config(text))
+
+    def test_no_x_forwarded_proto_and_xff_handling_kept(self):
+        good = rendered()
+        self.assertNotIn("X-Forwarded-Proto", "\n".join(ca._edge_lines(good)))
+        self.assertIn("http-request del-header X-Forwarded-For if !trusted_upstream", good)
+        self.assertIn("option forwardfor", good)
+
+    def test_upstream_sources_are_exact_hosts(self):
+        for value in (f"{UP1}/", f"{UP1}//32", f"{UP1}/32/", f"{UP1}/032", f"/{UP1}"):
+            with self.subTest(value=value):
+                self.assertNotEqual(ca.validate_upstream_sources(value), [])
+        self.assertEqual(ca.validate_upstream_sources(f"{UP1} {UP2}/32"), [])
 
     def test_check_access_beta_cli_renders_only_when_valid(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -291,6 +390,82 @@ class TestTargetGuards(ShellEnv):
         self.assertIn("CRM_BASE_URL", res.stderr)
 
 
+class TestDbDirPerTarget(ShellEnv):
+    """CRM_DB_DIR must be exactly $CRM_RUNTIME_DIR/db, in the env file and in
+    the crm-db /var/lib/mysql bind Compose resolves, for both targets."""
+
+    def setUp(self):
+        super().setUp()
+        import test_scripts
+        with open(os.path.join(self.bin, "docker"), "w") as fh:
+            fh.write(test_scripts.FAKE_DOCKER)
+        self.cfg = os.path.join(self.tmp, "fake_compose_config.py")
+        with open(self.cfg, "w") as fh:
+            fh.write(test_scripts.FAKE_COMPOSE_CONFIG)
+        self.dev = os.path.join(self.tmp, "runtime", "dev")
+        os.makedirs(self.dev)
+        for rt in (self.runtime, self.dev):
+            self.write_env(rt)
+
+    def write_env(self, runtime, db=None):
+        with open(os.path.join(runtime, "env"), "w") as fh:
+            fh.write(f"CRM_DB_DIR={db or runtime + '/db'}\nCRM_DATA_DIR={runtime}/data\n"
+                     f"CRM_CUSTOM_DIR={runtime}/custom\nCRM_CLIENT_CUSTOM_DIR={runtime}/client/custom\n")
+        os.chmod(os.path.join(runtime, "env"), 0o600)
+
+    def paths(self, target, fake_config=""):
+        runtime = self.runtime if target == "beta" else self.dev
+        code = (f"set -euo pipefail; . {SCRIPTS}/lib/common.sh; require_target {target}; "
+                "require_runtime_paths; echo PATHS-OK")
+        env = {"PATH": self.bin + os.pathsep + os.environ["PATH"], "CRM_RUNTIME_DIR": runtime,
+               "REAL_STAT": shutil.which("stat"), "FAKE_ROOT_DIR": os.path.join(self.tmp, "runtime"),
+               "FAKE_DOCKER_LOG": self.log, "FAKE_COMPOSE_CONFIG": self.cfg,
+               "FAKE_CONFIG": fake_config}
+        return subprocess.run(["bash", "-c", code], capture_output=True, text=True, env=env)
+
+    def test_control_both_targets_pass(self):
+        for target in ("beta", "dev"):
+            with self.subTest(target=target):
+                res = self.paths(target)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                self.assertIn("PATHS-OK", res.stdout)
+
+    def test_beta_with_the_dev_db_is_refused(self):
+        self.write_env(self.runtime, db=self.dev + "/db")
+        res = self.paths("beta")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn(f"CRM_DB_DIR in {self.runtime}/env is '{self.dev}/db'", res.stderr)
+        self.assertEqual(self.docker_calls(), [])
+
+    def test_dev_with_the_beta_db_is_refused(self):
+        self.write_env(self.dev, db=self.runtime + "/db")
+        res = self.paths("dev")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn(f"CRM_DB_DIR in {self.dev}/env is '{self.runtime}/db'", res.stderr)
+        self.assertEqual(self.docker_calls(), [])
+
+    def test_missing_db_dir_is_refused(self):
+        with open(os.path.join(self.runtime, "env"), "w") as fh:
+            fh.write(f"CRM_DATA_DIR={self.runtime}/data\nCRM_CUSTOM_DIR={self.runtime}/custom\n"
+                     f"CRM_CLIENT_CUSTOM_DIR={self.runtime}/client/custom\n")
+        res = self.paths("beta")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("must set CRM_DB_DIR exactly once (found 0)", res.stderr)
+
+    def test_compose_resolved_db_bind_is_checked(self):
+        cases = {
+            "beta": f"source:crm-db:/var/lib/mysql:{self.dev}/db",
+            "dev": f"source:crm-db:/var/lib/mysql:{self.runtime}/db",
+        }
+        for target, mode in cases.items():
+            for fake in (mode, "drop:crm-db:/var/lib/mysql", "type:crm-db:/var/lib/mysql:volume"):
+                with self.subTest(target=target, fake=fake):
+                    res = self.paths(target, fake)
+                    self.assertEqual(res.returncode, 1, res.stderr)
+                    self.assertIn("crm-db /var/lib/mysql", res.stderr)
+                    self.assertNotIn("PATHS-OK", res.stdout)
+
+
 class TestSeedingRefusesBeta(unittest.TestCase):
     def test_beta_urls_and_target_refused(self):
         for url, env in (("https://crm-beta.example.invalid", {}),
@@ -307,6 +482,44 @@ class TestSeedingRefusesBeta(unittest.TestCase):
         with unittest.mock.patch("sys.stdout", io.StringIO()):
             self.assertEqual(seed_synthetic.main(["--base-url", "http://127.0.0.1:8180",
                                                   "--dry-run"], environ={}), 0)
+
+
+def rewrite_bundle(path, change):
+    """Rebuild the bundle with change(name, data) -> data|None applied
+    (RELEASE.json last, so rehash() sees every other change first)."""
+    with tarfile.open(path) as tar:
+        members = [(m, tar.extractfile(m).read() if m.isfile() else None)
+                   for m in tar.getmembers()]
+    new = {}
+    for m, data in sorted(members, key=lambda e: e[0].name.endswith("/RELEASE.json")):
+        new[m.name] = change(m.name, data) if data is not None else None
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w:gz") as tar:
+        for m, _ in members:
+            data = new[m.name]
+            if m.isfile() and data is None:
+                continue
+            if data is not None:
+                m.size = len(data)
+            tar.addfile(m, io.BytesIO(data) if data is not None else None)
+    with open(path, "wb") as fh:
+        fh.write(raw.getvalue())
+
+
+def rehash(change):
+    """change(name, data) plus a consistently re-hashed RELEASE.json."""
+    pending = {}
+    def wrapped(name, data):
+        if name.endswith("/RELEASE.json"):
+            m = json.loads(data)
+            for rel, new in pending.items():
+                m["files"][rel] = release.sha256(new)
+            return (json.dumps(m, indent=2, sort_keys=True) + "\n").encode()
+        new = change(name, data)
+        if new != data:
+            pending[name.split("/", 1)[1]] = new
+        return new
+    return wrapped
 
 
 def make_repo(root):
@@ -363,26 +576,31 @@ class TestReleaseBundle(unittest.TestCase):
         self.assertIsNotNone(got["delivery_records"]["CRM-003"])
         self.assertIn("scripts/release.py", got["files"])
 
+    def test_forge_records_excluded_but_listed_by_sha(self):
+        path, manifest = self.build("f")
+        self.assertEqual(manifest["excluded"], [".forge/"])
+        self.assertFalse([n for n in manifest["files"] if n.startswith(".forge")])
+        with tarfile.open(path) as tar:
+            self.assertFalse([n for n in tar.getnames() if "/.forge" in n])
+        self.assertRegex(manifest["delivery_records"]["CRM-003"], r"^[0-9a-f]{40}$")
+        self.assertEqual(release.verify(path)["excluded"], [".forge/"])
+
+    def test_gzip_header_has_no_timestamp_whatever_the_clock(self):
+        with unittest.mock.patch("time.time", return_value=1_000_000_000.0):
+            a, _ = self.build("clock1")
+        with unittest.mock.patch("time.time", return_value=2_000_000_000.0):
+            b, _ = self.build("clock2")
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            da, db = fa.read(), fb.read()
+        self.assertEqual(da[4:8], b"\0\0\0\0")
+        self.assertEqual(da, db)
+
     def test_unaccepted_commit_refused(self):
         with self.assertRaises(release.ReleaseError):
             self.build("c", self.git("rev-parse", "side"))
 
     def rewrite(self, path, change):
-        """Rebuild the bundle with change(name, data) -> data|None applied."""
-        with tarfile.open(path) as tar:
-            members = [(m, tar.extractfile(m).read() if m.isfile() else None)
-                       for m in tar.getmembers()]
-        raw = io.BytesIO()
-        with tarfile.open(fileobj=raw, mode="w:gz") as tar:
-            for m, data in members:
-                data = change(m.name, data) if data is not None else None
-                if m.isfile() and data is None:
-                    continue
-                if data is not None:
-                    m.size = len(data)
-                tar.addfile(m, io.BytesIO(data) if data is not None else None)
-        with open(path, "wb") as fh:
-            fh.write(raw.getvalue())
+        rewrite_bundle(path, change)
 
     def test_tampered_file_refused(self):
         path, _ = self.build("t")
@@ -408,6 +626,45 @@ class TestReleaseBundle(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "image digests"):
             release.verify(path)
 
+    def test_compose_digest_must_be_in_the_register(self):
+        # Consistent RELEASE.json (file digests re-hashed), but a compose image
+        # digest the register does not list.
+        path, _ = self.build("cd")
+        bad = "sha256:" + "1" * 64
+        self.rewrite(path, rehash(lambda n, d: d.replace(
+            b"sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620",
+            bad.encode()) if n.endswith("/deploy/beta/compose.json") else d))
+        with self.assertRaisesRegex(release.ReleaseError, "compose image digest is not in the register"):
+            release.verify(path)
+
+    def test_excluded_must_be_recorded(self):
+        path, _ = self.build("ex")
+        def change(name, data):
+            if name.endswith("RELEASE.json"):
+                m = json.loads(data)
+                m.pop("excluded")
+                return json.dumps(m).encode()
+            return data
+        self.rewrite(path, change)
+        with self.assertRaisesRegex(release.ReleaseError, "excluded"):
+            release.verify(path)
+
+    def test_verify_without_sha256_warns_not_anchored(self):
+        path, _ = self.build("wa")
+        err = io.StringIO()
+        with unittest.mock.patch("sys.stderr", err), unittest.mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(release.main(["verify", path]), 0)
+        self.assertIn("NOT ANCHORED", err.getvalue())
+        with open(path, "rb") as fh:
+            digest = release.sha256(fh.read())
+        err = io.StringIO()
+        with unittest.mock.patch("sys.stderr", err), unittest.mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(release.main(["verify", path, "--sha256", digest]), 0)
+        self.assertNotIn("NOT ANCHORED", err.getvalue())
+        for bad in (digest.upper(), digest[:-1], digest + "0", ""):
+            with self.subTest(sha=bad), self.assertRaises(release.ReleaseError):
+                release.verify(path, bad)
+
     def test_wrong_bundle_digest_refused(self):
         path, _ = self.build("s")
         with self.assertRaisesRegex(release.ReleaseError, "sha256"):
@@ -427,14 +684,120 @@ class TestDeployRelease(ShellEnv):
         out = os.path.join(self.tmp, "out")
         os.mkdir(out)
         self.bundle, _ = release.build(repo, git("rev-parse", "main"), out)
+        self.sha = self.digest(self.bundle)
         env = os.path.join(self.runtime, "env")
         with open(env, "w") as fh:
             fh.write(env_text())
         os.chmod(env, 0o600)
 
-    def deploy(self, *extra, **kw):
-        return self.run_sh("deploy_release.sh", "beta", self.bundle, *extra,
-                           extra={"FAKE_UID": "0"}, **kw)
+    @staticmethod
+    def digest(path):
+        with open(path, "rb") as fh:
+            return release.sha256(fh.read())
+
+    def deploy(self, *extra, sha=True, env=None, **kw):
+        args = ["--sha256", self.sha] if sha is True else (["--sha256", sha] if sha else [])
+        return self.run_sh("deploy_release.sh", "beta", self.bundle, *args, *extra,
+                           extra={"FAKE_UID": "0", "TMPDIR": self.tmp, **(env or {})}, **kw)
+
+    def deploy_dir(self):
+        short = os.path.basename(self.bundle)[len("crm-release-"):-len(".tar.gz")]
+        return os.path.join(self.tmp, "deploy", short)
+
+    def assert_nothing_done(self, res):
+        self.assertNotEqual(res.returncode, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "deploy")))
+        self.assertEqual(self.docker_calls(), [])
+        self.assertEqual(sorted(os.listdir(self.runtime)), ["env"])
+        self.assertFalse([n for n in os.listdir(self.tmp) if n.startswith("crm-deploy-")],
+                         "private staging directory removed")
+
+    def make_writable(self):
+        for root, dirs, _ in os.walk(os.path.join(self.tmp, "deploy")):
+            os.chmod(root, 0o755)
+
+    def test_sha256_is_mandatory_and_well_formed(self):
+        for sha in (None, "", "0" * 63, "0" * 65, self.sha.upper(), "g" * 64, self.sha + " "):
+            with self.subTest(sha=sha):
+                res = self.deploy(sha=sha) if sha is not None else self.deploy(sha=False)
+                self.assert_nothing_done(res)
+                self.assertIn("--sha256 HEX", res.stderr)
+
+    def test_rehashed_bundle_refused_without_or_with_a_wrong_sha256(self):
+        # Change a file and re-hash RELEASE.json consistently: release.py verify
+        # (unanchored) accepts it, so only the outside digest can catch it.
+        rewrite_bundle(self.bundle, rehash(
+            lambda n, d: d + b"\n# tampered\n" if n.endswith("/scripts/release.py") else d))
+        release.verify(self.bundle)  # consistent: passes unanchored
+        res = self.deploy(sha=False)
+        self.assert_nothing_done(res)
+        self.assertIn("--sha256 HEX", res.stderr)
+        res = self.deploy()  # the release record's digest of the original bundle
+        self.assert_nothing_done(res)
+        self.assertIn("does not match --sha256", res.stderr)
+        # With the tampered bundle's own digest, the operator vouches for it: it proceeds.
+        res = self.deploy(sha=self.digest(self.bundle))
+        self.assertTrue(os.path.isfile(os.path.join(self.deploy_dir(), "RELEASE.json")), res.stderr)
+        self.make_writable()
+
+    def test_right_sha256_proceeds(self):
+        res = self.deploy()
+        self.assertNotIn("does not match", res.stderr)
+        self.assertTrue(os.path.isfile(os.path.join(self.deploy_dir(), "RELEASE.json")), res.stderr)
+        self.make_writable()
+
+    def test_unpacked_tree_is_rechecked(self):
+        # A tar that adds a file while unpacking: the post-unpack check refuses.
+        fake_tar = os.path.join(self.bin, "tar")
+        with open(fake_tar, "w") as fh:
+            fh.write('#!/usr/bin/env bash\n"$REAL_TAR" "$@" || exit\n'
+                     'dir=; prev=; for a in "$@"; do [ "$prev" = -C ] && dir=$a; prev=$a; done\n'
+                     'for d in "$dir"/crm-release-*; do echo x > "$d/${FAKE_TAR_FILE:-extra.txt}"; done\n')
+        os.chmod(fake_tar, 0o700)
+        for name in ("extra.txt", "README-unlisted", "RELEASE.json"):
+            with self.subTest(planted=name):
+                res = self.deploy(env={"REAL_TAR": shutil.which("tar"), "FAKE_TAR_FILE": name})
+                self.assertEqual(res.returncode, 1, res.stderr)
+                self.assertIn("unpacked files differ from the bundle", res.stderr)
+                self.assertFalse(os.path.exists(self.deploy_dir()))
+                self.assertEqual(os.listdir(os.path.join(self.tmp, "deploy")), [])
+                self.assertEqual(self.docker_calls(), [])
+
+    def test_upgrade_rechecks_an_existing_release_dir(self):
+        self.deploy()
+        dest = self.deploy_dir()
+        self.assertTrue(os.path.isdir(dest))
+        self.make_writable()
+        res = self.deploy("--upgrade")  # untouched: the check passes
+        self.assertNotIn("differs from the bundle", res.stderr)
+        self.assertNotIn("already exists", res.stderr)
+        rel = os.path.join(dest, "scripts", "release.py")
+        os.chmod(rel, 0o644)
+        cases = {
+            "extra file": lambda: open(os.path.join(dest, "extra"), "w").close(),
+            "extra dir": lambda: os.mkdir(os.path.join(dest, "extra.d")),
+            "changed file": lambda: open(rel, "a").write("# changed\n"),
+            "missing file": lambda: os.unlink(rel),
+            "symlink": lambda: os.symlink("/etc/passwd", os.path.join(dest, "link")),
+        }
+        for name, change in cases.items():
+            with self.subTest(case=name):
+                saved = read(rel) if os.path.exists(rel) else None
+                change()
+                res = self.deploy("--upgrade")
+                self.assertEqual(res.returncode, 1, res.stderr)
+                self.assertIn("differs from the bundle's RELEASE.json", res.stderr)
+                for extra in ("extra", "link"):
+                    if os.path.lexists(os.path.join(dest, extra)):
+                        os.unlink(os.path.join(dest, extra))
+                if os.path.isdir(os.path.join(dest, "extra.d")):
+                    os.rmdir(os.path.join(dest, "extra.d"))
+                if saved is not None:
+                    with open(rel, "w") as fh:
+                        fh.write(saved)
+                else:
+                    with open(rel, "w") as fh:
+                        fh.write(read(os.path.join(REPO, "scripts", "release.py")))
 
     def test_non_empty_runtime_refused_without_upgrade(self):
         os.mkdir(os.path.join(self.runtime, "data"))
@@ -448,14 +811,17 @@ class TestDeployRelease(ShellEnv):
         with open(self.bundle, "ab") as fh:
             fh.write(b"x")
         res = self.deploy()
-        self.assertNotEqual(res.returncode, 0)
+        self.assert_nothing_done(res)
+        self.assertIn("does not match --sha256", res.stderr)
+        res = self.deploy(sha=self.digest(self.bundle))  # anchored to the tampered bytes
+        self.assert_nothing_done(res)
         self.assertIn("failed verification", res.stderr)
-        self.assertFalse(os.path.exists(os.path.join(self.tmp, "deploy")))
 
     def test_wrong_target_not_root_and_bad_runtime_refused(self):
         res = self.run_sh("deploy_release.sh", "dev", self.bundle, extra={"FAKE_UID": "0"})
         self.assertEqual(res.returncode, 2)
-        res = self.run_sh("deploy_release.sh", "beta", self.bundle, extra={"FAKE_UID": "1000"})
+        res = self.run_sh("deploy_release.sh", "beta", self.bundle, "--sha256", self.sha,
+                          extra={"FAKE_UID": "1000"})
         self.assertIn("must run as root", res.stderr)
         res = self.deploy(root=False)
         self.assertIn("owned by root with mode 0700", res.stderr)
@@ -465,8 +831,7 @@ class TestDeployRelease(ShellEnv):
         # The minimal test repo has no scripts beyond release.py, so the deploy
         # stops at the first bundled script; everything before it is checked.
         res = self.deploy()
-        short = os.path.basename(self.bundle)[len("crm-release-"):-len(".tar.gz")]
-        dest = os.path.join(self.tmp, "deploy", short)
+        dest = self.deploy_dir()
         self.assertTrue(os.path.isfile(os.path.join(dest, "RELEASE.json")), res.stderr)
         self.assertEqual(stat.S_IMODE(os.stat(os.path.join(dest, "RELEASE.json")).st_mode) & 0o222, 0)
         for d in ("db", "data", "custom", "client/custom", "backups"):
@@ -755,7 +1120,9 @@ prev=
 for a in "$@"; do [ "$prev" = --env-file ] && envf=$a; prev=$a; done
 [ -n "$envf" ] && [ -f "$envf" ] && echo "envmode $("$REAL_STAT" -c %a -- "$envf")" >> "$FAKE_DOCKER_LOG.env"
 case "$*" in
-    *"COUNT(*)"*) echo 7 ;;
+    *"COUNT(*)"*)
+        [ -n "${FAKE_NO_COUNT:-}" ] && case "$*" in *"FROM "?"$FAKE_NO_COUNT"?" WHERE"*) exit 1 ;; esac
+        echo 7 ;;
     *"exec -T crm-db"*) cat > /dev/null; [ -z "${FAKE_FAIL_IMPORT:-}" ] || exit 1 ;;
 esac
 exit 0
@@ -827,6 +1194,15 @@ class TestRestoretest(ShellEnv):
         self.assertEqual(set(read(self.log + ".env").split("\n")) - {""}, {"envmode 600"})
         self.assertNotIn("CRM_RESTORETEST_DB_ROOT_PASSWORD=", res.stdout + res.stderr)
 
+    def test_a_missing_table_count_fails_the_run_after_teardown(self):
+        res = self.rt_run(self.backup, extra={"FAKE_NO_COUNT": "opportunity"})
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertIn("table opportunity: missing", res.stdout)
+        self.assertIn("table account: 7", res.stdout)
+        self.assertIn("1 table count(s) missing", res.stderr)
+        self.assertTrue(self.docker_calls()[-1].endswith("down -v --remove-orphans --timeout 10"))
+        self.assertFalse(os.path.exists(self.rt))
+
     def test_failure_still_tears_down_only_the_throwaway_project(self):
         res = self.rt_run(self.backup, extra={"FAKE_FAIL_IMPORT": "1"})
         self.assertNotEqual(res.returncode, 0)
@@ -847,7 +1223,13 @@ class TestRestoretest(ShellEnv):
                 2, "not named beta-restoretest"),
             "inside beta runtime": (lambda: self.rt_run(self.backup, extra={
                 "CRM_RESTORETEST_DIR": os.path.join(self.runtime, "beta-restoretest")}),
-                2, "inside the crm-beta runtime"),
+                2, "must sit next to"),
+            "parent not /srv/CRM/runtime": (lambda: self.rt_run(self.backup, extra={
+                "CRM_RESTORETEST_DIR": "/srv/CRM/other/beta-restoretest"}),
+                2, "must be exactly /srv/CRM/runtime"),
+            "parent /var/tmp": (lambda: self.rt_run(self.backup, extra={
+                "CRM_RESTORETEST_DIR": "/var/tmp/beta-restoretest"}),
+                2, "must be exactly /srv/CRM/runtime"),
             "relative": (lambda: self.rt_run(self.backup, extra={
                 "CRM_RESTORETEST_DIR": "runtime/beta-restoretest"}), 2, "absolute"),
             "secret in env": (lambda: self.rt_run(self.backup, extra={
@@ -1000,7 +1382,7 @@ class TestDeploySteps(ShellEnv):
                   f"{stubs}\n{code}")
         env = {"PATH": self.bin + os.pathsep + os.environ["PATH"], "CRM_RUNTIME_DIR": self.runtime,
                "REAL_STAT": shutil.which("stat"), "FAKE_ROOT_DIR": os.path.join(self.tmp, "runtime"),
-               "FAKE_DOCKER_LOG": self.log, "HOME": self.tmp}
+               "FAKE_DOCKER_LOG": self.log, "HOME": self.tmp, "TMPDIR": self.tmp}
         env.update(extra or {})
         return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env,
                               timeout=60)
@@ -1136,13 +1518,15 @@ class TestDeploySteps(ShellEnv):
             '; write_report() { echo write_report >> "$FAKE_DOCKER_LOG"; echo r; }'
             '; render_edge() { echo render_edge >> "$FAKE_DOCKER_LOG"; return ${RENDER_RC:-0}; }'
             '; id() { echo 0; }')
-        res = self.step("main beta x.tar.gz", stubs=stubs, extra={"CRM_DEPLOY_ROOT": "/x/deploy"})
+        sha = "a" * 64
+        res = self.step(f"main beta x.tar.gz --sha256 {sha}", stubs=stubs,
+                        extra={"CRM_DEPLOY_ROOT": "/x/deploy"})
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(self.docker_calls(), [
             "verify_bundle", "check_runtime_empty", "unpack_release", "make_runtime", "render_edge",
             "start_stack", "configure_site", "provision_and_accept", "write_report"])
         os.unlink(self.log)
-        res = self.step("main beta x.tar.gz", stubs=stubs,
+        res = self.step(f"main beta x.tar.gz --sha256 {sha}", stubs=stubs,
                         extra={"CRM_DEPLOY_ROOT": "/x/deploy", "RENDER_RC": "1"})
         self.assertNotEqual(res.returncode, 0)
         self.assertEqual(self.docker_calls()[-1], "render_edge")

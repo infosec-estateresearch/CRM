@@ -38,7 +38,7 @@ TLS ends at the PO's HAProxy. EspoCRM must still generate `https://` links, so `
 - **Why the peer address is not used.** With Docker's userland proxy, Apache sees the bridge gateway, not loopback, as the peer. A peer-based test cannot tell the edge apart from anything else, so none is used and no subnet is pinned.
 - **Modules.** `SetEnv` needs `mod_env` and `RequestHeader` needs `mod_headers`. The conf loads each one only if the image has not already enabled it (`<IfModule !env_module>` / `<IfModule !headers_module>` around `LoadModule`). If a module file is missing, Apache does not start and the deploy fails.
 - **Enforcement.** `scripts/check_access.py beta` refuses a `crm-proxy.conf` that makes HTTPS conditional, keeps or sets `X-Forwarded-Proto`, or adds any other directive.
-- The edge still sets `X-Forwarded-Proto: https` for trusted sources. Apache discards it.
+- The edge does not set `X-Forwarded-Proto` (Apache discards it anyway). It still deletes `X-Forwarded-For` from untrusted sources and appends the peer with `option forwardfor`.
 
 ## HAProxy upstream contract (configured by the PO)
 
@@ -128,15 +128,16 @@ Named users and roles are provisioned by `scripts/provision_access.py beta` and 
     - verifies `SHA256SUMS` and completeness;
     - refuses unless the throwaway project is `crm-beta-restoretest`, with Compose file `deploy/beta/restoretest/compose.json`;
     - runs the isolation policy `check_access.py restoretest`: one `crm-db`, no published or exposed port, no bind mount, its own project-scoped volume and internal network;
-    - requires the runtime to be exactly `/srv/CRM/runtime/beta-restoretest`, and refuses if it already exists.
+    - requires the runtime's parent to be exactly `/srv/CRM/runtime` (a test-only override is allowed only under `/tmp`), and refuses if it already exists.
   - **Then** it:
     - unpacks the file archives into that runtime;
     - loads the dump into the throwaway `crm-db` with a generated root password, kept in a `0600` file there and never printed;
     - prints fingerprints: live row counts for `account`, `contact`, `opportunity`, `call`, `meeting`, `task`, `email`, `user`, `team`, `role`, plus the file counts of `data`, `custom` and `client/custom`.
   - **Teardown.** It always tears down, also on failure: `docker compose -p crm-beta-restoretest … down -v` and removal of `/srv/CRM/runtime/beta-restoretest`. Nothing in it calls the `crm-beta` or `crm-dev` project.
   - **Leftovers.** If a killed run leaves the directory behind, run `docker compose -p crm-beta-restoretest -f deploy/beta/restoretest/compose.json down -v` and remove the directory, then re-run.
+  - **Result.** If any table count is missing (the query failed), the run still tears down, then exits non-zero.
   - **Limit.** It restores the database and the files and counts them. It does not boot EspoCRM on the restored data.
-- **Retention.** Retention is the PO's decision. Nothing prunes backups automatically; remove old `crm-beta-<stamp>/` directories by hand.
+- **Retention.** Retention follows [MIGRATION-DATA-HANDLING.md §4](MIGRATION-DATA-HANDLING.md). Nothing prunes backups automatically; remove old `crm-beta-<stamp>/` directories by hand.
 
 ### Backup timer (operator-installed, with PO consent)
 
