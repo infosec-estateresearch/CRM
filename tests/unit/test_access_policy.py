@@ -78,6 +78,9 @@ BROKEN_ACCESS = {
     "access_bad_staff_edits_email.json": {"staff_and_intake_cannot_edit_email",
                                           "matches_work_order_table"},
     "access_bad_manager_edits_task_sf_owner.json": {"sf_fields_read_only_for_people"},
+    # CRM-003-F: Currency back on the five-action table (read all), refused by 10.0.12
+    "access_bad_currency_all.json": {"level_scopes", "read_only_reference_scopes",
+                                     "matches_work_order_table"},
 }
 BROKEN_KEYS = {
     "keys_bad_sfid_writable.json": {"sf_id_field"},
@@ -136,6 +139,9 @@ class TestDeployedRoles(unittest.TestCase):
 
     def test_every_scope_and_action_has_a_valid_level(self):
         self.assertRule("known_levels")
+
+    def test_level_based_scopes_use_only_their_own_actions_and_levels(self):
+        self.assertRule("level_scopes")
 
     def test_unused_crm_scopes_are_disabled(self):
         self.assertRule("unused_scopes_disabled")
@@ -268,6 +274,65 @@ class TestScopeSet(unittest.TestCase):
             del role["data"]["ServiceType"]
         found = policy.rule_every_acl_scope_explicit(doc)
         self.assertEqual(len([v for v in found if "ServiceType" in v]), len(policy.ROLES))
+
+
+class TestLevelScopes(unittest.TestCase):
+    """CRM-003-F: Currency's ACL is level-based in EspoCRM 10.0.12 (aclActionList
+    [read, edit], aclLevelList [yes, no]); anything else is refused with HTTP 400."""
+
+    def test_currency_is_level_based_with_read_and_edit_yes_no(self):
+        self.assertEqual(policy.LEVEL_SCOPES["Currency"],
+                         {"actions": ["read", "edit"], "levels": {"yes", "no"}})
+        self.assertTrue(set(policy.LEVEL_SCOPES) <= set(policy.ACL_ENTITY_SCOPES))
+
+    def test_read_only_is_expressed_per_scope_kind(self):
+        self.assertEqual(policy.read_only_row("Currency"), {"read": "yes", "edit": "no"})
+        for scope in set(policy.READ_ONLY_SCOPES) - set(policy.LEVEL_SCOPES):
+            self.assertEqual(policy.read_only_row(scope),
+                             {"create": "no", "read": "all", "edit": "no", "delete": "no",
+                              "stream": "all"}, scope)
+
+    def test_every_role_gives_currency_read_yes_edit_no(self):
+        for role in policy.load_access()["roles"]:
+            self.assertEqual(role["data"]["Currency"], {"read": "yes", "edit": "no"},
+                             role["name"])
+
+    def violations(self, currency):
+        doc = policy.load_access()
+        for role in doc["roles"]:
+            role["data"]["Currency"] = currency
+        return {r: v for r, v in policy.check_roles(doc).items() if v}
+
+    def test_the_repository_currency_passes(self):
+        self.assertEqual(self.violations({"read": "yes", "edit": "no"}), {})
+
+    def test_refused_currency_shapes(self):
+        cases = {
+            "read all": {"read": "all", "edit": "no"},
+            "unknown action delete": {"read": "yes", "edit": "no", "delete": "no"},
+            "unknown action stream": {"read": "yes", "edit": "no", "stream": "yes"},
+            "edit missing": {"read": "yes"},
+            "edit all": {"read": "yes", "edit": "all"},
+            "true instead of levels": True,
+        }
+        for label, currency in cases.items():
+            with self.subTest(case=label):
+                found = self.violations(currency)
+                self.assertIn("level_scopes", found)
+                self.assertEqual(len(found["level_scopes"]), len(policy.ROLES))
+                self.assertIn("read_only_reference_scopes", found)
+
+    def test_edit_yes_is_a_valid_level_but_not_read_only(self):
+        found = self.violations({"read": "yes", "edit": "yes"})
+        self.assertNotIn("level_scopes", found)
+        self.assertIn("read_only_reference_scopes", found)
+
+    def test_import_deleting_currency_is_refused(self):
+        doc = policy.load_access()
+        _roles = {r["name"]: r for r in doc["roles"]}
+        _roles[policy.IMPORT]["data"]["Currency"] = {"read": "yes", "edit": "no", "delete": "all"}
+        self.assertTrue(policy.rule_import_never_deletes(doc))
+        self.assertTrue(policy.rule_level_scopes(doc))
 
 
 class TestBrokenFixtures(unittest.TestCase):

@@ -35,7 +35,8 @@ EspoCRM 10.0.12 has no `aclStrictMode` setting here, so it runs in non-strict mo
 | Scopes | `ER Staff`, `ER Intake`, `ER Manager` | `ER Import` |
 |---|---|---|
 | Account, Contact, Opportunity, Call, Meeting, Task, Email | as the table above | as the table above |
-| Currency, Document, DocumentFolder, User, Team | read all only (no create, edit or delete) | see §2.1 |
+| Document, DocumentFolder, User, Team | read all only (no create, edit or delete) | the same |
+| Currency (level-based ACL in EspoCRM 10.0.12: actions `read` and `edit` only, levels `yes`/`no`; `read: all` is refused with HTTP 400) | `read: yes`, `edit: no` (read-only) | the same |
 | Lead, Campaign, TargetList, TargetListCategory, KnowledgeBaseArticle, KnowledgeBaseCategory, Template, EmailTemplate, EmailTemplateCategory, Case (generic CRM features Estate Research does not use) | `false` (no access, hidden) | `false` |
 | Activities, Calendar, GlobalStream, WorkingTimeCalendar (boolean) | `true` | `false` |
 | Import, Webhook, OpenApi, ExternalAccount, EmailAccountScope (boolean) | `false` | `false` (the importer uses REST, not EspoCRM's Import tool) |
@@ -63,7 +64,7 @@ Administration stays with EspoCRM **admin** users, the user type `admin`. No rol
 - no role deletes an Account;
 - Staff edits only its own Opportunities, and Intake edits all of them;
 - Import never deletes, and only API users hold it;
-- stream equals read, and every level is valid;
+- stream equals read, and every level is valid; a level-based scope (Currency) uses only its own actions (`read`, `edit`) and levels (`yes`, `no`);
 - sfId is hidden from the human roles;
 - no human role can edit any `sf*` field, and `ER Import` can edit all of them.
 
