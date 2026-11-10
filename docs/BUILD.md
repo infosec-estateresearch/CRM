@@ -10,8 +10,9 @@ The build is the official EspoCRM image, pinned by digest, plus Estate Research'
 |---|---|
 | `deploy/compose.json` | Three services, all with images pinned by digest: `crm-app` (EspoCRM), `crm-daemon` (the same image with entrypoint `docker-daemon.sh`) and `crm-db` (MariaDB). JSON is valid Compose YAML; it was chosen so the policy tests need only the Python standard library. |
 | `deploy/env.example` | Names of the variables the stack needs. **No values.** |
+| `deploy/apache/crm-access.conf` | Apache source-address restriction for `crm-app`, mounted read-only (§7.6, CRM-D019) |
 | `custom/` | ER metadata and code. `scripts/deploy_custom.sh` deploys `custom/Espo/Custom/` into the runtime directory that the app mounts as EspoCRM's `custom/` (§7.2) |
-| `scripts/` | Synthetic data seeder, customisation deploy, backup, restore, export |
+| `scripts/` | Synthetic data seeder, customisation deploy, backup, restore, export, LAN access check (`check_access.py`) |
 | `tests/unit/` | Run without a stack or network (in the ForgeV2 loop) |
 | `tests/acceptance/` | Need the running dev stack (operator stage) |
 
@@ -35,9 +36,10 @@ The dev environment lives in `DOCKER1:/srv/CRM/runtime/dev/`, which is root-owne
   - Each environment has its own project name (`crm-dev`, later `crm-beta` and `crm-prod`).
   - No `container_name` is set: Compose generates instance names, e.g. `crm-dev-crm-app-1` and network `crm-dev_crm-net`.
 - **Compose project:** `crm-dev`, on its own network `crm-net` with subnet `172.16.10.0/24`. On 2026-11-06 Docker on the host had no 172.16.x network; confirm the subnet is also unused on the LAN.
-- **Published ports:** `crm-app` publishes `127.0.0.1:8180` only. The database publishes nothing. Access is through an SSH tunnel until CRM-PBI-008 adds TLS and LAN binding.
+- **Published ports:** `crm-app` publishes port 8180 on one host LAN address only, `${CRM_BIND_IP}` from the runtime env file. It never uses `0.0.0.0` or a mapping without a host IP, and it no longer publishes on `127.0.0.1`. The database and the daemon publish nothing. The address is never written in Git (§7.6, CRM-D019).
+- **Source restriction:** Apache inside `crm-app` admits only loopback and the networks in `${CRM_ALLOWED_SOURCES}` (§7.6). TLS is still missing and is mandatory before real data (CRM-PBI-008).
 - **Nothing shared:** no volumes, networks, databases or credentials with any other application on the host.
-- **Firewall:** no firewall rules (standing policy). Exposure is controlled by the bind address.
+- **Firewall:** no firewall rules (standing policy: no iptables, ufw or nftables, and so no `DOCKER-USER` rules either). Exposure is controlled by the bind address plus the Apache source restriction.
 - **Resources:** about 2–3 GB RAM and 10 GB disk.
 
 ## 4. Operator commands (operator stage only, from the exact PR commit)
@@ -46,8 +48,9 @@ The dev environment lives in `DOCKER1:/srv/CRM/runtime/dev/`, which is root-owne
 cd /srv/CRM/worktrees/CRM-001      # the delivered forge/CRM-001 worktree at the PR head commit
 git rev-parse HEAD                  # must equal the PR head SHA recorded on the WO Issue
 scripts/deploy_custom.sh dev        # before the first up (§7.2)
+python3 scripts/check_access.py dev # LAN access settings, before every up (§7.6)
 docker compose -p crm-dev -f deploy/compose.json --env-file /srv/CRM/runtime/dev/env up -d
-python3 scripts/seed_synthetic.py --base-url http://127.0.0.1:8180
+python3 scripts/seed_synthetic.py --base-url "http://<CRM_BIND_IP>:8180"
 python3 -m unittest discover -s tests/acceptance -v
 scripts/backup.sh dev && scripts/restore.sh dev <backup>
 docker compose -p crm-dev -f deploy/compose.json ps; docker network inspect crm-dev_crm-net   # AC9: own resources only
@@ -97,14 +100,18 @@ Everything below is for the operator stage. Run it as the authorised operator, f
    - `CRM_DATA_DIR=/srv/CRM/runtime/dev/data`
    - `CRM_CUSTOM_DIR=/srv/CRM/runtime/dev/custom`
    - `CRM_CLIENT_CUSTOM_DIR=/srv/CRM/runtime/dev/client/custom`
-   - `CRM_SITE_URL=http://127.0.0.1:8180`
+   - `CRM_BIND_IP=<the host's LAN address>`
+   - `CRM_ALLOWED_SOURCES=<authorised subnet A> <authorised subnet B>`
+   - `CRM_SITE_URL=http://<CRM_BIND_IP>:8180`
+
+   `python3 scripts/check_access.py dev` checks the last three (§7.6).
 
    Compose refuses to start if any variable is unset. `deploy_custom.sh`, `backup.sh` and `restore.sh` read `CRM_DATA_DIR`, `CRM_CUSTOM_DIR` and `CRM_CLIENT_CUSTOM_DIR` from the env file as text (it is never sourced). They refuse to run unless each one is a single, absolute, plain `NAME=<path>` line whose canonical path is exactly `/srv/CRM/runtime/dev/{data,custom,client/custom}`, and unless `/srv/CRM/runtime/dev` itself contains no symlink. Every line that could assign the name in a form Compose accepts counts towards "single": `NAME=`, `NAME: value`, `export NAME`, leading blanks, a bare `NAME`. Compose's own parser takes the last such line. Do not export `CRM_DB_DIR`, `CRM_DATA_DIR`, `CRM_CUSTOM_DIR` or `CRM_CLIENT_CUSTOM_DIR` in the shell. Compose prefers the process environment to the env file, so the scripts refuse to run if any of the four is set.
-3. Confirm that `172.16.10.0/24` and `127.0.0.1:8180` are free. A conflict is reported to Matt, not remediated (§6).
+3. Confirm that `172.16.10.0/24` and `<CRM_BIND_IP>:8180` are free. A conflict is reported to Matt, not remediated (§6).
 
 ### 7.2 Layout of the stack
 
-- `crm-app` serves EspoCRM on `127.0.0.1:8180`. Reach it from a workstation over an SSH tunnel.
+- `crm-app` serves EspoCRM on `<CRM_BIND_IP>:8180`, to the authorised subnets only (§7.6).
 - `crm-daemon` runs the job daemon (`docker-daemon.sh`).
 - `crm-db` is MariaDB and publishes no port. It bind-mounts `CRM_DB_DIR` at `/var/lib/mysql`.
 - `crm-app` and `crm-daemon` each have exactly three bind mounts, which are the same three on both services and are all read-write:
@@ -115,7 +122,7 @@ Everything below is for the operator stage. Run it as the authorised operator, f
   | `custom/` (`CRM_CUSTOM_DIR`) | `/var/www/html/custom` |
   | `client/custom/` (`CRM_CLIENT_CUSTOM_DIR`) | `/var/www/html/client/custom` |
 
-  No service mounts `/var/www/html` itself. The application code is the image's own, so an image upgrade really upgrades it. This is the EspoCRM 10 layout ("Migration to EspoCRM 10", https://docs.espocrm.com/administration/docker/installation/). If the entrypoint finds `/var/www/html` mounted, it takes the legacy path: no further upgrades, and `exit 1` when the mount is empty, which was the first-start risk in the earlier layout. The Compose policy tests enforce the layout (`no_docroot_mount`, `espocrm_mounts`, `espocrm_mounts_writable`).
+  `crm-app` also mounts the Git-controlled `deploy/apache/crm-access.conf` **read-only** at `/etc/apache2/conf-enabled/crm-access.conf` (§7.6). That is its only other mount. No service mounts `/var/www/html` itself. The application code is the image's own, so an image upgrade really upgrades it. This is the EspoCRM 10 layout ("Migration to EspoCRM 10", https://docs.espocrm.com/administration/docker/installation/). If the entrypoint finds `/var/www/html` mounted, it takes the legacy path: no further upgrades, and `exit 1` when the mount is empty, which was the first-start risk in the earlier layout. The Compose policy tests enforce the layout (`no_docroot_mount`, `espocrm_mounts`, `espocrm_mounts_writable`).
 
 #### Customisation: Git is authoritative, the runtime copy is read-write
 
@@ -165,7 +172,7 @@ docker compose -p crm-dev -f deploy/compose.json --env-file "$ENVF" up -d --wait
 scripts/deploy_custom.sh dev
 
 # Credentials are read from the environment only; they are never written to disk.
-export CRM_BASE_URL=http://127.0.0.1:8180 CRM_ADMIN_USERNAME=... CRM_ADMIN_PASSWORD=...
+export CRM_BASE_URL=http://<CRM_BIND_IP>:8180 CRM_ADMIN_USERNAME=... CRM_ADMIN_PASSWORD=...
 python3 scripts/seed_synthetic.py --dry-run                # dataset summary, no HTTP
 python3 scripts/seed_synthetic.py --base-url "$CRM_BASE_URL" --seed 1
 
@@ -173,7 +180,7 @@ scripts/backup.sh dev                      # -> /srv/CRM/runtime/dev/backups/crm
 scripts/export.sh dev                      # -> /srv/CRM/runtime/dev/backups/export-<UTC>/{accounts,contacts}.csv
 scripts/restore.sh dev crm-dev-<UTC>       # prints "restore completed ... in <N>s" (record it for AC8)
 
-CRM_SEED=1 CRM_EXPORT_DIR=/srv/CRM/runtime/dev/backups/export-<UTC> \
+CRM_SEED=1 CRM_EXPORT_DIR=/srv/CRM/runtime/dev/backups/export-<UTC> CRM_EXPECTED_BIND_IP=<CRM_BIND_IP> \
     python3 -m unittest discover -s tests/acceptance -v
 ```
 
@@ -212,4 +219,121 @@ for f in scripts/*.sh scripts/lib/*.sh; do bash -n "$f"; done
 # Show that a policy test fails when its rule is broken (any compose_bad_*.json):
 CRM_COMPOSE_UNDER_TEST=tests/unit/fixtures/compose_bad_mount_read_only.json \
     python3 -m unittest discover -s tests/unit -p test_compose_policy.py
+# The same for the Apache access file (any apache_bad_*.conf):
+CRM_ACCESS_CONF_UNDER_TEST=tests/unit/fixtures/apache_bad_remoteip.conf \
+    python3 -m unittest discover -s tests/unit -p test_compose_policy.py
 ```
+
+### 7.6 LAN access (CRM-D019)
+
+Matt has authorised direct access to the dev CRM from the two internal networks, on port 8180 of the host's LAN address. For the dev environment, this replaces the loopback-only binding and the SSH tunnel. The real addresses exist only in the runtime env file. Git holds variable names, loopback and logic only. Below, `<CRM_BIND_IP>` stands for the env file's value.
+
+#### How access is controlled
+
+1. **Bind.** Docker publishes `crm-app` port 80 as `${CRM_BIND_IP}:8180` only. No other host address answers, `127.0.0.1` included. `crm-db` and `crm-daemon` publish nothing, so MariaDB stays off the host network.
+2. **Source restriction, in Apache.** The host firewall is not available (standing rule: no iptables, ufw or nftables, so no `DOCKER-USER` chain either). The restriction is therefore enforced inside the stack. `deploy/apache/crm-access.conf` is mounted read-only into `crm-app` at `/etc/apache2/conf-enabled/crm-access.conf`, which `apache2.conf` includes server-wide. It holds:
+
+   ```apache
+   <Location "/">
+       Require ip 127.0.0.1 ::1 ${CRM_ALLOWED_SOURCES}
+   </Location>
+   ```
+
+   - `<Location "/">` covers every URL path. Location sections are merged after `<Directory>` sections and `.htaccess`, so this `Require` replaces the grant that `apache2.conf` gives `/var/www/`. The image's `.htaccess` has no access directives.
+   - Any other source gets `403 Forbidden`.
+   - `Require ip` tests the TCP peer address. `mod_remoteip` is not loaded and no header (`X-Forwarded-For` or any other) is trusted.
+   - Loopback stays allowed for the container's own healthcheck (`curl http://127.0.0.1/`).
+   - Compose passes `CRM_ALLOWED_SOURCES` to `crm-app` as a required variable. Apache expands `${CRM_ALLOWED_SOURCES}` from its process environment when it parses the configuration.
+3. **Fail closed.** No layer opens access when the variable is wrong or missing:
+
+   | Condition | Result |
+   |---|---|
+   | Bad bind, sources or site URL in the env file | `check_access.py dev` refuses (exit 1) |
+   | `CRM_BIND_IP` or `CRM_ALLOWED_SOURCES` unset or empty in the env file | Compose refuses to create the stack (`${VAR:?}`) |
+   | Variable undefined inside the container | Apache warns that it is not defined and leaves `${CRM_ALLOWED_SOURCES}` unexpanded. `mod_authz_host` rejects that as an invalid address, so the configuration does not parse and **Apache does not start**. The healthcheck then fails. |
+   | Variable empty inside the container | The line reduces to `Require ip 127.0.0.1 ::1`, so **every remote client is denied**. The healthcheck still passes. |
+   | Docker relays a connection instead of NAT-ing it (userland proxy) | Apache sees the `crm-net` gateway as the source. `check_access.py` refuses any source that overlaps `crm-net`, so the request is denied. |
+
+4. **Policy tests (in the loop).** `tests/unit/test_compose_policy.py` covers the following, each with a broken fixture:
+   - the single env-sourced bind (`app_single_env_bind`);
+   - no mapping without a host IP and no `0.0.0.0` (`ports_host_ip`);
+   - no literal non-loopback address in the Compose file (`no_literal_ip`), and none anywhere in `deploy/`, `scripts/` or `tests/` (`TestLiteralAddresses`);
+   - the read-only, `crm-app`-only access-file mount (`access_conf_mount`) and the required `CRM_ALLOWED_SOURCES` (`access_sources_env`);
+   - the conf file itself (`conf_deny_by_default`, `conf_no_grant`, `conf_no_remoteip`).
+
+**To confirm at the operator stage.** None of the following could be run in the ForgeV2 loop, which has no Docker and no network:
+- the Apache merge behaviour, and the fail-closed results for an undefined and an empty variable;
+- that Apache in the pinned image sees the container's environment;
+- that the container sees the real client source address for LAN traffic. Docker on the host runs with default settings: iptables NAT and the userland proxy.
+
+The steps below confirm each of these.
+
+#### The check: `scripts/check_access.py dev`
+
+It uses the Python standard library only and takes the same `dev` guard as the shell scripts: exit 2 unless the argument is exactly `dev` and the runtime directory is named `dev`. It reads the env file as text and never sources it. It refuses (exit 1) unless all of the following hold:
+- `CRM_BIND_IP` is exactly one IPv4 unicast address in dotted-quad form. It is not `0.0.0.0` (nor in `0.0.0.0/8`), not loopback, not multicast, reserved, broadcast or link-local.
+- `CRM_ALLOWED_SOURCES` is one or more space-separated IPv4 CIDRs, each of the form `a.b.c.d/nn`, with no host bits set. Each one:
+  - lies inside RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`);
+  - is `/16` or longer;
+  - does not overlap the `crm-net` subnet, which is read from `deploy/compose.json`.
+
+  `0.0.0.0/0` is therefore always refused.
+- `CRM_SITE_URL` is `http://<CRM_BIND_IP>:8180`, with the port explicit, no path other than `/`, no query and no user information. It is `http` because TLS is not implemented yet.
+- Each of the three names is assigned exactly once, in the plain `NAME=value` form, and none of them is set in the process environment, because Compose would prefer the process environment to the env file. Do not export `CRM_BIND_IP`. The acceptance tests use `CRM_EXPECTED_BIND_IP` instead.
+
+It prints no value from the env file. Problems are reported by variable name and entry number only.
+
+#### Operator steps: changing the existing install
+
+These steps keep the database, `data/`, `custom/`, `client/custom/` and the backups. They are all bind mounts under `/srv/CRM/runtime/dev` that `up -d` does not touch. Run them from the delivered worktree at the PR head commit (§4). Do not run `down -v`, and do not delete anything under the runtime.
+
+```sh
+ENVF=/srv/CRM/runtime/dev/env
+DC="docker compose -p crm-dev -f deploy/compose.json --env-file $ENVF"
+
+scripts/backup.sh dev                        # 1. a fresh backup before the change
+# 2. edit $ENVF (root, mode 0600): add CRM_BIND_IP and CRM_ALLOWED_SOURCES, and set
+#    CRM_SITE_URL=http://<CRM_BIND_IP>:8180. Nothing else changes.
+python3 scripts/check_access.py dev          # 3. must print "access settings OK"
+$DC config --quiet                           # 4. Compose accepts the file (prints nothing)
+ss -ltn 'sport = :8180'                      # 5. <CRM_BIND_IP>:8180 must be free (§6)
+$DC up -d --wait                             # 6. recreates crm-app with the new port, env and
+                                             #    access file; the data is in the bind mounts
+# 7. The entrypoint sets siteUrl only at installation, so set it on the existing install:
+$DC exec -T -u www-data -w /var/www/html crm-app php bin/command config:set siteUrl "http://<CRM_BIND_IP>:8180"
+$DC exec -T -u www-data -w /var/www/html crm-app php bin/command clear-cache
+```
+
+8. **Check Apache.**
+   - Run `$DC exec -T crm-app apache2ctl -t`. Expect `Syntax OK`.
+   - Run `$DC exec -T crm-app env -u CRM_ALLOWED_SOURCES apache2ctl -t`. Expect a syntax error about an invalid IP address, which shows that an undefined variable stops Apache.
+   - Run `$DC exec -T crm-app env CRM_ALLOWED_SOURCES= apache2ctl -t`. Expect `Syntax OK`, which means loopback only.
+
+   None of these restarts the running server.
+9. **Run AC9.** Run `CRM_EXPECTED_BIND_IP=<CRM_BIND_IP> python3 -m unittest discover -s tests/acceptance -k ac9 -v`. It checks the following:
+   - `crm-app` is published on `<CRM_BIND_IP>:8180` only;
+   - nothing answers on `127.0.0.1:8180`;
+   - `crm-db` and `crm-daemon` publish nothing;
+   - a request from `crm-daemon`, an unlisted source, gets `403`;
+   - `crm-app` is still healthy over loopback.
+
+   Then run the full acceptance suite with `CRM_BASE_URL=http://<CRM_BIND_IP>:8180`. Those requests come from the host itself, so they succeed only if the host's own address falls inside `CRM_ALLOWED_SOURCES`.
+10. **Check from each authorised subnet.** From one workstation in each authorised subnet, open `http://<CRM_BIND_IP>:8180/`, log in, and follow a few links. They must stay on the LAN URL. This verifies routing and the return path for both subnets. On the host, `docker compose ... logs crm-app` shows each request's client address. It must be the workstation's own address, not a `crm-net` address, which confirms that Docker preserves the source address.
+11. **Unauthorised source.** Request the CRM from a source outside both subnets and expect `403`, or no route. Use `curl -s -o /dev/null -w '%{http_code}\n' http://<CRM_BIND_IP>:8180/`.
+    - The in-stack check in step 9 always applies.
+    - If a LAN host outside both subnets is available, use it as well.
+    - Never widen `CRM_ALLOWED_SOURCES` to run a test.
+12. **Record the evidence** on the WO Issue, sanitised: no addresses. The CRM-001 evidence already recorded stays as it is.
+
+To roll back, run `$DC up -d --wait` from a checkout of the PR #5 head commit, with the previous env file restored. That brings back the `127.0.0.1` binding. Then set `siteUrl` back the same way. This commit's Compose file cannot be used without `CRM_BIND_IP`.
+
+**Changing the allowed sources or the access file later.** Edit the env file, or check out the new commit, run `check_access.py dev`, then run `$DC up -d --force-recreate --wait crm-app`. The access file is bind-mounted by inode, so a checkout that replaces the file reaches the container only when the container is recreated. The checkout must stay in place while the stack runs.
+
+#### Residual risks
+
+- **Plain HTTP.** Passwords and session cookies cross the LAN unencrypted. **TLS is mandatory before any real data** (CRM-PBI-008), and HTTPS is preferred for any authenticated use before then.
+- **Admin interface.** Every host in the authorised subnets reaches the login page, and with it the administrator login. EspoCRM authentication is the only control inside those subnets.
+- **Address-based trust.** A compromised or spoofing host inside an authorised subnet is admitted. The TCP handshake limits blind spoofing.
+- **The host itself.** Processes on the host that connect to `<CRM_BIND_IP>` carry the host's own address. If that address is inside an authorised subnet, they are admitted, much as loopback access was before. Containers of other projects that are relayed through the `crm-net` gateway are refused. To confirm at the operator stage.
+- **Docker networking changes.** If Docker's NAT mode changed, for example to `--iptables=false`, sources would appear differently. The overlap rule makes that fail closed for relayed traffic. Re-run step 9 after any Docker upgrade.
+- **IPv6.** Only an IPv4 address is published. No IPv6 access exists or is checked.

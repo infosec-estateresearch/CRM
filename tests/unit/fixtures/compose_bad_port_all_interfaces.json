@@ -49,7 +49,8 @@
         "ESPOCRM_DATABASE_PASSWORD": "${CRM_DB_PASSWORD:?CRM_DB_PASSWORD must be set in the env file}",
         "ESPOCRM_ADMIN_USERNAME": "${CRM_ADMIN_USERNAME:?CRM_ADMIN_USERNAME must be set in the env file}",
         "ESPOCRM_ADMIN_PASSWORD": "${CRM_ADMIN_PASSWORD:?CRM_ADMIN_PASSWORD must be set in the env file}",
-        "ESPOCRM_SITE_URL": "${CRM_SITE_URL:?CRM_SITE_URL must be set in the env file}"
+        "ESPOCRM_SITE_URL": "${CRM_SITE_URL:?CRM_SITE_URL must be set in the env file}",
+        "CRM_ALLOWED_SOURCES": "${CRM_ALLOWED_SOURCES:?CRM_ALLOWED_SOURCES must be set in the env file}"
       },
       "volumes": [
         {
@@ -66,6 +67,12 @@
           "type": "bind",
           "source": "${CRM_CLIENT_CUSTOM_DIR:?CRM_CLIENT_CUSTOM_DIR must be set in the env file}",
           "target": "/var/www/html/client/custom"
+        },
+        {
+          "type": "bind",
+          "source": "./apache/crm-access.conf",
+          "target": "/etc/apache2/conf-enabled/crm-access.conf",
+          "read_only": true
         }
       ],
       "ports": [

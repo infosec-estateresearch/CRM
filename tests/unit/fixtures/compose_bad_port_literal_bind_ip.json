@@ -1,0 +1,143 @@
+{
+  "name": "crm-dev",
+  "services": {
+    "crm-db": {
+      "image": "mariadb:11.4.13@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620",
+      "restart": "unless-stopped",
+      "environment": {
+        "MARIADB_DATABASE": "${CRM_DB_NAME:?CRM_DB_NAME must be set in the env file}",
+        "MARIADB_USER": "${CRM_DB_USER:?CRM_DB_USER must be set in the env file}",
+        "MARIADB_PASSWORD": "${CRM_DB_PASSWORD:?CRM_DB_PASSWORD must be set in the env file}",
+        "MARIADB_ROOT_PASSWORD": "${CRM_DB_ROOT_PASSWORD:?CRM_DB_ROOT_PASSWORD must be set in the env file}"
+      },
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "${CRM_DB_DIR:?CRM_DB_DIR must be set in the env file}",
+          "target": "/var/lib/mysql"
+        }
+      ],
+      "networks": {
+        "crm-net": {}
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "healthcheck.sh",
+          "--connect",
+          "--innodb_initialized"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 10,
+        "start_period": "30s"
+      }
+    },
+    "crm-app": {
+      "image": "espocrm/espocrm:10.0.12@sha256:b50245d1e291b2636116b0396ce0d06018ffcded6a6c61c7af2420443a20f3ec",
+      "restart": "unless-stopped",
+      "depends_on": {
+        "crm-db": {
+          "condition": "service_healthy"
+        }
+      },
+      "environment": {
+        "ESPOCRM_DATABASE_PLATFORM": "Mysql",
+        "ESPOCRM_DATABASE_HOST": "crm-db",
+        "ESPOCRM_DATABASE_NAME": "${CRM_DB_NAME:?CRM_DB_NAME must be set in the env file}",
+        "ESPOCRM_DATABASE_USER": "${CRM_DB_USER:?CRM_DB_USER must be set in the env file}",
+        "ESPOCRM_DATABASE_PASSWORD": "${CRM_DB_PASSWORD:?CRM_DB_PASSWORD must be set in the env file}",
+        "ESPOCRM_ADMIN_USERNAME": "${CRM_ADMIN_USERNAME:?CRM_ADMIN_USERNAME must be set in the env file}",
+        "ESPOCRM_ADMIN_PASSWORD": "${CRM_ADMIN_PASSWORD:?CRM_ADMIN_PASSWORD must be set in the env file}",
+        "ESPOCRM_SITE_URL": "${CRM_SITE_URL:?CRM_SITE_URL must be set in the env file}",
+        "CRM_ALLOWED_SOURCES": "${CRM_ALLOWED_SOURCES:?CRM_ALLOWED_SOURCES must be set in the env file}"
+      },
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "${CRM_DATA_DIR:?CRM_DATA_DIR must be set in the env file}",
+          "target": "/var/www/html/data"
+        },
+        {
+          "type": "bind",
+          "source": "${CRM_CUSTOM_DIR:?CRM_CUSTOM_DIR must be set in the env file}",
+          "target": "/var/www/html/custom"
+        },
+        {
+          "type": "bind",
+          "source": "${CRM_CLIENT_CUSTOM_DIR:?CRM_CLIENT_CUSTOM_DIR must be set in the env file}",
+          "target": "/var/www/html/client/custom"
+        },
+        {
+          "type": "bind",
+          "source": "./apache/crm-access.conf",
+          "target": "/etc/apache2/conf-enabled/crm-access.conf",
+          "read_only": true
+        }
+      ],
+      "ports": [
+        "192.0.2.10:8180:80"
+      ],
+      "networks": {
+        "crm-net": {}
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "curl",
+          "-fsS",
+          "-o",
+          "/dev/null",
+          "http://127.0.0.1/"
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "retries": 10,
+        "start_period": "180s"
+      }
+    },
+    "crm-daemon": {
+      "image": "espocrm/espocrm:10.0.12@sha256:b50245d1e291b2636116b0396ce0d06018ffcded6a6c61c7af2420443a20f3ec",
+      "entrypoint": "docker-daemon.sh",
+      "restart": "unless-stopped",
+      "depends_on": {
+        "crm-app": {
+          "condition": "service_healthy"
+        }
+      },
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "${CRM_DATA_DIR:?CRM_DATA_DIR must be set in the env file}",
+          "target": "/var/www/html/data"
+        },
+        {
+          "type": "bind",
+          "source": "${CRM_CUSTOM_DIR:?CRM_CUSTOM_DIR must be set in the env file}",
+          "target": "/var/www/html/custom"
+        },
+        {
+          "type": "bind",
+          "source": "${CRM_CLIENT_CUSTOM_DIR:?CRM_CLIENT_CUSTOM_DIR must be set in the env file}",
+          "target": "/var/www/html/client/custom"
+        }
+      ],
+      "networks": {
+        "crm-net": {}
+      }
+    }
+  },
+  "networks": {
+    "crm-net": {
+      "driver": "bridge",
+      "ipam": {
+        "config": [
+          {
+            "subnet": "172.16.10.0/24"
+          }
+        ]
+      }
+    }
+  },
+  "x-broken-fixture": "crm-app binds a literal (RFC 5737 documentation) address instead of ${CRM_BIND_IP}"
+}
