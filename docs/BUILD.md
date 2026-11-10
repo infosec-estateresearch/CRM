@@ -10,8 +10,8 @@ The build is the official EspoCRM image, pinned by digest, plus Estate Research'
 |---|---|
 | `deploy/compose.json` | Three services, all with images pinned by digest: `crm-app` (EspoCRM), `crm-daemon` (the same image with entrypoint `docker-daemon.sh`) and `crm-db` (MariaDB). JSON is valid Compose YAML; it was chosen so the policy tests need only the Python standard library. |
 | `deploy/env.example` | Names of the variables the stack needs. **No values.** |
-| `custom/` | ER metadata and code, mounted into the app as EspoCRM's `custom/` directory |
-| `scripts/` | Synthetic data seeder, backup, restore, export |
+| `custom/` | ER metadata and code. `scripts/deploy_custom.sh` deploys `custom/Espo/Custom/` into the runtime directory that the app mounts as EspoCRM's `custom/` (§7.2) |
+| `scripts/` | Synthetic data seeder, customisation deploy, backup, restore, export |
 | `tests/unit/` | Run without a stack or network (in the ForgeV2 loop) |
 | `tests/acceptance/` | Need the running dev stack (operator stage) |
 
@@ -19,13 +19,13 @@ Images (see `security/EXTERNAL_CODE_REGISTER.yaml`):
 - `espocrm/espocrm:10.0.12@sha256:b50245d1e291b2636116b0396ce0d06018ffcded6a6c61c7af2420443a20f3ec`
 - `mariadb:11.4.13@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620`
 
-**Dev versus release.** CRM-001's dev stack mounts `custom/` from the checkout. The customer release (CRM-PBI-016) bakes the customisations into an ER image built from the pinned upstream digest, and installs from a release bundle with no Git checkout, ForgeV2, Claude or development-host paths (CRM-D017).
+**Dev versus release.** CRM-001's dev stack deploys `custom/` from the checkout into its runtime directory. The customer release (CRM-PBI-016) bakes the customisations into an ER image built from the pinned upstream digest, and installs from a release bundle with no Git checkout, ForgeV2, Claude or development-host paths (CRM-D017).
 
 ## 2. Where it runs
 
 The dev environment lives in `DOCKER1:/srv/CRM/runtime/dev/`, which is root-owned, mode `0700` and outside Git. It contains:
 - `env`: generated secrets, mode `0600`;
-- `db/` and `data/`: bind mounts;
+- `db/`, `data/`, `custom/` and `client/custom/`: bind mounts;
 - `backups/`.
 
 ## 3. Isolation boundary (CRM-D012)
@@ -45,6 +45,7 @@ The dev environment lives in `DOCKER1:/srv/CRM/runtime/dev/`, which is root-owne
 ```sh
 cd /srv/CRM/worktrees/CRM-001      # the delivered forge/CRM-001 worktree at the PR head commit
 git rev-parse HEAD                  # must equal the PR head SHA recorded on the WO Issue
+scripts/deploy_custom.sh dev        # before the first up (§7.2)
 docker compose -p crm-dev -f deploy/compose.json --env-file /srv/CRM/runtime/dev/env up -d
 python3 scripts/seed_synthetic.py --base-url http://127.0.0.1:8180
 python3 -m unittest discover -s tests/acceptance -v
@@ -90,22 +91,54 @@ Everything below is for the operator stage. Run it as the authorised operator, f
 
 ### 7.1 One-time runtime preparation
 
-1. Create `/srv/CRM/runtime/dev/` (root-owned, mode `0700`) with the subdirectories `db/`, `data/` and `backups/`.
+1. Create `/srv/CRM/runtime/dev/` (root-owned, mode `0700`) with the subdirectories `db/`, `data/`, `custom/`, `client/custom/` and `backups/`. All of them start empty.
 2. Copy `deploy/env.example` to `/srv/CRM/runtime/dev/env` (mode `0600`) and fill in every name. Generate the secrets on the host and never commit them. Use these values:
    - `CRM_DB_DIR=/srv/CRM/runtime/dev/db`
    - `CRM_DATA_DIR=/srv/CRM/runtime/dev/data`
+   - `CRM_CUSTOM_DIR=/srv/CRM/runtime/dev/custom`
+   - `CRM_CLIENT_CUSTOM_DIR=/srv/CRM/runtime/dev/client/custom`
    - `CRM_SITE_URL=http://127.0.0.1:8180`
 
-   Compose refuses to start if any variable is unset.
+   Compose refuses to start if any variable is unset. The scripts assume these exact paths under `/srv/CRM/runtime/dev`.
 3. Confirm that `172.16.10.0/24` and `127.0.0.1:8180` are free. A conflict is reported to Matt, not remediated (§6).
 
 ### 7.2 Layout of the stack
 
 - `crm-app` serves EspoCRM on `127.0.0.1:8180`. Reach it from a workstation over an SSH tunnel.
 - `crm-daemon` runs the job daemon (`docker-daemon.sh`).
-- `crm-db` is MariaDB and publishes no port.
-- The EspoCRM document root (`/var/www/html`) is bind-mounted from `CRM_DATA_DIR`, and the app and the daemon share it. EspoCRM's own `data/` directory (config, uploads, logs) therefore sits under it.
-- The repository's `custom/` directory is mounted **read-only** at `/var/www/html/custom`. Customisation is changed in Git, not in the Admin UI. Entity Manager and Layout Manager edits that write to `custom/` will fail. After changing `custom/`, run *Administration → Clear Cache / Rebuild*.
+- `crm-db` is MariaDB and publishes no port. It bind-mounts `CRM_DB_DIR` at `/var/lib/mysql`.
+- `crm-app` and `crm-daemon` each have exactly three bind mounts, which are the same three on both services and are all read-write:
+
+  | Runtime directory (env variable) | Mounted at |
+  |---|---|
+  | `data/` (`CRM_DATA_DIR`) | `/var/www/html/data`: config, uploads, logs, cache |
+  | `custom/` (`CRM_CUSTOM_DIR`) | `/var/www/html/custom` |
+  | `client/custom/` (`CRM_CLIENT_CUSTOM_DIR`) | `/var/www/html/client/custom` |
+
+  No service mounts `/var/www/html` itself. The application code is the image's own, so an image upgrade really upgrades it. This is the EspoCRM 10 layout ("Migration to EspoCRM 10", https://docs.espocrm.com/administration/docker/installation/). If the entrypoint finds `/var/www/html` mounted, it takes the legacy path: no further upgrades, and `exit 1` when the mount is empty, which was the first-start risk in the earlier layout. The Compose policy tests enforce the layout (`no_docroot_mount`, `espocrm_mounts`, `espocrm_mounts_writable`).
+
+#### Customisation: Git is authoritative, the runtime copy is read-write
+
+**Decision.** The runtime `custom/` and `client/custom/` are mounted read-write. The repository's `custom/` is not mounted into the containers at all. `scripts/deploy_custom.sh dev` copies `custom/Espo/Custom/` into the runtime `custom/Espo/Custom/`.
+
+**Why not read-only.** The image entrypoint runs `setPermissions`, which is `chown -R www-data:www-data ./data ./custom ./client/custom`, on every start, under `set -euo pipefail`. That covers both installation and migration. A chown on a read-only mount fails, so the entrypoint would abort the first installation and every later restart. The image entrypoint is not overridden.
+
+**How the deploy works.** It is deterministic:
+- It builds a fresh copy beside the live tree, swaps it in by rename, and deletes the previous tree. Files removed from Git are therefore removed from the runtime too, and two deploys of the same commit give identical trees.
+- Files are written world-readable (umask `022`), whatever the operator's umask.
+- It only manages `custom/Espo/Custom/`. The rest of the runtime `custom/` and all of `client/custom/` are left alone. The repository has no `client/custom/` content at present.
+- It never replaces the runtime `custom/` directory itself, because that directory is the bind-mount source.
+- If `crm-app` is running, it then runs `bin/command clear-cache` and `bin/command rebuild` inside `crm-app` as `www-data`. Otherwise it says the rebuild was skipped.
+- It takes the `dev` guard like the other scripts.
+
+**Consequences:**
+- **Installation (first start).** Run the first deploy **before** the first `up`. Bind mounts start empty, and they hide the image's own `custom/` and `client/custom/`. On its first start the entrypoint runs `actionInstall`, which includes `bin/command rebuild`. With the customisation already in place, that rebuild creates the ER fields, links and database columns. The metadata cache and schema are then right from the first start, with no second rebuild. Deploying after the first `up` also works, but only once the deploy's own rebuild has run. The script refuses to run if the runtime `custom/` directory does not exist (§7.1).
+- **Rebuild (changing the customisation).** Change `custom/` in Git, check out the commit, and run `scripts/deploy_custom.sh dev` with the stack up. That clears the cache and rebuilds in place, and no restart is needed. If the stack is down, run the script again after `up`. A restart alone runs `clear-cache` and `migrate` (`actionMigrate`), not a guaranteed `rebuild`.
+- **Restart.** The entrypoint re-chowns the three runtime directories to `www-data` (container uid) on every start. The files deployed from Git stay as they are, only their owner changes. A later deploy, run as root, replaces them again.
+- **Admin-UI changes.** Entity Manager and Layout Manager now succeed, because they write to the runtime `custom/Espo/Custom/`. They are **overwritten by the next deploy**. To keep a change, make it in Git. Git remains authoritative, and the runtime copy is only a deployment of it.
+- **Backup and restore** cover the runtime `custom/` and `client/custom/` as well as `data/` and the database (§7.3). After a restore, the runtime holds the customisation as it was at backup time. Run `scripts/deploy_custom.sh dev` to return to the checked-out commit.
+
+The entrypoint and image behaviour above comes from the upstream `espocrm-docker` source (`latest/apache/`, `ESPOCRM_VERSION 10.0.12`), not from the pinned digest. It is to be confirmed at the operator stage.
 
 ### 7.3 Commands
 
@@ -113,7 +146,11 @@ All commands run from the repository root.
 
 ```sh
 ENVF=/srv/CRM/runtime/dev/env
-docker compose -p crm-dev -f deploy/compose.json --env-file "$ENVF" up -d --wait
+scripts/deploy_custom.sh dev               # first deploy BEFORE the first up (crm-app not running: no rebuild yet)
+docker compose -p crm-dev -f deploy/compose.json --env-file "$ENVF" up -d --wait   # installs, incl. rebuild
+
+# Later customisation changes, with the stack up: deploy + clear-cache + rebuild
+scripts/deploy_custom.sh dev
 
 # Credentials are read from the environment only; they are never written to disk.
 export CRM_BASE_URL=http://127.0.0.1:8180 CRM_ADMIN_USERNAME=... CRM_ADMIN_PASSWORD=...
@@ -129,9 +166,10 @@ CRM_SEED=1 CRM_EXPORT_DIR=/srv/CRM/runtime/dev/backups/export-<UTC> \
 ```
 
 Script behaviour:
-- **The dev guard.** `backup.sh`, `restore.sh` and `export.sh` take the target environment as their first argument. They refuse, with exit 2, unless it is exactly `dev` and the runtime directory is named `dev`.
-- **`backup.sh`** runs `mariadb-dump` inside `crm-db`, using the container's own credentials, so no secret appears on the host command line. It also tars `data/` and writes `SHA256SUMS`. A failed backup leaves no partial directory.
-- **`restore.sh`** checks the checksums and stops `crm-app` and `crm-daemon`. It moves the current `data/` aside to `data.replaced-<UTC>` (nothing is deleted), extracts the backup and imports the dump. Then it starts the stack and prints the elapsed time. Remove `data.replaced-*` by hand once the restore has been accepted.
+- **The dev guard.** `deploy_custom.sh`, `backup.sh`, `restore.sh` and `export.sh` take the target environment as their first argument. They refuse, with exit 2, unless it is exactly `dev` and the runtime directory is named `dev`.
+- **`deploy_custom.sh`** is described in §7.2.
+- **`backup.sh`** runs `mariadb-dump` inside `crm-db`, using the container's own credentials, so no secret appears on the host command line. It also writes one archive per mounted runtime directory: `data.tar.gz` (`data/`), `custom.tar.gz` (`custom/`) and `client-custom.tar.gz` (`client/custom/`). Each archive stores its runtime-relative path. It then writes `SHA256SUMS` over all four files. A failed backup leaves no partial directory.
+- **`restore.sh`** checks the checksums. It also refuses a backup that lacks any of the four checksummed files, which includes backups made with the earlier, whole-document-root layout. Then it stops `crm-app` and `crm-daemon`. It moves each current directory aside, to `data.replaced-<UTC>`, `custom.replaced-<UTC>` and `client/custom.replaced-<UTC>` (nothing is deleted), and extracts each archive back into its own place. It imports the dump, starts the stack and prints the elapsed time. Remove the `*.replaced-*` directories by hand once the restore has been accepted.
 - **`export.sh`** pages through the API, ordered by id, and fails if the number of rows does not match the API total. Values are written verbatim, so open the CSV files as data, not as spreadsheets with formulas.
 
 ### 7.4 The synthetic dataset (seed 1)
@@ -154,7 +192,7 @@ All values are synthetic:
 ```sh
 python3 -m unittest discover -s tests/unit -v
 for f in scripts/*.sh scripts/lib/*.sh; do bash -n "$f"; done
-# Show that a policy test fails when its rule is broken:
-CRM_COMPOSE_UNDER_TEST=tests/unit/fixtures/compose_bad_db_ports.json \
+# Show that a policy test fails when its rule is broken (any compose_bad_*.json):
+CRM_COMPOSE_UNDER_TEST=tests/unit/fixtures/compose_bad_mount_read_only.json \
     python3 -m unittest discover -s tests/unit -p test_compose_policy.py
 ```

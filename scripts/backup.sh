@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Back up the crm-dev stack: a MariaDB dump plus the EspoCRM data directory,
-# into $CRM_RUNTIME_DIR/backups/crm-dev-<UTC stamp>/.
+# Back up the crm-dev stack: a MariaDB dump plus the runtime directories that
+# crm-app and crm-daemon mount (data/, custom/, client/custom/), into
+# $CRM_RUNTIME_DIR/backups/crm-dev-<UTC stamp>/.
 # Usage: scripts/backup.sh dev
 set -euo pipefail
 # shellcheck source=lib/common.sh
@@ -8,7 +9,9 @@ set -euo pipefail
 
 require_dev "${1:-}"
 require_env_file
-[ -d "$CRM_RUNTIME_DIR/data" ] || die "data directory missing: $CRM_RUNTIME_DIR/data"
+for dir in "${CRM_PERSISTENT_DIRS[@]}"; do
+    [ -d "$CRM_RUNTIME_DIR/$dir" ] || die "$dir directory missing: $CRM_RUNTIME_DIR/$dir"
+done
 
 umask 077
 name="crm-dev-$(utc_stamp)"
@@ -23,8 +26,15 @@ trap 'rm -rf -- "$partial"' EXIT
 compose exec -T crm-db sh -c \
     'MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb-dump -uroot --single-transaction --routines --triggers --events "$MARIADB_DATABASE"' \
     | gzip -c > "$partial/db.sql.gz"
-tar -C "$CRM_RUNTIME_DIR" -czf "$partial/data.tar.gz" data
-(cd "$partial" && sha256sum db.sql.gz data.tar.gz > SHA256SUMS)
+archives=(db.sql.gz)
+for dir in "${CRM_PERSISTENT_DIRS[@]}"; do
+    archive=$(archive_for "$dir")
+    # Members are stored under their runtime-relative path (data/, custom/,
+    # client/custom/), so restore extracts each back into its own place.
+    tar -C "$CRM_RUNTIME_DIR" -czf "$partial/$archive" "$dir"
+    archives+=("$archive")
+done
+(cd "$partial" && sha256sum "${archives[@]}" > SHA256SUMS)
 
 mv "$partial" "$dest"
 trap - EXIT

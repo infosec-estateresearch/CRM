@@ -55,13 +55,17 @@
         {
           "type": "bind",
           "source": "${CRM_DATA_DIR:?CRM_DATA_DIR must be set in the env file}",
-          "target": "/var/www/html"
+          "target": "/var/www/html/data"
         },
         {
           "type": "bind",
-          "source": "../custom",
-          "target": "/var/www/html/custom",
-          "read_only": true
+          "source": "${CRM_CUSTOM_DIR:?CRM_CUSTOM_DIR must be set in the env file}",
+          "target": "/var/www/html/custom"
+        },
+        {
+          "type": "bind",
+          "source": "${CRM_CLIENT_CUSTOM_DIR:?CRM_CLIENT_CUSTOM_DIR must be set in the env file}",
+          "target": "/var/www/html/client/custom"
         }
       ],
       "ports": [
@@ -98,13 +102,17 @@
         {
           "type": "bind",
           "source": "${CRM_DATA_DIR:?CRM_DATA_DIR must be set in the env file}",
-          "target": "/var/www/html"
+          "target": "/var/www/html/data"
         },
         {
           "type": "bind",
-          "source": "../custom",
-          "target": "/var/www/html/custom",
-          "read_only": true
+          "source": "${CRM_CUSTOM_DIR:?CRM_CUSTOM_DIR must be set in the env file}",
+          "target": "/var/www/html/custom"
+        },
+        {
+          "type": "bind",
+          "source": "${CRM_CLIENT_CUSTOM_DIR:?CRM_CLIENT_CUSTOM_DIR must be set in the env file}",
+          "target": "/var/www/html/client/custom"
         }
       ],
       "networks": {

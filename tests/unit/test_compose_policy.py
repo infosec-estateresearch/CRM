@@ -37,6 +37,10 @@ BROKEN = {
     "compose_bad_prefix_network.json": {"crm_prefix"},
     "compose_bad_prefix_volume.json": {"crm_prefix"},
     "compose_bad_container_name.json": {"no_container_name"},
+    "compose_bad_docroot_mount.json": {"no_docroot_mount", "espocrm_mounts"},
+    "compose_bad_mount_missing.json": {"espocrm_mounts"},
+    "compose_bad_mount_literal_source.json": {"espocrm_mounts"},
+    "compose_bad_mount_read_only.json": {"espocrm_mounts_writable"},
 }
 
 
@@ -72,6 +76,15 @@ class TestDeployedComposePolicy(unittest.TestCase):
 
     def test_no_service_sets_container_name(self):
         self.assertRule("no_container_name")
+
+    def test_no_service_mounts_the_document_root(self):
+        self.assertRule("no_docroot_mount")
+
+    def test_espocrm_services_mount_the_three_persistent_dirs_from_env(self):
+        self.assertRule("espocrm_mounts")
+
+    def test_espocrm_persistent_mounts_are_writable(self):
+        self.assertRule("espocrm_mounts_writable")
 
 
 class TestBrokenFixtures(unittest.TestCase):
@@ -120,6 +133,53 @@ class TestPortParsing(unittest.TestCase):
         self.assertTrue(policy.rule_db_no_ports({"services": {}}))
 
 
+class TestMountRules(unittest.TestCase):
+    """The mount rules on small documents, short syntax included."""
+
+    IMAGE = ESPOCRM_IMAGE
+    GOOD = ["${CRM_DATA_DIR:?x}:/var/www/html/data",
+            "${CRM_CUSTOM_DIR:?x}:/var/www/html/custom",
+            "${CRM_CLIENT_CUSTOM_DIR:?x}:/var/www/html/client/custom"]
+
+    def doc(self, *volume_lists):
+        return {"services": {f"crm-e{i}": {"image": self.IMAGE, "volumes": v}
+                             for i, v in enumerate(volume_lists)}}
+
+    def test_short_syntax_good_layout_passes(self):
+        doc = self.doc(self.GOOD, self.GOOD)
+        for rule in ("no_docroot_mount", "espocrm_mounts", "espocrm_mounts_writable"):
+            self.assertEqual(policy.RULES[rule](doc), [], rule)
+
+    def test_short_syntax_docroot_and_ro(self):
+        doc = self.doc(["${CRM_DATA_DIR:?x}:/var/www/html"])
+        self.assertTrue(policy.rule_no_docroot_mount(doc))
+        self.assertTrue(policy.rule_espocrm_mounts(doc))
+        ro = self.doc(self.GOOD[:2] + [self.GOOD[2] + ":ro"])
+        self.assertEqual(policy.rule_espocrm_mounts(ro), [])
+        self.assertEqual(len(policy.rule_espocrm_mounts_writable(ro)), 1)
+
+    def test_docroot_on_any_service_is_a_violation(self):
+        doc = {"services": {"crm-db": {"image": MARIADB_IMAGE,
+                                       "volumes": ["/srv/x:/var/www/html"]}}}
+        self.assertTrue(policy.rule_no_docroot_mount(doc))
+
+    def test_named_volume_literal_path_and_shared_variable_are_violations(self):
+        named = self.doc(["crm-data:/var/www/html/data"] + self.GOOD[1:])
+        self.assertTrue(policy.rule_espocrm_mounts(named))
+        literal = self.doc(["/srv/CRM/runtime/dev/data:/var/www/html/data"] + self.GOOD[1:])
+        self.assertTrue(policy.rule_espocrm_mounts(literal))
+        shared = self.doc(["${CRM_DATA_DIR:?x}:/var/www/html/custom",
+                           self.GOOD[0], self.GOOD[2]])
+        self.assertTrue(policy.rule_espocrm_mounts(shared))
+        differ = self.doc(self.GOOD, ["${OTHER_DIR:?x}:/var/www/html/data"] + self.GOOD[1:])
+        self.assertTrue(policy.rule_espocrm_mounts(differ))
+        extra = self.doc(self.GOOD + ["${CRM_X:?x}:/var/www/html/upload"])
+        self.assertTrue(policy.rule_espocrm_mounts(extra))
+
+    def test_no_espocrm_service_is_a_violation(self):
+        self.assertTrue(policy.rule_espocrm_mounts({"services": {}}))
+
+
 class TestRegister(unittest.TestCase):
     def test_register_parses_both_images(self):
         reg = policy.load_register()
@@ -166,18 +226,23 @@ class TestComposeShape(unittest.TestCase):
     def test_mounts(self):
         def binds(name):
             return {v["target"]: v for v in self.svc[name]["volumes"]}
+        expected = {
+            "/var/www/html/data": "CRM_DATA_DIR",
+            "/var/www/html/custom": "CRM_CUSTOM_DIR",
+            "/var/www/html/client/custom": "CRM_CLIENT_CUSTOM_DIR",
+        }
         for name in ("crm-app", "crm-daemon"):
-            custom = binds(name)["/var/www/html/custom"]
-            self.assertEqual(custom["type"], "bind")
-            self.assertTrue(custom["read_only"])
-            # compose.json lives in deploy/, so the repo's custom/ is ../custom
-            self.assertEqual(os.path.normpath(os.path.join(policy.REPO, "deploy",
-                                                           custom["source"])),
-                             os.path.join(policy.REPO, "custom"))
-            self.assertEqual(binds(name)["/var/www/html"]["source"],
-                             "${CRM_DATA_DIR:?CRM_DATA_DIR must be set in the env file}")
+            self.assertEqual(len(self.svc[name]["volumes"]), 3, name)
+            self.assertEqual(set(binds(name)), set(expected), name)
+            self.assertNotIn("/var/www/html", binds(name))
+            for target, var in expected.items():
+                vol = binds(name)[target]
+                self.assertEqual(vol["type"], "bind")
+                self.assertEqual(vol["source"], f"${{{var}:?{var} must be set in the env file}}")
+                self.assertFalse(vol.get("read_only", False), f"{name} {target}")
         self.assertEqual(binds("crm-db")["/var/lib/mysql"]["source"],
                          "${CRM_DB_DIR:?CRM_DB_DIR must be set in the env file}")
+        self.assertEqual(len(self.svc["crm-db"]["volumes"]), 1)
         for name, svc in self.svc.items():
             for vol in svc["volumes"]:
                 self.assertEqual(vol["type"], "bind", name)

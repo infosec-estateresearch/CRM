@@ -1,8 +1,20 @@
 # shellcheck shell=bash
-# Shared helpers for backup.sh, restore.sh and export.sh. Source, do not run.
+# Shared helpers for backup.sh, restore.sh, export.sh and deploy_custom.sh. Source, do not run.
 
 CRM_REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 CRM_PROJECT=crm-dev
+
+# The runtime directories crm-app and crm-daemon bind-mount, relative to
+# $CRM_RUNTIME_DIR, and the backup archive that holds each one.
+CRM_PERSISTENT_DIRS=(data custom client/custom)
+archive_for() {
+    case "$1" in
+        data) echo data.tar.gz ;;
+        custom) echo custom.tar.gz ;;
+        client/custom) echo client-custom.tar.gz ;;
+        *) die "unknown persistent directory: $1" ;;
+    esac
+}
 
 die() {
     echo "$(basename "$0"): $*" >&2

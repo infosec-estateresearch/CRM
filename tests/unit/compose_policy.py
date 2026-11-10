@@ -137,6 +137,99 @@ def rule_no_container_name(doc, register=None):
             if "container_name" in svc]
 
 
+# EspoCRM 10 persistence layout (upstream Docker docs, "Migration to EspoCRM 10"):
+# the persistent directories are mounted one by one, never the document root.
+ESPOCRM_REPO = "espocrm/espocrm"
+DOCROOT = "/var/www/html"
+ESPOCRM_TARGETS = ("/var/www/html/data", "/var/www/html/custom",
+                   "/var/www/html/client/custom")
+REQUIRED_ENV = re.compile(r"^\$\{[A-Z][A-Z0-9_]*:\?[^}]*\}$")
+
+
+def _norm_target(target):
+    target = str(target or "")
+    return "/" + target.strip("/") if target.startswith("/") else target
+
+
+def _mounts(svc):
+    """[{type, source, target, read_only}] for a service, short or long syntax."""
+    out = []
+    for vol in svc.get("volumes") or []:
+        if isinstance(vol, dict):
+            out.append({"type": vol.get("type", ""), "source": str(vol.get("source", "")),
+                        "target": _norm_target(vol.get("target")),
+                        "read_only": bool(vol.get("read_only"))})
+            continue
+        text = str(vol)
+        if text.startswith("${") and "}" in text:  # ${VAR:?msg} contains a colon
+            end = text.index("}") + 1
+            parts = [text[:end]] + (text[end + 1:].split(":") if text[end:end + 1] == ":" else [])
+        else:
+            parts = text.split(":")
+        if len(parts) == 1:  # anonymous volume
+            out.append({"type": "volume", "source": "", "target": _norm_target(parts[0]),
+                        "read_only": False})
+            continue
+        source, target = parts[0], parts[1]
+        modes = parts[2].split(",") if len(parts) > 2 else []
+        kind = "bind" if source[:1] in ("/", ".", "~", "$") else "volume"
+        out.append({"type": kind, "source": source, "target": _norm_target(target),
+                    "read_only": "ro" in modes})
+    return out
+
+
+def _is_espocrm(svc):
+    ref = str(svc.get("image") or "").partition("@")[0]
+    repo = ref.rsplit(":", 1)[0] if ":" in ref.rsplit("/", 1)[-1] else ref
+    return repo == ESPOCRM_REPO
+
+
+def rule_no_docroot_mount(doc, register=None):
+    """No service mounts the EspoCRM document root itself (legacy layout)."""
+    return [f"{name}: mounts {DOCROOT} itself" for name, svc in _services(doc)
+            for m in _mounts(svc) if m["target"] == DOCROOT]
+
+
+def rule_espocrm_mounts(doc, register=None):
+    """Every EspoCRM service has exactly the three persistent bind mounts, each
+    sourced from a required env variable, one distinct variable per target, and
+    the same variable per target on every EspoCRM service."""
+    out = []
+    espo = [(name, svc) for name, svc in _services(doc) if _is_espocrm(svc)]
+    if not espo:
+        return ["no service runs the EspoCRM image"]
+    sources = {}
+    for name, svc in espo:
+        mounts = _mounts(svc)
+        targets = [m["target"] for m in mounts]
+        if sorted(targets) != sorted(ESPOCRM_TARGETS):
+            out.append(f"{name}: mounts {targets}, expected exactly {list(ESPOCRM_TARGETS)}")
+        for m in mounts:
+            if m["target"] not in ESPOCRM_TARGETS:
+                continue
+            if m["type"] != "bind":
+                out.append(f"{name}: {m['target']} is a {m['type'] or '<untyped>'} mount, not a bind")
+            if not REQUIRED_ENV.match(m["source"]):
+                out.append(f"{name}: {m['target']} source {m['source']!r} is not a required "
+                           "env variable (${VAR:?message})")
+            sources.setdefault(m["target"], set()).add(m["source"])
+    for target, srcs in sorted(sources.items()):
+        if len(srcs) > 1:
+            out.append(f"{target}: EspoCRM services use different sources {sorted(srcs)}")
+    flat = [next(iter(s)) for s in sources.values() if len(s) == 1]
+    if len(set(flat)) != len(flat):
+        out.append("two persistent targets share one source variable")
+    return out
+
+
+def rule_espocrm_mounts_writable(doc, register=None):
+    """The entrypoint chowns data/, custom/ and client/custom/ on every start
+    under set -e, so none of them may be read-only."""
+    return [f"{name}: {m['target']} is mounted read-only"
+            for name, svc in _services(doc) if _is_espocrm(svc)
+            for m in _mounts(svc) if m["target"] in ESPOCRM_TARGETS and m["read_only"]]
+
+
 RULES = {
     "db_no_ports": rule_db_no_ports,
     "ports_loopback": rule_ports_loopback,
@@ -145,6 +238,9 @@ RULES = {
     "images_match_register": rule_images_match_register,
     "crm_prefix": rule_crm_prefix,
     "no_container_name": rule_no_container_name,
+    "no_docroot_mount": rule_no_docroot_mount,
+    "espocrm_mounts": rule_espocrm_mounts,
+    "espocrm_mounts_writable": rule_espocrm_mounts_writable,
 }
 
 

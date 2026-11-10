@@ -1,8 +1,9 @@
 """Script tests (WO CRM-001 items 4 and 5): bash -n, the dev guard, and the
-backup/restore/export flows against a fake `docker` and a temporary runtime
-directory. No stack, no network."""
+backup/restore/export/deploy_custom flows against a fake `docker` and a
+temporary runtime directory. No stack, no network."""
 
 import csv
+import filecmp
 import gzip
 import io
 import json
@@ -10,6 +11,7 @@ import os
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -21,7 +23,8 @@ sys.path.insert(0, SCRIPTS)
 import crm_api  # noqa: E402
 import export_csv  # noqa: E402
 
-GUARDED = ["backup.sh", "restore.sh", "export.sh"]
+GUARDED = ["backup.sh", "restore.sh", "export.sh", "deploy_custom.sh"]
+REPO_CUSTOM = os.path.join(REPO, "custom", "Espo", "Custom")
 
 FAKE_DOCKER = """#!/usr/bin/env bash
 # Records its arguments; plays mariadb-dump / mariadb inside "crm-db".
@@ -29,6 +32,7 @@ printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
 case "$*" in
     *mariadb-dump*) printf -- '-- fake dump\\nCREATE TABLE account (id int);\\n' ;;
     *"exec -T crm-db"*) cat > "$FAKE_DOCKER_STDIN" ;;
+    *" ps --status running -q crm-app"*) [ -z "${FAKE_DOCKER_RUNNING:-}" ] || echo 0123abcd ;;
 esac
 exit 0
 """
@@ -57,13 +61,24 @@ class ScriptEnv(unittest.TestCase):
         os.makedirs(os.path.join(self.runtime, "data", "upload"))
         with open(os.path.join(self.runtime, "data", "config.php"), "w") as fh:
             fh.write("<?php return [];\n")
+        os.makedirs(os.path.join(self.runtime, "custom", "Espo", "Custom"))
+        self.write("custom/Espo/Custom/Resources/metadata/entityDefs/Account.json", "{}\n")
+        os.makedirs(os.path.join(self.runtime, "client", "custom"))
+        self.write("client/custom/res.js", "// client customisation\n")
         with open(os.path.join(self.runtime, "env"), "w") as fh:
             fh.write("CRM_DB_NAME=\n")
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_script(self, name, *args, runtime=None, extra_env=None):
+    def write(self, rel, text):
+        path = os.path.join(self.runtime, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write(text)
+        return path
+
+    def run_script(self, name, *args, runtime=None, extra_env=None, umask=None):
         env = {
             "PATH": self.bin + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"),
             "CRM_RUNTIME_DIR": runtime or self.runtime,
@@ -72,8 +87,10 @@ class ScriptEnv(unittest.TestCase):
             "HOME": self.tmp.name,
         }
         env.update(extra_env or {})
+        preexec = (lambda: os.umask(umask)) if umask is not None else None
         return subprocess.run(["bash", os.path.join(SCRIPTS, name), *args],
-                              capture_output=True, text=True, env=env, timeout=60)
+                              capture_output=True, text=True, env=env, timeout=60,
+                              preexec_fn=preexec)
 
     def docker_calls(self):
         if not os.path.exists(self.log):
@@ -108,7 +125,10 @@ class TestDevGuard(ScriptEnv):
                     self.assertEqual(res.returncode, 2, res.stderr)
                     self.assertIn("refusing to run", res.stderr)
                     self.assertEqual(self.docker_calls(), [])
-        self.assertEqual(sorted(os.listdir(self.runtime)), ["data", "env"], "nothing written")
+        self.assertEqual(sorted(os.listdir(self.runtime)), ["client", "custom", "data", "env"],
+                         "nothing written")
+        self.assertEqual(os.listdir(os.path.join(self.runtime, "custom", "Espo", "Custom")),
+                         ["Resources"], "custom untouched")
 
     def test_refuses_a_runtime_that_is_not_dev(self):
         prod = os.path.join(self.tmp.name, "runtime", "prod")
@@ -133,7 +153,21 @@ class TestBackupRestore(ScriptEnv):
 
     def test_backup_writes_dump_data_and_checksums(self):
         dest = self.backup()
-        self.assertEqual(sorted(os.listdir(dest)), ["SHA256SUMS", "data.tar.gz", "db.sql.gz"])
+        self.assertEqual(sorted(os.listdir(dest)),
+                         ["SHA256SUMS", "client-custom.tar.gz", "custom.tar.gz",
+                          "data.tar.gz", "db.sql.gz"])
+        tops = {"data.tar.gz": "data/config.php",
+                "custom.tar.gz": "custom/Espo/Custom/Resources/metadata/entityDefs/Account.json",
+                "client-custom.tar.gz": "client/custom/res.js"}
+        for archive, member in tops.items():
+            with tarfile.open(os.path.join(dest, archive)) as tf:
+                names = tf.getnames()
+            self.assertIn(member, names, archive)
+            root = member.split("/")[0] if archive != "client-custom.tar.gz" else "client/custom"
+            self.assertTrue(all(n == root or n.startswith(root + "/") for n in names),
+                            f"{archive} holds only {root}: {names}")
+        with open(os.path.join(dest, "SHA256SUMS")) as fh:
+            self.assertEqual(len(fh.read().splitlines()), 4)
         with gzip.open(os.path.join(dest, "db.sql.gz"), "rt") as fh:
             self.assertIn("fake dump", fh.read())
         calls = self.docker_calls()
@@ -145,6 +179,15 @@ class TestBackupRestore(ScriptEnv):
         res = subprocess.run(["sha256sum", "-c", "SHA256SUMS"], cwd=dest, capture_output=True)
         self.assertEqual(res.returncode, 0)
 
+    def test_backup_requires_every_persistent_dir(self):
+        os.rename(os.path.join(self.runtime, "client", "custom"),
+                  os.path.join(self.tmp.name, "moved"))
+        res = self.run_script("backup.sh", "dev")
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("client/custom directory missing", res.stderr)
+        self.assertEqual(self.docker_calls(), [])
+        self.assertFalse(os.path.exists(os.path.join(self.runtime, "backups")))
+
     def test_backup_requires_env_file(self):
         os.remove(os.path.join(self.runtime, "env"))
         res = self.run_script("backup.sh", "dev")
@@ -154,16 +197,28 @@ class TestBackupRestore(ScriptEnv):
 
     def test_restore_round_trip(self):
         dest = self.backup()
-        marker = os.path.join(self.runtime, "data", "upload", "after-backup")
-        open(marker, "w").close()
+        markers = [self.write(rel, "x") for rel in
+                   ("data/upload/after-backup", "custom/Espo/Custom/after-backup.json",
+                    "client/custom/after-backup.js")]
+        self.write("custom/Espo/Custom/Resources/metadata/entityDefs/Account.json", "changed")
         open(self.log, "w").close()
         res = self.run_script("restore.sh", "dev", os.path.basename(dest))
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertRegex(res.stdout, r"restore completed from .* in \d+s")
         self.assertTrue(os.path.isfile(os.path.join(self.runtime, "data", "config.php")))
-        self.assertFalse(os.path.exists(marker), "data replaced by the backup copy")
-        moved = [d for d in os.listdir(self.runtime) if d.startswith("data.replaced-")]
-        self.assertEqual(len(moved), 1, "previous data kept, not deleted")
+        for marker in markers:
+            self.assertFalse(os.path.exists(marker), f"replaced by the backup copy: {marker}")
+        with open(os.path.join(self.runtime, "custom/Espo/Custom/Resources/metadata/"
+                               "entityDefs/Account.json")) as fh:
+            self.assertEqual(fh.read(), "{}\n")
+        with open(os.path.join(self.runtime, "client", "custom", "res.js")) as fh:
+            self.assertEqual(fh.read(), "// client customisation\n")
+        for parent, name in (("", "data"), ("", "custom"), ("client", "custom")):
+            moved = [d for d in os.listdir(os.path.join(self.runtime, parent))
+                     if d.startswith(name + ".replaced-")]
+            self.assertEqual(len(moved), 1, f"previous {parent}/{name} kept, not deleted")
+            kept = os.path.join(self.runtime, parent, moved[0])
+            self.assertTrue(any("after-backup" in f for _, _, fs in os.walk(kept) for f in fs))
         with open(self.stdin) as fh:
             self.assertIn("fake dump", fh.read())
         verbs = [c.split(" --env-file ")[1].split(" ", 1)[1] for c in self.docker_calls()]
@@ -185,6 +240,116 @@ class TestBackupRestore(ScriptEnv):
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("checksum mismatch", res.stderr)
         self.assertEqual(self.docker_calls(), [])
+
+    def test_restore_rejects_backup_without_customisation(self):
+        dest = self.backup()
+        open(self.log, "w").close()
+        os.remove(os.path.join(dest, "client-custom.tar.gz"))
+        sums = os.path.join(dest, "SHA256SUMS")
+        with open(sums) as fh:
+            lines = [l for l in fh if "client-custom" not in l]
+        with open(sums, "w") as fh:
+            fh.writelines(lines)
+        res = self.run_script("restore.sh", "dev", dest)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("backup is incomplete (no checksummed client-custom.tar.gz)", res.stderr)
+        self.assertEqual(self.docker_calls(), [])
+        self.assertFalse([d for d in os.listdir(self.runtime) if ".replaced-" in d])
+
+
+def tree(root):
+    """{relative path: file bytes, or None for a directory} under root."""
+    out = {}
+    for dirpath, dirs, files in os.walk(root):
+        for d in dirs:
+            out[os.path.relpath(os.path.join(dirpath, d), root)] = None
+        for f in files:
+            with open(os.path.join(dirpath, f), "rb") as fh:
+                out[os.path.relpath(os.path.join(dirpath, f), root)] = fh.read()
+    return out
+
+
+class TestDeployCustom(ScriptEnv):
+    def setUp(self):
+        super().setUp()
+        self.live = os.path.join(self.runtime, "custom", "Espo", "Custom")
+        # Admin-UI style edits and a file since removed from Git
+        self.write("custom/Espo/Custom/Resources/metadata/entityDefs/Account.json",
+                   '{"edited": "in the Admin UI"}')
+        self.write("custom/Espo/Custom/Resources/layouts/Account/removedFromGit.json", "[]")
+        self.write("custom/Espo/Custom/.hidden-stale", "x")
+        # outside Espo/Custom: not managed by the deploy
+        self.write("custom/Espo/Modules/Other/keep.txt", "keep")
+
+    def deploy(self, **kw):
+        res = self.run_script("deploy_custom.sh", "dev", **kw)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        return res
+
+    def test_runtime_tree_equals_git_tree(self):
+        self.deploy()
+        self.assertEqual(tree(self.live), tree(REPO_CUSTOM))
+        cmp = filecmp.dircmp(REPO_CUSTOM, self.live)
+        self.assertEqual((cmp.left_only, cmp.right_only, cmp.diff_files), ([], [], []))
+        self.assertFalse(os.path.exists(os.path.join(
+            self.live, "Resources/layouts/Account/removedFromGit.json")), "removed from Git")
+        self.assertFalse(os.path.exists(os.path.join(self.live, ".hidden-stale")))
+        with open(os.path.join(self.runtime, "custom/Espo/Modules/Other/keep.txt")) as fh:
+            self.assertEqual(fh.read(), "keep")
+        self.assertEqual(sorted(os.listdir(os.path.join(self.runtime, "custom", "Espo"))),
+                         ["Custom", "Modules"], "no staging or old tree left behind")
+        with open(os.path.join(self.runtime, "client", "custom", "res.js")) as fh:
+            self.assertEqual(fh.read(), "// client customisation\n", "client/custom untouched")
+
+    def test_deploy_is_repeatable_and_world_readable(self):
+        self.deploy()
+        first = tree(self.live)
+        self.deploy(umask=0o077)  # the operator's restrictive umask must not leak in
+        self.assertEqual(tree(self.live), first)
+        for dirpath, dirs, files in os.walk(self.live):
+            for name in dirs + files:
+                mode = os.stat(os.path.join(dirpath, name)).st_mode
+                self.assertTrue(mode & stat.S_IROTH, f"{name} not readable by www-data")
+
+    def test_first_deploy_into_empty_runtime_custom(self):
+        import shutil
+        shutil.rmtree(os.path.join(self.runtime, "custom"))
+        os.mkdir(os.path.join(self.runtime, "custom"))
+        self.deploy()
+        self.assertEqual(tree(self.live), tree(REPO_CUSTOM))
+
+    def test_not_running_skips_rebuild(self):
+        res = self.deploy()
+        self.assertIn("clear-cache/rebuild skipped", res.stdout)
+        calls = self.docker_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0].endswith("ps --status running -q crm-app"))
+
+    def test_running_app_gets_clear_cache_then_rebuild(self):
+        res = self.deploy(extra_env={"FAKE_DOCKER_RUNNING": "1"})
+        self.assertIn("clear-cache and rebuild completed", res.stdout)
+        verbs = [c.split(" --env-file ")[1].split(" ", 1)[1] for c in self.docker_calls()]
+        self.assertEqual(verbs, [
+            "ps --status running -q crm-app",
+            "exec -T -u www-data -w /var/www/html crm-app php bin/command clear-cache",
+            "exec -T -u www-data -w /var/www/html crm-app php bin/command rebuild",
+        ])
+
+    def test_missing_runtime_custom_dir_fails_and_writes_nothing(self):
+        import shutil
+        shutil.rmtree(os.path.join(self.runtime, "custom"))
+        res = self.run_script("deploy_custom.sh", "dev")
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("runtime custom directory missing", res.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.runtime, "custom")))
+        self.assertEqual(self.docker_calls(), [])
+
+    def test_requires_env_file(self):
+        os.remove(os.path.join(self.runtime, "env"))
+        res = self.run_script("deploy_custom.sh", "dev")
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("env file not readable", res.stderr)
+        self.assertNotEqual(tree(self.live), tree(REPO_CUSTOM), "nothing deployed")
 
 
 class FakeListTransport:
