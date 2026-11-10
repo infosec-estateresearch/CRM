@@ -7,7 +7,10 @@ import filecmp
 import gzip
 import io
 import json
+import hashlib
 import os
+import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -33,9 +36,20 @@ case "$*" in
     *mariadb-dump*) printf -- '-- fake dump\\nCREATE TABLE account (id int);\\n' ;;
     *"exec -T crm-db"*) cat > "$FAKE_DOCKER_STDIN" ;;
     *" ps --status running -q crm-app"*) [ -z "${FAKE_DOCKER_RUNNING:-}" ] || echo 0123abcd ;;
+    *" stop crm-daemon crm-app") [ -z "${FAKE_DOCKER_ON_STOP:-}" ] || bash -c "$FAKE_DOCKER_ON_STOP" ;;
 esac
 exit 0
 """
+
+# Pins utc_stamp() so a test can plant the deploy's staging/old names in advance.
+FAKE_DATE = """#!/usr/bin/env bash
+if [ -n "${FAKE_DATE_STAMP:-}" ] && [ "$*" = "-u +%Y%m%dT%H%M%SZ" ]; then
+    echo "$FAKE_DATE_STAMP"
+    exit 0
+fi
+exec "$REAL_DATE" "$@"
+"""
+REAL_DATE = shutil.which("date")
 
 
 def shell_scripts():
@@ -55,6 +69,10 @@ class ScriptEnv(unittest.TestCase):
         with open(docker, "w") as fh:
             fh.write(FAKE_DOCKER)
         os.chmod(docker, stat.S_IRWXU)
+        fake_date = os.path.join(self.bin, "date")
+        with open(fake_date, "w") as fh:
+            fh.write(FAKE_DATE)
+        os.chmod(fake_date, stat.S_IRWXU)
         self.log = os.path.join(base, "docker.log")
         self.stdin = os.path.join(base, "docker.stdin")
         self.runtime = os.path.join(base, "runtime", "dev")
@@ -65,8 +83,18 @@ class ScriptEnv(unittest.TestCase):
         self.write("custom/Espo/Custom/Resources/metadata/entityDefs/Account.json", "{}\n")
         os.makedirs(os.path.join(self.runtime, "client", "custom"))
         self.write("client/custom/res.js", "// client customisation\n")
-        with open(os.path.join(self.runtime, "env"), "w") as fh:
-            fh.write("CRM_DB_NAME=\n")
+        self.write_env(self.runtime)
+
+    def write_env(self, runtime, **override):
+        values = {"CRM_DATA_DIR": f"{runtime}/data",
+                  "CRM_CUSTOM_DIR": f"{runtime}/custom",
+                  "CRM_CLIENT_CUSTOM_DIR": f"{runtime}/client/custom"}
+        values.update(override)
+        with open(os.path.join(runtime, "env"), "w") as fh:
+            fh.write("# synthetic test env\nCRM_DB_NAME=\n")
+            for name, value in values.items():
+                if value is not None:
+                    fh.write(f"{name}={value}\n")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -85,6 +113,7 @@ class ScriptEnv(unittest.TestCase):
             "FAKE_DOCKER_LOG": self.log,
             "FAKE_DOCKER_STDIN": self.stdin,
             "HOME": self.tmp.name,
+            "REAL_DATE": REAL_DATE,
         }
         env.update(extra_env or {})
         preexec = (lambda: os.umask(umask)) if umask is not None else None
@@ -321,9 +350,8 @@ class TestDeployCustom(ScriptEnv):
     def test_not_running_skips_rebuild(self):
         res = self.deploy()
         self.assertIn("clear-cache/rebuild skipped", res.stdout)
-        calls = self.docker_calls()
-        self.assertEqual(len(calls), 1)
-        self.assertTrue(calls[0].endswith("ps --status running -q crm-app"))
+        verbs = [c.split(" --env-file ")[1].split(" ", 1)[1] for c in self.docker_calls()]
+        self.assertEqual(verbs, ["ps --status running -q crm-app", "stop crm-daemon crm-app"])
 
     def test_running_app_gets_clear_cache_then_rebuild(self):
         res = self.deploy(extra_env={"FAKE_DOCKER_RUNNING": "1"})
@@ -331,6 +359,8 @@ class TestDeployCustom(ScriptEnv):
         verbs = [c.split(" --env-file ")[1].split(" ", 1)[1] for c in self.docker_calls()]
         self.assertEqual(verbs, [
             "ps --status running -q crm-app",
+            "stop crm-daemon crm-app",
+            "up -d --wait crm-app crm-daemon",
             "exec -T -u www-data -w /var/www/html crm-app php bin/command clear-cache",
             "exec -T -u www-data -w /var/www/html crm-app php bin/command rebuild",
         ])
@@ -350,6 +380,212 @@ class TestDeployCustom(ScriptEnv):
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("env file not readable", res.stderr)
         self.assertNotEqual(tree(self.live), tree(REPO_CUSTOM), "nothing deployed")
+
+
+
+def tree_hash(root):
+    """sha256 over every entry under root (type, mode, bytes, link target); never follows links."""
+    h = hashlib.sha256()
+    for dirpath, dirs, files in os.walk(root):
+        dirs.sort()
+        for name in sorted(dirs + files):
+            path = os.path.join(dirpath, name)
+            st = os.lstat(path)
+            h.update(f"{os.path.relpath(path, root)}\0{st.st_mode:o}\0".encode())
+            if stat.S_ISLNK(st.st_mode):
+                h.update(os.readlink(path).encode())
+            elif stat.S_ISREG(st.st_mode):
+                with open(path, "rb") as fh:
+                    h.update(fh.read())
+    return h.hexdigest()
+
+
+class TestDeployPathSafety(ScriptEnv):
+    """CRM-001-C2: a symlink at any component the deploy works on must stop it
+    before anything is written through the link, whether the link is there
+    before the run or appears while crm-app/crm-daemon are being stopped."""
+
+    STAMP = "20261110T120000Z"
+    COMPONENTS = ["", "custom", "custom/Espo", "custom/Espo/Custom"]
+    NEW_NAMES = [".Custom.deploy-" + STAMP, ".Custom.old-" + STAMP]
+
+    def setUp(self):
+        super().setUp()
+        self.write("custom/Espo/Custom/marker.txt", "live tree before the deploy")
+        self.sentinel = os.path.join(self.tmp.name, "sentinel")
+
+    def deploy(self, on_stop=None):
+        env = {"FAKE_DOCKER_RUNNING": "1", "FAKE_DATE_STAMP": self.STAMP}
+        if on_stop:
+            env["FAKE_DOCKER_ON_STOP"] = on_stop
+        return self.run_script("deploy_custom.sh", "dev", extra_env=env)
+
+    def redirect_cmd(self, rel):
+        """Shell command: move the real directory at rel aside to the sentinel
+        and leave a symlink to it, so writes through the link land in the sentinel."""
+        path = os.path.join(self.runtime, rel) if rel else self.runtime
+        return f"mv -T -- {shlex.quote(path)} {shlex.quote(self.sentinel)} && " \
+               f"ln -s -- {shlex.quote(self.sentinel)} {shlex.quote(path)}"
+
+    def plant_cmd(self, name):
+        """Shell command: an unrelated sentinel directory, and a symlink to it at a staging/old name."""
+        link = os.path.join(self.runtime, "custom", "Espo", name)
+        return f"mkdir -p {shlex.quote(self.sentinel)} && echo keep > {shlex.quote(self.sentinel)}/keep.txt && " \
+               f"ln -s -- {shlex.quote(self.sentinel)} {shlex.quote(link)}"
+
+    def assert_refused(self, res, before, at_stop):
+        self.assertNotEqual(res.returncode, 0, res.stdout + res.stderr)
+        # Refused by the deploy's own path checks, or earlier by the shared
+        # runtime/env-file check in lib/common.sh (runtime dir and custom/).
+        self.assertRegex(res.stderr, r"refusing to deploy|not canonical|resolves to")
+        self.assertEqual(tree_hash(self.sentinel), before, "symlink target changed")
+        verbs = [c.split(" --env-file ")[1].split(" ", 1)[1] for c in self.docker_calls()]
+        self.assertFalse([v for v in verbs if v.startswith(("up", "exec"))], verbs)
+        if at_stop:
+            self.assertEqual(verbs, ["ps --status running -q crm-app", "stop crm-daemon crm-app"])
+            self.assertIn("left stopped", res.stderr)
+        else:
+            self.assertEqual(verbs, [], "a bad layout is refused before the stack is touched")
+
+    def fresh(self):
+        """A new temporary runtime for each subtest."""
+        self.tearDown()
+        self.setUp()
+
+    def test_symlinked_component_planted_before_the_run(self):
+        for rel in self.COMPONENTS:
+            with self.subTest(component=rel or "$CRM_RUNTIME_DIR"):
+                self.fresh()
+                subprocess.run(["bash", "-c", self.redirect_cmd(rel)], check=True)
+                before = tree_hash(self.sentinel)
+                res = self.deploy()
+                self.assert_refused(res, before, at_stop=False)
+
+    def test_symlinked_component_planted_while_the_stack_stops(self):
+        for rel in self.COMPONENTS:
+            with self.subTest(component=rel or "$CRM_RUNTIME_DIR"):
+                self.fresh()
+                path = os.path.join(self.runtime, rel) if rel else self.runtime
+                before = tree_hash(path)
+                res = self.deploy(on_stop=self.redirect_cmd(rel))
+                self.assertTrue(os.path.islink(path), "the plant happened")
+                self.assert_refused(res, before, at_stop=True)
+
+    def test_preexisting_staging_or_old_name(self):
+        reference = os.path.join(self.tmp.name, "reference")
+        os.mkdir(reference)
+        with open(os.path.join(reference, "keep.txt"), "w") as fh:
+            fh.write("keep\n")
+        expected = tree_hash(reference)  # what plant_cmd's sentinel holds
+        for name in self.NEW_NAMES:
+            for at_stop in (False, True):
+                with self.subTest(name=name, at_stop=at_stop):
+                    self.fresh()
+                    live = os.path.join(self.runtime, "custom/Espo/Custom")
+                    live_before = tree_hash(live)
+                    if at_stop:
+                        res = self.deploy(on_stop=self.plant_cmd(name))
+                    else:
+                        subprocess.run(["bash", "-c", self.plant_cmd(name)], check=True)
+                        self.assertEqual(tree_hash(self.sentinel), expected)
+                        res = self.deploy()
+                    self.assert_refused(res, expected, at_stop=at_stop)
+                    self.assertEqual(tree_hash(live), live_before, "live tree untouched")
+
+    def test_dangling_symlink_at_staging_name(self):
+        link = os.path.join(self.runtime, "custom", "Espo", self.NEW_NAMES[0])
+        os.symlink(os.path.join(self.tmp.name, "does-not-exist"), link)
+        res = self.deploy()
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("already exists", res.stderr)
+        self.assertFalse(os.path.lexists(os.path.join(self.tmp.name, "does-not-exist")))
+        self.assertTrue(os.path.islink(link), "the planted link is reported, not removed")
+
+    def test_group_or_world_writable_runtime_is_refused(self):
+        live = os.path.join(self.runtime, "custom/Espo/Custom")
+        before = tree_hash(live)
+        for mode in (0o775, 0o757, 0o722, 0o1777):
+            with self.subTest(mode=oct(mode)):
+                os.chmod(self.runtime, mode)
+                res = self.deploy()
+                self.assertNotEqual(res.returncode, 0)
+                self.assertIn("group- or world-writable", res.stderr)
+                self.assertEqual(self.docker_calls(), [])
+                self.assertEqual(tree_hash(live), before)
+        os.chmod(self.runtime, 0o700)
+        res = self.deploy()
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(tree(live), tree(REPO_CUSTOM), "a private runtime deploys")
+
+    def test_missing_managed_parent_is_created_as_a_real_directory(self):
+        shutil.rmtree(os.path.join(self.runtime, "custom", "Espo"))
+        res = self.deploy()
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertFalse(os.path.islink(os.path.join(self.runtime, "custom", "Espo")))
+        self.assertEqual(tree(os.path.join(self.runtime, "custom/Espo/Custom")), tree(REPO_CUSTOM))
+
+
+class TestEnvPathDivergence(ScriptEnv):
+    """CRM-001-C2: deploy, backup and restore refuse unless the env file's
+    bind-mount sources are exactly $CRM_RUNTIME_DIR/{data,custom,client/custom}."""
+
+    SCRIPTS = [("deploy_custom.sh",), ("backup.sh",), ("restore.sh", "crm-dev-20261110T120000Z")]
+    VARS = {"CRM_DATA_DIR": "data", "CRM_CUSTOM_DIR": "custom", "CRM_CLIENT_CUSTOM_DIR": "client/custom"}
+
+    def assert_all_refuse(self, needle):
+        listing = sorted(os.listdir(self.runtime))
+        live = tree_hash(os.path.join(self.runtime, "custom"))
+        for args in self.SCRIPTS:
+            with self.subTest(script=args[0]):
+                res = self.run_script(args[0], "dev", *args[1:])
+                self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+                self.assertIn(needle, res.stderr)
+                self.assertEqual(self.docker_calls(), [])
+                self.assertEqual(sorted(os.listdir(self.runtime)), listing, "nothing written")
+                self.assertEqual(tree_hash(os.path.join(self.runtime, "custom")), live)
+
+    def test_each_divergent_variable_is_refused(self):
+        for name, rel in self.VARS.items():
+            with self.subTest(var=name):
+                elsewhere = os.path.join(self.tmp.name, "elsewhere", rel)
+                os.makedirs(elsewhere, exist_ok=True)
+                self.write_env(self.runtime, **{name: elsewhere})
+                self.assert_all_refuse(f"{name} in {self.runtime}/env is '{elsewhere}'")
+
+    def test_each_missing_variable_is_refused(self):
+        for name in self.VARS:
+            with self.subTest(var=name):
+                self.write_env(self.runtime, **{name: None})
+                self.assert_all_refuse(f"must set {name} exactly once (found 0)")
+
+    def test_ambiguous_relative_or_aliased_values_are_refused(self):
+        cases = {
+            "duplicate": ("CRM_DATA_DIR", f"{self.runtime}/data\nexport CRM_DATA_DIR=/elsewhere",
+                          "exactly once (found 2)"),
+            "relative": ("CRM_CUSTOM_DIR", "./custom", "must be an absolute path"),
+            "sibling prefix": ("CRM_DATA_DIR", f"{self.runtime}/data-old", "resolves to"),
+        }
+        for label, (name, value, needle) in cases.items():
+            with self.subTest(case=label):
+                self.write_env(self.runtime, **{name: value})
+                self.assert_all_refuse(needle)
+        # a symlinked data/ resolves outside the runtime even with the right spelling
+        self.write_env(self.runtime)
+        os.rename(os.path.join(self.runtime, "data"), os.path.join(self.tmp.name, "data-real"))
+        os.symlink(os.path.join(self.tmp.name, "data-real"), os.path.join(self.runtime, "data"))
+        self.assert_all_refuse("CRM_DATA_DIR")
+
+    def test_equivalent_spellings_are_accepted(self):
+        self.write_env(self.runtime, CRM_DATA_DIR=f'"{self.runtime}/data/"',
+                       CRM_CUSTOM_DIR=f"'{self.runtime}/./custom'")
+        res = self.run_script("backup.sh", "dev")
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def test_non_canonical_runtime_dir_is_refused(self):
+        res = self.run_script("backup.sh", "dev", runtime=self.runtime + "/../dev")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("not canonical", res.stderr)
+        self.assertEqual(self.docker_calls(), [])
 
 
 class FakeListTransport:

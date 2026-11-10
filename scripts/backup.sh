@@ -9,6 +9,7 @@ set -euo pipefail
 
 require_dev "${1:-}"
 require_env_file
+require_runtime_paths
 for dir in "${CRM_PERSISTENT_DIRS[@]}"; do
     [ -d "$CRM_RUNTIME_DIR/$dir" ] || die "$dir directory missing: $CRM_RUNTIME_DIR/$dir"
 done

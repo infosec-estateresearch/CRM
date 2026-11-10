@@ -9,6 +9,7 @@ set -euo pipefail
 
 require_dev "${1:-}"
 require_env_file
+require_runtime_paths
 backup=${2:-}
 [ -n "$backup" ] || die "usage: $(basename "$0") dev <backup name or path>"
 case "$backup" in

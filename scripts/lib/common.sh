@@ -41,6 +41,44 @@ require_env_file() {
     [ -r "$CRM_ENV_FILE" ] || die "env file not readable: $CRM_ENV_FILE"
 }
 
+# Fail closed unless $CRM_RUNTIME_DIR is an absolute path with no symlink in it
+# and the env file's bind-mount sources are exactly its data/, custom/ and
+# client/custom/, so the scripts and Compose work on the same directories.
+# The env file is read as text, never sourced.
+require_runtime_paths() {
+    local canon name rel count line value
+    case "$CRM_RUNTIME_DIR" in
+        /*) ;;
+        *) die "runtime directory must be an absolute path: $CRM_RUNTIME_DIR" ;;
+    esac
+    canon=$(realpath -e -- "$CRM_RUNTIME_DIR") || die "runtime directory missing: $CRM_RUNTIME_DIR"
+    [ "$canon" = "$CRM_RUNTIME_DIR" ] \
+        || die "runtime directory is not canonical (symlink, '.', '..' or trailing '/'): $CRM_RUNTIME_DIR -> $canon"
+    for name in CRM_DATA_DIR CRM_CUSTOM_DIR CRM_CLIENT_CUSTOM_DIR; do
+        case "$name" in
+            CRM_DATA_DIR) rel=data ;;
+            CRM_CUSTOM_DIR) rel=custom ;;
+            *) rel=client/custom ;;
+        esac
+        count=$(grep -Ec "^[[:space:]]*(export[[:space:]]+)?$name[[:space:]]*=" -- "$CRM_ENV_FILE") || true
+        [ "$count" = 1 ] || die "env file must set $name exactly once (found ${count:-0}): $CRM_ENV_FILE"
+        line=$(grep -E "^$name=" -- "$CRM_ENV_FILE") \
+            || die "env file must set $name in the plain form $name=<path>: $CRM_ENV_FILE"
+        value=${line#*=}
+        case "$value" in
+            \"*\") value=${value#\"}; value=${value%\"} ;;
+            \'*\') value=${value#\'}; value=${value%\'} ;;
+        esac
+        case "$value" in
+            /*) ;;
+            *) die "$name in $CRM_ENV_FILE must be an absolute path (got '$value')" ;;
+        esac
+        canon=$(realpath -m -- "$value")
+        [ "$canon" = "$CRM_RUNTIME_DIR/$rel" ] \
+            || die "$name in $CRM_ENV_FILE is '$value', which resolves to $canon, not $CRM_RUNTIME_DIR/$rel"
+    done
+}
+
 compose() {
     docker compose -p "$CRM_PROJECT" -f "$CRM_REPO_DIR/deploy/compose.json" \
         --env-file "$CRM_ENV_FILE" "$@"
