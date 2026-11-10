@@ -90,6 +90,10 @@ def build_report(loader, status, accept_drift_used):
         "relationships": relationships(loader),
         "requests": {"writes": loader.client.writes, "reads": loader.client.reads},
         "deletes": 0,
+        # Whether the previous run's phone-refusals.json was given (--phone-refusals); without it
+        # every server-refused phone is probed again and the re-run is not write-free.
+        "phoneRefusals": {"supplied": bool(getattr(loader, "refusals_supplied", False)),
+                          "remembered": len(loader.refused_before), "refusedThisRun": len(loader.refused)},
     }
 
 

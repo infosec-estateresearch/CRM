@@ -448,6 +448,18 @@ class TestLoadShOptions(LoadShBase):
         res = self.run_sh("--phone-refusals", bad, "dev", self.synthetic, self.out("p2"))
         self.assertEqual(res.returncode, 2, res.stderr)
         self.assertIn("code=phone_refusals_invalid", res.stderr)
+        # the parent must be root-owned 0700 (the --resume rule)
+        loose = os.path.join(self.tmp, "loose")
+        os.makedirs(loose)
+        os.chmod(loose, 0o755)
+        in_loose = os.path.join(loose, "refusals.json")
+        with open(in_loose, "w") as fh:
+            fh.write("[]\n")
+        os.chmod(in_loose, 0o600)
+        res = self.run_sh("--phone-refusals", in_loose, "dev", self.synthetic, self.out("p4"))
+        self.assertEqual(res.returncode, 2, res.stderr)
+        self.assertIn("phone refusals parent must be root-owned 0700", res.stderr)
+        self.assertFalse(os.path.exists(self.out("p4")))
         os.chmod(good, 0o644)
         for path, frag in (("relative.json", "absolute"), (self.out("none.json"), "not a regular file"),
                            (good, "0600")):

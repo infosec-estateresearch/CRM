@@ -345,6 +345,8 @@ class FakeEspo:
     # Enums without "" in their options: null and "" are refused (400 valid). The custom one is
     # read from the entityDefs, so removing its "" option makes this fake refuse a blank again.
     CORE_NO_BLANK = {"Opportunity": {"stage"}, "Task": {"status", "priority"}, "Call": {"direction"}}
+    # Core enums validated on save (PL-verified on crm-dev): a value outside the options is 400 valid.
+    CORE_OPTIONS = {"Contact": {"salutationName": ("", "Mr.", "Ms.", "Mrs.", "Dr.")}}
     # text/wysiwyg attributes are stored verbatim; every other string is trimmed (StringTrim).
     TEXT = {"description", "body", "bodyPlain", "keyInformation"}
     SETTINGS_REFUSED = object()
@@ -454,6 +456,9 @@ class FakeEspo:
         for attr in self._no_blank(entity):
             if attr in body and body[attr] in (None, ""):
                 return attr
+        for attr, options in self.CORE_OPTIONS.get(entity, {}).items():
+            if body.get(attr) is not None and body[attr] not in options:
+                return attr
         return None
 
     def _phone(self, number):
@@ -467,7 +472,7 @@ class FakeEspo:
             return "+" + digits, not digits
         if not any(c.isdigit() for c in number) or any(c.isalpha() or c == "/" for c in number):
             return number, True                          # junk such as n/a
-        return number, False                             # stored verbatim
+        return number.strip(), False                     # stored trimmed (PL-verified on crm-dev)
 
     def _server_side(self, entity, body):
         """What the server stores for ``body``, and whether a phone was refused."""

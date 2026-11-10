@@ -43,16 +43,22 @@ PHONE_ATTRS = ("phoneNumberData", "phoneNumber")
 NUMERIC_ATTRS = ("amount",)
 
 
+def _phone_text(number):
+    """A phone as EspoCRM stores it with phoneNumberInternational=false: trimmed."""
+    return number.strip() if isinstance(number, str) else number
+
+
 def _phone_set(value):
     """phoneNumberData compared on (phoneNumber, type, primary) only, order-insensitive.
 
-    EspoCRM reads it back with extra keys (optOut, invalid) that the importer never sends."""
+    EspoCRM reads it back with extra keys (optOut, invalid) that the importer never sends,
+    and stores each number trimmed (like the phoneNumber attribute)."""
     if not isinstance(value, list):
         return None
     out = set()
     for p in value:
         if isinstance(p, dict):
-            out.add((p.get("phoneNumber"), p.get("type"), p.get("primary") is True))
+            out.add((_phone_text(p.get("phoneNumber")), p.get("type"), p.get("primary") is True))
     return frozenset(out) or None
 
 
@@ -88,7 +94,9 @@ def same_value(attr, new, old, text=False, entity=None):
 
 
 def refusal_hash(sf_id, field, value):
-    """Content-free memory of a server-refused phone: sha256 of (sfId, field, value)."""
+    """Content-free memory of a server-refused phone: sha256 of (sfId, field, value as stored,
+    i.e. trimmed), so a number differing only in surrounding blanks is the same refusal."""
+    value = _phone_text(value)
     return hashlib.sha256(json.dumps([sf_id, field, value], separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
@@ -289,6 +297,7 @@ class Loader:
                         ids = a[:-len("Columns")] + "Ids"
                         if ids not in diff:
                             diff[ids] = list(existing.get(ids) or [])
+                    wrote = True
                     try:
                         self.client.update(entity, existing["id"], diff)
                         existing.update(diff)
@@ -297,8 +306,11 @@ class Loader:
                         if base:
                             self.client.update(entity, existing["id"], base)
                             existing.update(base)
-                        self._probe_phones(obj, sf_id, entity, existing, phones)
-                    action = "updated"
+                        accepted = self._probe_phones(obj, sf_id, entity, existing, phones)
+                        # Nothing stored (every phone probe refused, no other change): unchanged.
+                        wrote = bool(base) or accepted > 0
+                    if wrote:
+                        action = "updated"
         except WriteRejected as exc:
             if exc.status == 409:
                 # EspoCRM's duplicate-name check; every POST skips it, so this should not occur.
@@ -351,12 +363,15 @@ class Loader:
 
     def _probe_phones(self, obj, sf_id, entity, record, phones):
         """One write per number (bounded by the numbers on the record): the valid ones are kept,
-        each refused one is remembered by hash and reported as phone_refused (record id only)."""
+        each refused one is remembered by hash and reported as phone_refused (record id only).
+        Returns the number of accepted (stored) probe writes."""
+        accepted = 0
         if phones.get("phoneNumber"):
             value = phones["phoneNumber"]
             try:
                 self.client.update(entity, record["id"], {"phoneNumber": value})
                 record["phoneNumber"] = value
+                accepted += 1
             except WriteRejected as exc:
                 if exc.status != 400 or exc.field != "phoneNumber":
                     raise
@@ -370,11 +385,13 @@ class Loader:
                     self.client.update(entity, record["id"], {"phoneNumberData": trial})
                     kept.append(p)
                     record["phoneNumberData"] = trial
+                    accepted += 1
                 except WriteRejected as exc:
                     if exc.status != 400 or exc.field != "phoneNumber":
                         raise
                     self.refused.add(refusal_hash(sf_id, "phoneNumberData", p.get("phoneNumber")))
                     self.exception(obj, sf_id, "phone_refused")
+        return accepted
 
     # ---------------------------------------------------------------- phases
     def _source(self, obj):

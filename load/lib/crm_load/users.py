@@ -7,6 +7,7 @@ listed in ``legacyShared.sfIds`` become the inactive legacy user (D4); inactive 
 users stay inactive (D5).
 """
 
+import hashlib
 import json
 import re
 
@@ -48,8 +49,22 @@ def load_role_map(path):
     return doc
 
 
-def _user_name(row):
-    """The Salesforce Username's local part, if it is a valid EspoCRM user name."""
+def synthetic_user_name(sf_id):
+    """Selftest only: ``syn-`` + the first 10 hex characters of sha256(sfId), lowercase.
+
+    ``crm-migrate selftest`` writes Usernames such as "<marker> User Username 0" (a space, no
+    "@"), which are never valid EspoCRM user names; the sfId is the stable, unique key."""
+    return "syn-" + hashlib.sha256(sf_id.encode("utf-8")).hexdigest()[:10]
+
+
+def _user_name(row, synthetic=False):
+    """The Salesforce Username's local part, if it is a valid EspoCRM user name.
+
+    In a synthetic (selftest) snapshot the name is derived from the sfId instead
+    (``synthetic_user_name``); a real snapshot always uses the Username rule."""
+    if synthetic is True:
+        sf_id = row.get("Id")
+        return synthetic_user_name(sf_id) if isinstance(sf_id, str) and SF_ID.fullmatch(sf_id) else None
     raw = row.get("Username")
     if not isinstance(raw, str):
         return None
@@ -73,8 +88,8 @@ def build_users(snapshot, role_map):
     # neither is exported (user_not_exportable), neither is guessed.
     counts = {}
     for row in snapshot.rows("User"):
-        if is_human(row, synthetic) and _user_name(row) is not None:
-            key = _user_name(row).lower()
+        if is_human(row, synthetic) and _user_name(row, synthetic) is not None:
+            key = _user_name(row, synthetic).lower()
             counts[key] = counts.get(key, 0) + 1
     for row in snapshot.rows("User"):
         if not is_human(row, synthetic):
@@ -90,7 +105,7 @@ def build_users(snapshot, role_map):
             if entry:
                 teams += entry.get("teams", [])
                 eroles += entry.get("roles", [])
-        user = {"sfId": sf_id, "userName": _user_name(row), "firstName": row.get("FirstName"),
+        user = {"sfId": sf_id, "userName": _user_name(row, synthetic), "firstName": row.get("FirstName"),
                 "lastName": row.get("LastName"), "emailAddress": row.get("Email"),
                 "isActive": row.get("IsActive") is True,
                 "teams": sorted(set(teams)), "roles": sorted(set(eroles))}

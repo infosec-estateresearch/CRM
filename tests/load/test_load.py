@@ -20,6 +20,8 @@ from crm_load.api import EspoClient
 
 ROOT = fx.ROOT
 ENTITY_DEFS = os.path.join(ROOT, "custom", "Espo", "Custom", "Resources", "metadata", "entityDefs")
+# Core 10.0.12 enum options, PL-verified on crm-dev (not in the custom entityDefs).
+CORE_ENUM_OPTIONS = {"Contact.salutationName": ["", "Mr.", "Ms.", "Mrs.", "Dr."]}
 
 
 class _NullCtx:
@@ -1186,11 +1188,12 @@ class TestUsers(Base):
             self.assertNotIn(fx.U_AUTOMATED, fh.read())
 
     def test_user_name_collision_exports_neither(self):
-        data = fx.org()
+        # The Username rule applies to a real snapshot (a selftest one derives names from sfIds).
+        data = fx.org(account_marker=False)
         u1 = next(u for u in data["User"] if u["Id"] == fx.U1)
         u2 = next(u for u in data["User"] if u["Id"] == fx.U2)
         u2["Username"] = "U1@other.example.test"               # same local part, other domain/case
-        snap = write_snapshot(os.path.join(self.tmp, "coll"), data=data)
+        snap = write_snapshot(os.path.join(self.tmp, "coll"), data=data, synthetic=False)
         rm = os.path.join(self.tmp, "rm.json")
         with open(rm, "w") as fh:
             json.dump({"profiles": {}, "userRoles": {}}, fh)
@@ -1291,12 +1294,16 @@ class TestFidelity(Base):
         mapping = load_json("mapping.json")
         refused = set(mapping["enumNoBlank"]["attributes"])
         null_ok = set(mapping["enumNoBlank"]["nullAccepted"])
+        core = set(mapping["coreEnums"]["attributes"])
         blankable = {f"{e}.{a}" for e, spec in mapping["entities"].items() for a in spec.get("enum", {})}
         blankable |= {"Opportunity.lossReason", "Opportunity.channel", "Meeting.meetingType"}
         for key in sorted(blankable):
             entity, field = key.split(".")
-            with open(os.path.join(ENTITY_DEFS, f"{entity}.json")) as fh:
-                options = json.load(fh)["fields"][field]["options"]
+            if key in core:
+                options = CORE_ENUM_OPTIONS[key]
+            else:
+                with open(os.path.join(ENTITY_DEFS, f"{entity}.json")) as fh:
+                    options = json.load(fh)["fields"][field]["options"]
             self.assertTrue("" in options or key in refused or key in null_ok, key)
             if key in mapping["enums"]:
                 self.assertEqual(mapping["enums"][key], options, key)
@@ -1364,6 +1371,248 @@ class TestFidelity(Base):
         self.assertEqual(self.report()["objects"]["User"]["skipped"]["user_not_human"], 2)
 
 
+class TestRound2(Base):
+    """CRM-006S round 2: selftest users, trimmed phones, salutation, synthetic enums, refusal file."""
+
+    @staticmethod
+    def _selftest_users(data):
+        """The real ``crm-migrate selftest`` User shape: "<marker> User Username <n>", Value A|B|C."""
+        for i, u in enumerate(data["User"]):
+            u["Username"] = f"{SENTINEL} User Username {i}"
+            if u["UserType"] == "Standard":
+                u["UserType"] = ("Value A", "Value B", "Value C")[i % 3]
+        return data
+
+    def _users_json(self, snap):
+        rm = os.path.join(self.tmp, "rm.json")
+        with open(rm, "w") as fh:
+            json.dump({"profiles": {}, "userRoles": {}}, fh)
+        self._n += 1
+        out = os.path.join(self.tmp, f"users{self._n}")
+        self.assertEqual(cli.main(["users", snap, "--role-map", rm, "--out", out], stderr=io.StringIO(),
+                                  stdout=io.StringIO()), 0)
+        with open(os.path.join(out, "users.json")) as fh:
+            users = json.load(fh)
+        with open(os.path.join(out, "exceptions.jsonl")) as fh:
+            exc = [json.loads(line) for line in fh if line.strip()]
+        return users, exc
+
+    def test_selftest_usernames_resolve_owners(self):
+        import hashlib
+        from crm_load.users import USER_NAME
+        snap = write_snapshot(os.path.join(self.tmp, "stu"), data=self._selftest_users(fx.org()))
+        users, exc = self._users_json(snap)
+        humans = {fx.U1, fx.U2, fx.U_INACTIVE, fx.U_SHARED}
+        self.assertEqual({u["sfId"] for u in users}, humans)
+        self.assertEqual(exc, [])                                       # no user_not_exportable
+        for u in users:
+            self.assertEqual(u["userName"], "syn-" + hashlib.sha256(u["sfId"].encode()).hexdigest()[:10])
+            self.assertRegex(u["userName"], USER_NAME)
+            self.assertNotIn(SENTINEL, u["userName"])
+        # provisioned exactly as exported: owners who are synthetic users resolve
+        espo = FakeEspo(users=sorted(u["sfId"] for u in users))
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        owners = {}
+        for obj in ("Account", "Contact", "Opportunity", "Task", "Event"):
+            for r in fx.org()[obj]:
+                owners[r["Id"]] = r.get("OwnerId")
+        unresolved = [e["sfId"] for e in self.exceptions() if e["reason"] == "owner_unresolved"]
+        self.assertEqual([i for i in unresolved if owners.get(i) in humans], [])
+        self.assertTrue(unresolved)                                     # U_MISSING / automated still coded
+        self.assertEqual(espo.by_sf("Account")[fx.A[0]]["assignedUserId"],
+                         next(r["id"] for r in espo.db["User"].values() if r["sfId"] == fx.U1))
+
+    def test_real_snapshot_keeps_the_username_rule(self):
+        data = self._selftest_users(fx.org(account_marker=False))
+        for u in data["User"]:
+            if u["UserType"].startswith("Value"):
+                u["UserType"] = "Standard"
+        real = write_snapshot(os.path.join(self.tmp, "rsu"), data=data, synthetic=False)
+        users, exc = self._users_json(real)
+        self.assertEqual(users, [])                                     # space, no "@": not exportable
+        self.assertEqual({e["reason"] for e in exc}, {"user_not_exportable"})
+        self.assertEqual(len(exc), 4)
+
+    def test_padded_phones_compare_trimmed_and_hash_trimmed(self):
+        class RefuseC2(FakeEspo):
+            refuse = False
+
+            def _phone(self, number):
+                if self.refuse and isinstance(number, str) and number.strip() == "01632 960102":
+                    return number, True
+                return super()._phone(number)
+        data = fx.org()
+        for c in data["Contact"]:
+            if isinstance(c.get("Phone"), str):
+                c["Phone"] = "  " + c["Phone"] + "  "
+        snap = write_snapshot(os.path.join(self.tmp, "pad"), data=data)
+        espo = RefuseC2()
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        self.assertEqual(espo.by_sf("Contact")[fx.C[0]]["phoneNumberData"][0]["phoneNumber"], "01632 960100")
+        n = len(espo.writes)
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        self.assertEqual(espo.writes[n:], [])                           # trimmed on save == padded source
+        # refusal memory: refused while padded, remembered for the same number unpadded
+        espo = RefuseC2()
+        espo.refuse = True
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        memory = os.path.join(self.last_dir, "phone-refusals.json")
+        unpadded = write_snapshot(os.path.join(self.tmp, "unpad"), data=fx.org())
+        n = len(espo.writes)
+        self.assertEqual(self.run_load("--phone-refusals", memory, snap=unpadded, espo=espo), 0, self.last_err)
+        self.assertFalse([b for _m, e, b in espo.writes[n:] if e == "Contact" and "phoneNumberData" in b
+                          and any(p["phoneNumber"].strip() == "01632 960102" for p in b["phoneNumberData"])])
+        self.assertIn({"object": "Contact", "sfId": fx.C[2], "reason": "phone_refused"}, self.exceptions())
+
+    def test_salutation_routed_through_enum(self):
+        data = fx.org()
+        data["Contact"][1]["Salutation"] = "Prof." + SENTINEL
+        snap = write_snapshot(os.path.join(self.tmp, "sal"), data=data)
+        self.assertEqual(self.run_load(snap=snap), 0, self.last_err)
+        posts = {b["sfId"]: b for m, e, b in self.espo.writes if m == "POST" and e == "Contact"}
+        self.assertIn("salutationName", posts[fx.C[1]])
+        self.assertIsNone(posts[fx.C[1]]["salutationName"])             # null sent, not omitted
+        self.assertEqual(posts[fx.C[0]]["salutationName"], "Mr.")
+        exc = self.exceptions()
+        self.assertIn({"object": "Contact", "sfId": fx.C[1], "reason": "enum_unmapped"}, exc)
+        self.assertNotIn({"object": "Contact", "sfId": fx.C[0], "reason": "enum_unmapped"}, exc)
+        self.assertNotIn("write_rejected", self.report()["exceptions"]["byReason"])
+        # the fake refuses an unlisted salutation exactly as crm-dev does (400 valid)
+        self.assertEqual(FakeEspo().send("POST", "Contact", body={"sfId": "x", "salutationName": "Prof."}),
+                         (400, {"field": "salutationName", "type": "valid"}))
+
+    @staticmethod
+    def _synthetic_values(data):
+        for o in data["Opportunity"]:
+            o["StageName"] = "Value A"
+        tasks = {t["Id"]: t for t in data["Task"]}
+        tasks[fx.T[0]].update(Status="Value B", Priority="Value C")
+        tasks[fx.T[5]].update(Status="Value A", Priority="Value A")
+        tasks[fx.T[1]].update(TaskSubtype="Value B", CallType="Value A")      # -> Call, Inbound
+        return data
+
+    def test_synthetic_enum_map_on_selftest(self):
+        snap = write_snapshot(os.path.join(self.tmp, "sem"), data=self._synthetic_values(fx.org()))
+        self.assertEqual(self.run_load(snap=snap), 0, self.last_err)
+        opp = self.espo.by_sf("Opportunity")
+        self.assertEqual(opp[fx.O[0]]["stage"], "Enquiry")
+        self.assertEqual(len(opp), 6)                                   # every current one created
+        t0 = self.espo.by_sf("Task")[fx.T[0]]
+        self.assertEqual((t0["status"], t0["priority"]), ("Started", "High"))
+        self.assertEqual(self.espo.by_sf("Call")[fx.T[1]]["direction"], "Inbound")
+        self.assertTrue(opp[fx.O[0]]["contactsIds"])                    # contact-role path reached
+        rep = self.report()
+        self.assertEqual(rep["exceptions"]["byReason"]["synthetic_enum_mapped"], 6 + 3)
+        self.assertNotIn("enum_blank_unrepresentable", rep["exceptions"]["byReason"])
+        n = len(self.espo.writes)
+        self.assertEqual(self.run_load(snap=snap), 0, self.last_err)
+        self.assertEqual(self.espo.writes[n:], [])
+
+    def _beta_exceptions(self, contract_dir):
+        data = self._synthetic_values(fx.org(account_marker=False))
+        self._n += 1
+        real = write_snapshot(os.path.join(self.tmp, f"semr{self._n}"), data=data, synthetic=False)
+        espo, out = FakeEspo(), os.path.join(self.tmp, f"bout{self._n}")
+        rc = cli.main(["load", real, "--target", "beta", "--out", out], transport=espo, stderr=io.StringIO(),
+                      stdout=io.StringIO(), sleep=lambda s: None, contract_dir=contract_dir)
+        self.assertEqual(rc, 0)
+        return self.exceptions(out), espo
+
+    def test_real_snapshot_never_consults_the_synthetic_map(self):
+        self.assertIn("syntheticEnumMap", load_json("mapping.json"))
+        with_map, espo = self._beta_exceptions(None)
+        reasons = {e["reason"] for e in with_map}
+        self.assertNotIn("synthetic_enum_mapped", reasons)
+        self.assertIn({"object": "Opportunity", "sfId": fx.O[0], "reason": "enum_blank_unrepresentable"}, with_map)
+        self.assertIn({"object": "Task", "sfId": fx.T[0], "reason": "enum_blank_unrepresentable"}, with_map)
+        self.assertIn({"object": "Task", "sfId": fx.T[0], "reason": "enum_unmapped"}, with_map)
+        self.assertEqual(espo.by_sf("Opportunity"), {})
+        self.assertNotIn(fx.T[1], espo.by_sf("Call"))                   # TaskSubtype "Value B" stays a Task
+        # exactly as before: identical exceptions with the map removed from the contract
+        nomap = os.path.join(self.tmp, "contract-nomap")
+        shutil.copytree(os.path.join(ROOT, "load", "contract"), nomap)
+        doc = load_json("mapping.json", nomap)
+        del doc["syntheticEnumMap"]
+        with open(os.path.join(nomap, "mapping.json"), "w") as fh:
+            json.dump(doc, fh)
+        without_map, _ = self._beta_exceptions(nomap)
+        self.assertEqual(with_map, without_map)
+
+    def test_unmapped_call_type_is_direction_unknown(self):
+        data = fx.org()
+        for t in data["Task"]:
+            if t["Id"] == fx.T[1]:
+                t["CallType"] = "Internal"
+        snap = write_snapshot(os.path.join(self.tmp, "uct"), data=data)
+        self.assertEqual(self.run_load(snap=snap), 0, self.last_err)
+        posts = {b["sfId"]: b for m, e, b in self.espo.writes if m == "POST" and e == "Call"}
+        self.assertNotIn("direction", posts[fx.T[1]])
+        exc = self.exceptions()
+        for code in ("call_direction_unknown", "enum_unmapped"):
+            self.assertIn({"object": "Task", "sfId": fx.T[1], "reason": code}, exc)
+
+    def _memory(self, mode=0o600):
+        path = os.path.join(self.tmp, f"mem{self._n}.json")
+        with open(path, "w") as fh:
+            fh.write("[]\n")
+        os.chmod(path, mode)
+        return path
+
+    def test_phone_refusals_file_must_be_sealed(self):
+        from unittest import mock
+        good = self._memory()
+        self.assertEqual(self.run_load("--phone-refusals", good), 0, self.last_err)
+        self.assertEqual(self.report()["phoneRefusals"]["supplied"], True)
+        self.assertIn("event=phone_refusals remembered=0 supplied=true", self.last_err)
+        self.assertEqual(self.run_load(), 0, self.last_err)
+        self.assertEqual(self.report()["phoneRefusals"]["supplied"], False)
+        link = os.path.join(self.tmp, "link.json")
+        os.symlink(good, link)
+        cases = [(link, "phone_refusals_unreadable"), (self._memory(0o644), "phone_refusals_not_sealed"),
+                 (self.tmp, "phone_refusals_not_sealed")]
+        for path, code in cases:
+            with self.subTest(path=path):
+                self.assertEqual(self.run_load("--phone-refusals", path), 2)
+                self.assertIn(f"code={code}", self.last_err)
+        with mock.patch.object(cli, "_refusals_owner", return_value=os.geteuid() + 1):
+            self.assertEqual(self.run_load("--phone-refusals", good), 2)
+        self.assertIn("code=phone_refusals_not_sealed", self.last_err)
+
+    def test_update_with_every_phone_probe_refused_is_unchanged(self):
+        class Toggle(FakeEspo):
+            refuse = False
+
+            def _phone(self, number):
+                if self.refuse and number == "01632 960102":
+                    return number, True
+                return super()._phone(number)
+        espo = Toggle()
+        self.assertEqual(self.run_load(espo=espo), 0, self.last_err)
+        espo.refuse = True
+        espo.by_sf("Contact")[fx.C[2]]["phoneNumberData"] = []         # only its refused number differs
+        n = len(espo.writes)
+        self.assertEqual(self.run_load(espo=espo), 0, self.last_err)
+        self.assertTrue(espo.writes[n:])                                # attempted (and refused)
+        self.assertEqual(self.report()["objects"]["Contact"]["targets"]["Contact"],
+                         {"created": 0, "updated": 0, "unchanged": 3, "failed": 0})
+        self.assertIn({"object": "Contact", "sfId": fx.C[2], "reason": "phone_refused"}, self.exceptions())
+
+    def test_text_attributes_are_not_trimmed_before_comparison(self):
+        """M10: a text attribute is compared verbatim, so a trimmed copy in EspoCRM is restored."""
+        from crm_load.engine import same_value
+        self.assertFalse(same_value("description", "  x  ", "x", text=True))
+        self.assertTrue(same_value("name", "  x  ", "x", text=False))
+        data = fx.org()
+        data["Account"][0]["Description"] = "  padded " + SENTINEL + "  "
+        snap = write_snapshot(os.path.join(self.tmp, "txt"), data=data)
+        self.assertEqual(self.run_load(snap=snap), 0, self.last_err)
+        acc = self.espo.by_sf("Account")[fx.A[0]]
+        acc["description"] = acc["description"].strip()
+        n = len(self.espo.writes)
+        self.assertEqual(self.run_load(snap=snap), 0, self.last_err)
+        self.assertIn(("PUT", "Account", {"description": "  padded " + SENTINEL + "  "}), self.espo.writes[n:])
+
+
 class TestStatic(unittest.TestCase):
     """Every attribute written by mapping.json exists in the target entityDefs or the 10.0.12 core."""
 
@@ -1412,8 +1661,11 @@ class TestStatic(unittest.TestCase):
 
     def test_enum_options_match_entity_defs(self):
         mapping = load_json("mapping.json")
+        self.assertEqual({k: mapping["enums"][k] for k in mapping["coreEnums"]["attributes"]}, CORE_ENUM_OPTIONS)
         for key, options in mapping["enums"].items():
             entity, field = key.split(".")
+            if key in CORE_ENUM_OPTIONS:
+                continue
             with open(os.path.join(ENTITY_DEFS, f"{entity}.json")) as fh:
                 self.assertEqual(json.load(fh)["fields"][field]["options"], options, key)
 

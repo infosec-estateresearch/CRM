@@ -26,7 +26,10 @@ Before any write, ``load`` reads ``GET Settings``: ``--target beta`` refuses
 (``phone_international_enabled``, exit 3) unless ``phoneNumberInternational`` is exactly
 ``false`` (a refused read counts as not confirmed); dev reports the value and continues.
 ``phone-refusals.json`` in the output holds the sha256 of (sfId, field, number) of every
-phone the server refused; given back with ``--phone-refusals``, those numbers are not retried.
+phone the server refused (number trimmed, as stored); given back with ``--phone-refusals``,
+those numbers are not retried. That file is opened with O_NOFOLLOW and must be a regular file
+owned by the running user (root under load.sh), mode 0600; the report's ``phoneRefusals``
+says whether one was supplied.
 
 Exit codes: 0 ok, 2 usage/config, 3 gate refused, 4 transport, 5 load finished with
 write failures.
@@ -151,13 +154,32 @@ REFUSALS_FILE = "phone-refusals.json"
 _HEX64 = frozenset("0123456789abcdef")
 
 
+def _refusals_owner():
+    """The uid a phone-refusals file must be owned by: the running user (root under load.sh)."""
+    return os.geteuid()
+
+
 def _read_refusals(path):
-    """A list of sha256 hex digests (content-free); anything else is refused."""
+    """A list of sha256 hex digests (content-free); anything else is refused.
+
+    Opened without following a symlink, then checked on the open descriptor (no race): a
+    regular file, owned by the running user (root under load.sh), mode exactly 0600."""
     try:
-        with open(path, "rb") as fh:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        raise LoadError("phone_refusals_unreadable") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != _refusals_owner() or stat.S_IMODE(st.st_mode) != 0o600:
+            raise LoadError("phone_refusals_not_sealed")
+        with os.fdopen(fd, "rb") as fh:
+            fd = None
             doc = json.loads(fh.read().decode("utf-8"))
     except (OSError, ValueError, UnicodeDecodeError):
         raise LoadError("phone_refusals_unreadable") from None
+    finally:
+        if fd is not None:
+            os.close(fd)
     if not isinstance(doc, list) or not all(isinstance(h, str) and len(h) == 64 and set(h) <= _HEX64
                                             for h in doc):
         raise LoadError("phone_refusals_invalid")
@@ -201,7 +223,7 @@ def run_load(args, transport, log, contract_dir=None, sleep=time.sleep, fail_aft
         raise LoadError("mapping_contract_mismatch")
     mapper = Mapper(mapping, load_json("lead_source_map.json", contract_dir),
                     NameParser(load_json("name_patterns.json", contract_dir)["patterns"]), snapshot.as_of,
-                    snapshot.t_start)
+                    snapshot.t_start, synthetic=snapshot.synthetic is True)
     previous = _resume_dir(args.resume, snapshot, args.target) if args.resume is not None else None
     refused = _read_refusals(args.phone_refusals) if args.phone_refusals is not None else frozenset()
     out = _new_dir(args.out)
@@ -218,6 +240,8 @@ def run_load(args, transport, log, contract_dir=None, sleep=time.sleep, fail_aft
         progress.close()
         raise
     loader = Loader(snapshot, mapper, client, log, progress, mapping, refused)
+    loader.refusals_supplied = args.phone_refusals is not None
+    log.event("phone_refusals", supplied=loader.refusals_supplied, remembered=len(refused))
     try:
         loader.run()
     finally:
