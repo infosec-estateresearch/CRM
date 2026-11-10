@@ -242,6 +242,8 @@ def _extract(client, contract, out, log, options, manifest):
     gate = run_gate(client, contract, log)
     out.write_json("contract-check.json", gate.report)
     out.write_json("describe.json", gate.describe_summary)
+    manifest["identity"] = gate.report["identity"]
+    manifest["writable_objects"] = gate.report["writable_objects"]
     if not gate.ok:
         manifest["gate"] = "failed"
         raise GateFailed(detail="no data query issued")

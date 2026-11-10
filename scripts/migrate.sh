@@ -7,6 +7,7 @@
 #   migrate.sh [migrate] extract [--passes N] [--overlap-minutes M]
 #   migrate.sh [migrate] reconcile <snapshot-id> [<previous-snapshot-id>]
 #   migrate.sh [migrate] credentials
+#   migrate.sh [migrate] --auth soap-legacy [--sandbox] contract-check|count|extract [...]
 #
 # Root only. The optional first argument is the target and must be "migrate".
 # Every run writes a new snapshots/<UTC id>-<mode>/ directory owned 64021:64021 (0700),
@@ -29,6 +30,7 @@ REPO="$(dirname -- "$(dirname -- "$SCRIPT_PATH")")"
 readonly SCRIPT_PATH REPO
 readonly COMPOSE_FILE="$REPO/deploy/migrate/compose.json"
 readonly ENV_EXAMPLE="$REPO/deploy/migrate/env.example"
+readonly ENV_EXAMPLE_LEGACY="$REPO/deploy/migrate/env.legacy.example"
 readonly ENTRY="$REPO/migrate/bin/crm-migrate.py"
 readonly SUBCOMMANDS=" selftest contract-check count extract reconcile credentials "
 
@@ -37,7 +39,7 @@ CRED_TMP=""
 ENV_NAMES=()
 
 die() { printf 'migrate.sh: refused: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '4,9p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '4,10p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 # Host checks are pure functions in migrate/lib/crm_migrate/hostcheck.py (unit-tested).
 check() { "$PYTHON" -I -B "$ENTRY" hostcheck "$@"; }
@@ -45,11 +47,25 @@ require() { check "$@" || die "host check '$1' failed"; }
 
 is_subcommand() { [[ "$SUBCOMMANDS" == *" $1 "* ]]; }
 
+# CRM-002-S legacy checks print to stdout for capture (fingerprint) or the container pipe.
+legacy_require() { "$PYTHON" -I -B "$ENTRY" hostcheck "$@" || die "legacy host check '$1' failed"; }
+
 # ------------------------------------------------------------------ arguments
 target=migrate
-if [[ $# -ge 1 ]] && ! is_subcommand "$1"; then
+auth=client-credentials
+sandbox_args=()
+if [[ $# -ge 1 ]] && [[ "$1" != --auth ]] && ! is_subcommand "$1"; then
     target="$1"
     shift
+fi
+if [[ $# -ge 1 && "$1" == --auth ]]; then
+    [[ $# -ge 2 && "$2" == soap-legacy ]] || usage
+    auth=soap-legacy
+    shift 2
+    if [[ $# -ge 1 && "$1" == --sandbox ]]; then
+        sandbox_args=(--sandbox)
+        shift
+    fi
 fi
 [[ $# -ge 1 ]] || usage
 sub="$1"
@@ -70,6 +86,12 @@ done
 require env-clean "$ENV_EXAMPLE"
 require runtime-dirs
 require uid-free "$(getent passwd "$RUN_UID" || true)" "$(getent group "$RUN_GID" || true)"
+if [[ "$auth" == soap-legacy ]]; then
+    [[ -f "$ENV_EXAMPLE_LEGACY" ]] || die "repository files missing"
+    for name in NIF_SRC_SALESFORCE_USER NIF_SRC_SALESFORCE_PASS; do
+        [[ ! -v "$name" ]] || die "$name is set in the calling shell; unset it first"
+    done
+fi
 
 # ------------------------------------------------------------------ helpers
 compose_run() {
@@ -136,6 +158,36 @@ require_env_file() {
     require env-file "$ENV_EXAMPLE"
 }
 
+run_legacy() {
+    # TEMPORARY (CRM-002-S): the legacy username/password go from the ELT env file (read-only,
+    # parsed by hostcheck.parse_legacy_env) straight into the container's stdin. They are never
+    # written to /srv/CRM/runtime/migrate, an argument list or the environment.
+    local mode="$1"
+    shift
+    command -v docker >/dev/null || die "docker is required"
+    local before after rc=0
+    before="$(legacy_require legacy-fingerprint)" || die "legacy env file could not be fingerprinted"
+    legacy_require waiver-file
+    new_run_dir "$mode"
+    local args=(--out /out/run --auth soap-legacy --credentials-stdin "${sandbox_args[@]}")
+    if [[ -f "$RUNTIME/waiver.json" ]]; then
+        mkdir -m 0700 -- "$RUN_DIR/input"
+        install -m 0400 -o "$RUN_UID" -g "$RUN_GID" -- "$RUNTIME/waiver.json" "$RUN_DIR/input/waiver.json"
+        chown "$RUN_UID:$RUN_GID" -- "$RUN_DIR/input"
+        args+=(--waiver /out/input/waiver.json)
+    fi
+    "$PYTHON" -I -B "$ENTRY" hostcheck legacy-credentials |
+        compose_run crm-migrate "$mode" "${args[@]}" "$@" || rc=$?
+    after="$(legacy_require legacy-fingerprint)" || after="unavailable"
+    if [[ "$before" != "$after" ]]; then
+        printf 'migrate.sh: FAILED: the legacy env file changed during the run (sha256 or mtime)\n' >&2
+        [[ "$rc" -ne 0 ]] || rc=22
+    else
+        printf 'migrate.sh: legacy env file unchanged (sha256 and mtime equal before and after)\n'
+    fi
+    finish "$RUN_DIR" "$RUN_DIR/run" "$rc"
+}
+
 # ------------------------------------------------------------------ subcommands
 cmd_selftest() {
     local args=()
@@ -165,6 +217,10 @@ cmd_live() {
         done
     else
         [[ $# -eq 0 ]] || usage
+    fi
+    if [[ "$auth" == soap-legacy ]]; then
+        require env-file "$ENV_EXAMPLE_LEGACY"
+        run_legacy "$mode" "${args[@]}"
     fi
     require_env_file
     run_container crm-migrate "$mode" "${args[@]}"
@@ -237,6 +293,8 @@ cmd_credentials() {
     printf 'migrate.sh: wrote %s (root:root 0600; values not shown)\n' "$ENV_FILE"
 }
 
+[[ "$auth" == client-credentials || "$sub" == contract-check || "$sub" == count || "$sub" == extract ]] ||
+    die "--auth soap-legacy applies to contract-check, count and extract only"
 case "$sub" in
     selftest) cmd_selftest "$@" ;;
     contract-check | count | extract) cmd_live "$sub" "$@" ;;

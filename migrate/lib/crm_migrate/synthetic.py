@@ -27,6 +27,31 @@ FAKE_API_VERSION = "62.0"
 FAKE_CLIENT_ID = "synthetic-client-id-" + SENTINEL
 FAKE_CLIENT_SECRET = "synthetic-client-secret-" + SENTINEL
 FAKE_TOKEN = "synthetic-token-" + SENTINEL
+# CRM-002-S SOAP legacy fixtures (synthetic only)
+FAKE_USERNAME = "user@example.test"
+FAKE_PASSWORD = "sentinel-password-" + SENTINEL
+FAKE_SESSION = "00DS70000000001!sentinel.session." + SENTINEL
+FAKE_ORG_ID = "00DS70000000001AAA"
+FAKE_SOAP_VERSION = "59.0"
+_NS_ENV = "http" + "://schemas.xmlsoap.org/soap/envelope/"   # XML namespace, never contacted
+SOAP_SUCCESS_TEMPLATE = (
+    '<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="' + _NS_ENV + '" '
+    'xmlns="urn:partner.soap.sforce.com"><soapenv:Body><loginResponse><result>'
+    "<passwordExpired>false</passwordExpired><serverUrl>{server_url}</serverUrl>"
+    "<sessionId>{session}</sessionId><userName>user@example.test</userName>"
+    "</result></loginResponse></soapenv:Body></soapenv:Envelope>")
+SOAP_LOGOUT_RESPONSE = (
+    '<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="' + _NS_ENV + '" '
+    'xmlns="urn:partner.soap.sforce.com"><soapenv:Body><logoutResponse/></soapenv:Body></soapenv:Envelope>')
+SOAP_FAULT_RESPONSE = (
+    '<?xml version="1.0" encoding="UTF-8"?><soapenv:Envelope xmlns:soapenv="' + _NS_ENV + '" '
+    'xmlns:sf="urn:fault.partner.soap.sforce.com"><soapenv:Body><soapenv:Fault>'
+    "<faultcode>sf:INVALID_LOGIN</faultcode>"
+    "<faultstring>INVALID_LOGIN: " + SENTINEL + " bad password " + FAKE_PASSWORD + "</faultstring>"
+    "<detail><sf:LoginFault><sf:exceptionCode>INVALID_LOGIN " + SENTINEL + "</sf:exceptionCode>"
+    "<sf:exceptionMessage>" + SENTINEL + "</sf:exceptionMessage></sf:LoginFault></detail>"
+    "</soapenv:Fault></soapenv:Body></soapenv:Envelope>")
+WRITE_CAPABLE = {"createable": True, "updateable": True, "deletable": True}
 CLOCK_START = _dt.datetime(2026, 11, 10, 9, 0, 0, tzinfo=_dt.timezone.utc)
 
 KEY_PREFIX = {
@@ -391,7 +416,8 @@ class FakeSalesforceTransport:
 
     def __init__(self, org, *, origin=FAKE_ORIGIN, api_version=FAKE_API_VERSION, instance_url=None,
                  page_size=7, hooks=(), redirect_paths=(), absolute_next=False, foreign_next=False,
-                 count_offset=None, hide_from_id_query=(), error_paths=(), drop_date=False):
+                 count_offset=None, hide_from_id_query=(), error_paths=(), drop_date=False,
+                 soap_server_url=None, soap_response=None, soap_status=200):
         self.org = org
         self.origin = origin
         self.api_version = api_version
@@ -405,6 +431,11 @@ class FakeSalesforceTransport:
         self.count_offset = dict(count_offset or {})
         self.hide_from_id_query = set(hide_from_id_query)
         self.drop_date = drop_date
+        self.soap_server_url = soap_server_url or f"{origin}/services/Soap/u/{api_version}/{FAKE_ORG_ID}"
+        self.soap_response = soap_response
+        self.soap_status = soap_status
+        self.soap_requests = []          # (SOAPAction, path) of SOAP requests received
+        self.session_active = False
         self.requests = []
         self.write_requests = 0
         self._cursors = {}
@@ -430,7 +461,10 @@ class FakeSalesforceTransport:
         parts = urlsplit(request.url)
         self.requests.append((request.method, parts.path))
         is_token = request.method == "POST" and parts.path == "/services/oauth2/token"
-        if request.method != "GET" and not is_token:
+        action = dict((k.lower(), v) for k, v in request.headers).get("soapaction")
+        is_soap = (request.method == "POST" and parts.path.startswith("/services/Soap/u/")
+                   and action in ("login", "logout"))
+        if request.method != "GET" and not is_token and not is_soap:
             self.write_requests += 1
             FakeSalesforceTransport.total_write_requests += 1
             raise FakeWriteAttempt("write request reached the fake")
@@ -440,6 +474,8 @@ class FakeSalesforceTransport:
         for rx in self.error_paths:
             if rx.search(parts.path):
                 return self._error(500, "UNKNOWN_EXCEPTION")
+        if is_soap:
+            return self._soap(request, parts, action)
         if is_token:
             form = dict(parse_qsl(request.body.decode("ascii")))
             if (form.get("grant_type") != "client_credentials" or form.get("client_id") != FAKE_CLIENT_ID
@@ -448,7 +484,8 @@ class FakeSalesforceTransport:
             return self._resp(200, {"access_token": FAKE_TOKEN, "instance_url": self.instance_url,
                                     "token_type": "Bearer", "id": f"{self.origin}/id/{SENTINEL}"})
         headers = dict(request.headers)
-        if headers.get("Authorization") != "Bearer " + FAKE_TOKEN:
+        bearer = headers.get("Authorization")
+        if bearer != "Bearer " + FAKE_TOKEN and not (self.session_active and bearer == "Bearer " + FAKE_SESSION):
             return self._error(401, "INVALID_SESSION_ID")
         base = f"/services/data/v{self.api_version}/"
         path = parts.path
@@ -469,6 +506,22 @@ class FakeSalesforceTransport:
                 return self._resp(200, self.org.describe(m.group(1)))
             return self._deleted(m.group(1), params)
         return self._error(404, "NOT_FOUND")
+
+    def _soap(self, request, parts, action):
+        self.soap_requests.append((action, parts.path))
+        headers = {"content-type": "text/xml; charset=utf-8"}
+        if action == "logout":
+            self.session_active = False
+            return Response(200, headers, SOAP_LOGOUT_RESPONSE.encode("utf-8"))
+        if self.soap_response is not None:
+            return Response(self.soap_status, headers, self.soap_response)
+        body = request.body.decode("utf-8")
+        if ("<urn:username>user@example.test</urn:username>" not in body
+                or f"<urn:password>{FAKE_PASSWORD}</urn:password>" not in body):
+            return Response(500, headers, SOAP_FAULT_RESPONSE.encode("utf-8"))
+        self.session_active = True
+        doc = SOAP_SUCCESS_TEMPLATE.format(server_url=self.soap_server_url, session=FAKE_SESSION)
+        return Response(200, headers, doc.encode("utf-8"))
 
     def _project(self, obj, row, fields):
         rec = {"attributes": {"type": obj, "url": f"/services/data/v{self.api_version}/sobjects/{obj}/{row['Id']}"}}

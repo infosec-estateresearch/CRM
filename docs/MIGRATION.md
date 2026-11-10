@@ -213,3 +213,55 @@ These contract details come from Salesforce documentation and the inventory, not
 
 - The synthetic org and `FakeSalesforceTransport` live in `migrate/lib/crm_migrate/synthetic.py`, because `selftest` must run in the container, where only `migrate/` is mounted. `tests/migrate/fake_salesforce.py` re-exports them. They are in memory only, with no sockets. Every record carries the marker `SENTINEL-7f3a`, and every domain is `example.test`.
 - Run the tests from the repository root with `python3 -I -B -m unittest discover -s tests/migrate -t . -v`.
+
+## Network egress
+
+`crm-migrate-net` is a **plain Docker bridge network**. It does not restrict destinations
+by itself. The destination is restricted by the client policy (`RequestPolicy`, enforced in
+`SalesforceClient` and again in `HttpsTransport`): one origin (`CRM_SF_ORIGIN`), port 443,
+HTTPS only, no proxies or redirects. Under `--auth soap-legacy` the constant SOAP login host
+is the only addition. Host-firewall changes are prohibited by a PO standing rule, so no
+firewall rule backs this up.
+
+## Temporary legacy credential
+
+**Authority.** The PO priority override of 2026-11-10, recorded on Issue #9 (CRM-002-S). It
+authorises temporary reuse of the existing Salesforce username and password for the read-only
+migration only. Every request must pass the read-only allowlist. Only the trusted operator
+handles the credential and runs the extraction. No secret goes anywhere public, or into a
+prompt or a log.
+
+**Risk.** The legacy identity **can write**. Only the request allowlist limits it. The
+allowlist gains exactly two SOAP partner entries, `login` (to the constant
+`login.salesforce.com`, or `test.salesforce.com` with `--sandbox`) and `logout` (to the
+origin `serverUrl` gives). Each is matched on host, path, `SOAPAction`, and a body
+byte-identical to a fixed template. No other SOAP operation can be expressed. The
+`serverUrl` origin must equal `CRM_SF_ORIGIN` exactly, otherwise the run aborts before any
+REST call. The session id is used only as the Bearer token for that origin and is held only
+in memory. SOAP faults are reduced to `faultcode` and the first `exceptionCode` token.
+
+**Operator-only procedure** (root, on the host):
+
+1. `/srv/CRM/runtime/migrate/env` holds only `CRM_SF_ORIGIN` and `CRM_SF_API_VERSION`
+   (31.0 to 64.0; the tool defaults to `59.0`); see `deploy/migrate/env.legacy.example`.
+2. Optional waiver, `/srv/CRM/runtime/migrate/waiver.json` (root:root, `0600`):
+   `{"authorisation": "<Issue #9 comment URL>", "identity": "legacy-eric", "expires": "YYYY-MM-DD"}`.
+   `expires` must be today or later, and at most 30 days ahead. If the waiver is expired,
+   malformed or has extra keys, the run fails before any request. If it is missing, a
+   write-capable identity fails `contract-check`, and no data query runs. The waiver applies
+   to `--auth soap-legacy` only; client-credentials mode ignores it completely. The manifest
+   and the report state `identity: write-capable (waived: <url>)` and `writable_objects`.
+3. `scripts/migrate.sh --auth soap-legacy contract-check` (then `count`, then `extract`).
+   The script reads only `NIF_SRC_SALESFORCE_USER` and `NIF_SRC_SALESFORCE_PASS` from the
+   existing ELT env file. It opens the file read-only, never follows a symlink, and parses it
+   strictly (`hostcheck.parse_legacy_env`). It pipes them as JSON on stdin to
+   `docker compose run -T --rm crm-migrate … --auth soap-legacy --credentials-stdin`. The
+   values are never written under `/srv/CRM/runtime/migrate`, into arguments or into the
+   environment. The script records the file's sha256 and mtime before and after the run, and
+   fails (exit 22) if either changed. The run's output is in `snapshots/<id>/run/`. The
+   waiver copy used is in `snapshots/<id>/input/`.
+
+**Retirement.** Disable the adapter as soon as extraction is complete, or when the dedicated
+read-only identity exists. In any case, do so before Summer '27, when Salesforce retires SOAP
+`login()`. To retire it, remove `auth_soap.py`, the `soap-legacy` CLI and script paths, and
+the waiver file.

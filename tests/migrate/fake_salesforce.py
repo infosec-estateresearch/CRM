@@ -14,7 +14,8 @@ from crm_migrate.extract import ExtractOptions, run_extract
 from crm_migrate.log import CountsLog
 from crm_migrate.manifest import OutputDir
 from crm_migrate.synthetic import (  # noqa: F401  (re-exported for the tests)
-    CLOCK_START, FAKE_API_VERSION, FAKE_CLIENT_ID, FAKE_CLIENT_SECRET, FAKE_ORIGIN, FAKE_TOKEN, KEY_PREFIX,
+    CLOCK_START, FAKE_API_VERSION, FAKE_ORG_ID, FAKE_PASSWORD, FAKE_SESSION, FAKE_SOAP_VERSION, FAKE_USERNAME,
+    SOAP_FAULT_RESPONSE, SOAP_SUCCESS_TEMPLATE, WRITE_CAPABLE, FAKE_CLIENT_ID, FAKE_CLIENT_SECRET, FAKE_ORIGIN, FAKE_TOKEN, KEY_PREFIX,
     PLANTED, SCENARIO_EXPECTED, SENTINEL, FakeOrg, FakeSalesforceTransport, FakeWriteAttempt, Hook, build_org,
     make_fake, scenario_hooks, sf_id)
 

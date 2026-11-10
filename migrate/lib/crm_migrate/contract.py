@@ -32,7 +32,7 @@ COMPOUND_TYPES = frozenset({"address", "location"})
 COMPOUND_FIELDS = frozenset({"BillingAddress", "ShippingAddress", "MailingAddress", "OtherAddress", "Address"})
 EXCLUDED_FIELDS = frozenset({"HtmlBody", "BccAddress"})  # D5
 WAIVABLE_FLAGS = ("createable", "updateable", "deletable")
-_DT_LITERAL_RE = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+_DT_LITERAL_RE = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"
 
 
 @dataclass(frozen=True)
@@ -280,10 +280,10 @@ def soql_id_only(spec):
 
 
 _SOQL_RE = re.compile(
-    r"^SELECT (?P<fields>COUNT\(\)|[A-Za-z][A-Za-z0-9_]*(?:, [A-Za-z][A-Za-z0-9_]*)*)"
+    r"SELECT (?P<fields>COUNT\(\)|[A-Za-z][A-Za-z0-9_]*(?:, [A-Za-z][A-Za-z0-9_]*)*)"
     r" FROM (?P<object>[A-Za-z][A-Za-z0-9_]*)"
     r"(?: WHERE SystemModstamp >= (?P<since>" + _DT_LITERAL_RE + r"))?"
-    r"(?P<order> ORDER BY Id)?$"
+    r"(?P<order> ORDER BY Id)?"
 )
 
 
@@ -299,7 +299,7 @@ def parse_soql(q):
     """Parse a SOQL string of one of the generated shapes; return None if it is not one."""
     if not isinstance(q, str):
         return None
-    m = _SOQL_RE.match(q)
+    m = _SOQL_RE.fullmatch(q)   # fullmatch: "$" would accept a trailing newline
     if not m:
         return None
     is_count = m.group("fields") == "COUNT()"

@@ -7,6 +7,8 @@ I/O wrapper the script calls as ``crm-migrate.py hostcheck <check> ...``; it pri
 reasons and variable names, never a value.
 """
 
+import hashlib
+import json
 import os
 import re
 import stat
@@ -23,6 +25,20 @@ RUN_GID = 64021
 RUN_MODES = ("selftest", "contract-check", "count", "extract", "reconcile")
 RUN_ID_RE = re.compile(r"^\d{8}T\d{6}Z-(?:" + "|".join(re.escape(m) for m in RUN_MODES) + r")$")
 _NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+WAIVER_FILE = RUNTIME + "/waiver.json"
+
+# CRM-002-S (temporary): the existing ELT env file holding the legacy credential. The real
+# path is a host fact the PL supplies; until set, the legacy commands refuse to run.
+LEGACY_ENV_FILE = ""
+LEGACY_USER = "NIF_SRC_SALESFORCE_USER"
+LEGACY_PASS = "NIF_SRC_SALESFORCE_PASS"
+LEGACY_NAMES = (LEGACY_USER, LEGACY_PASS)
+MAX_LEGACY_ENV_BYTES = 1024 * 1024
+_ASSIGN_RE = re.compile(r"\A(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)\Z", re.S)
+_UNQUOTED_RE = re.compile(r"\A[^\s'\"\\`$]+\Z")
+_DQ_INNER_RE = re.compile(r"\A[^\"\\`$]+\Z")
+_SQ_INNER_RE = re.compile(r"\A[^']+\Z")
+_CTL_RE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
 
 
 def _mode(st):
@@ -33,8 +49,14 @@ def check_target(target):
     return [] if target == TARGET else ["target must be 'migrate'"]
 
 
-def check_runtime_path(path, expected=RUNTIME):
-    return [] if path == expected else [f"runtime must be {expected}"]
+def check_runtime_path(path, expected=RUNTIME, realpath=os.path.realpath):
+    """``path`` is the runtime path the caller was given; it must be ``expected`` and resolve
+    to itself (no symlinked component)."""
+    if path != expected:
+        return [f"runtime must be {expected}"]
+    if realpath(path) != expected:
+        return [f"runtime {expected} must not resolve through a symlink"]
+    return []
 
 
 def check_root_private_dir(st, label):
@@ -110,6 +132,92 @@ def check_env_keys(keys, names):
 def check_no_exported(environ, names):
     present = sorted(n for n in names if n in environ)
     return [f"refusing: {n} is exported in the calling shell" for n in present]
+
+
+def parse_legacy_env(text):
+    """Pure strict parser for the ELT env file: returns ``(creds or None, errors)``.
+
+    Only ``NIF_SRC_SALESFORCE_USER`` and ``NIF_SRC_SALESFORCE_PASS`` are extracted; every
+    other name is ignored, but every non-blank, non-comment line must be ``[export ]NAME=...``.
+    The two values may be unquoted (no whitespace, quotes, backslash, backtick or ``$``),
+    double-quoted (no ``"``, backslash, backtick or ``$`` inside) or single-quoted. A
+    duplicate, missing, empty or ambiguous value is refused. Errors carry line numbers and
+    names only, never a value."""
+    found, errors = {}, []
+    if not isinstance(text, str):
+        return None, ["legacy env file is not text"]
+    for number, line in enumerate(text.split("\n"), 1):
+        if line.endswith("\r"):
+            line = line[:-1]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        m = _ASSIGN_RE.fullmatch(line)
+        if not m:
+            errors.append(f"legacy env file line {number} is not NAME=value")
+            continue
+        name, raw = m.group(1), m.group(2)
+        if name not in LEGACY_NAMES:
+            continue                                  # unrelated names are ignored
+        if name in found:
+            errors.append(f"legacy env file repeats {name}")
+            continue
+        value = None
+        if _CTL_RE.search(raw):
+            value = None
+        elif len(raw) >= 2 and raw[0] == raw[-1] == '"' and _DQ_INNER_RE.fullmatch(raw[1:-1]):
+            value = raw[1:-1]
+        elif len(raw) >= 2 and raw[0] == raw[-1] == "'" and _SQ_INNER_RE.fullmatch(raw[1:-1]):
+            value = raw[1:-1]
+        elif _UNQUOTED_RE.fullmatch(raw):
+            value = raw
+        if value is None:
+            errors.append(f"legacy env file value of {name} is empty or ambiguous")
+            found[name] = None
+            continue
+        found[name] = value
+    for name in LEGACY_NAMES:
+        if name not in found:
+            errors.append(f"legacy env file is missing {name}")
+    if errors:
+        return None, errors
+    return {"username": found[LEGACY_USER], "password": found[LEGACY_PASS]}, []
+
+
+def legacy_credentials_json(creds):
+    return json.dumps({"username": creds["username"], "password": creds["password"]}, ensure_ascii=True)
+
+
+def fingerprint(raw, st):
+    """sha256 of the content plus mtime (ns), size and inode: evidence the file was not modified."""
+    return f"{hashlib.sha256(raw).hexdigest()} {st.st_mtime_ns} {st.st_size} {st.st_ino}"
+
+
+def check_unchanged(before, after):
+    return [] if before == after else ["legacy env file changed during the run (sha256 or mtime)"]
+
+
+def check_legacy_env_stat(st):
+    if st is None:
+        return ["legacy env file does not exist"]
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        return ["legacy env file must be a regular file"]
+    if _mode(st) & 0o002:
+        return ["legacy env file must not be world-writable"]
+    return []
+
+
+def check_waiver_file_stat(st):
+    if st is None:
+        return []                                     # absent: the gate decides (write flags fail)
+    errors = []
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        errors.append("waiver must be a regular file")
+    if st.st_uid != 0 or st.st_gid != 0:
+        errors.append("waiver must be owned root:root")
+    if _mode(st) != 0o600:
+        errors.append("waiver must be mode 0600")
+    return errors
 
 
 def check_uid_free(passwd_entry, group_entry, uid=RUN_UID, gid=RUN_GID):
@@ -196,6 +304,57 @@ def _read(path):
         return fh.read()
 
 
+def _read_legacy(path):
+    """Open read-only, no symlink follow; return (raw bytes, fingerprint)."""
+    if not path or not os.path.isabs(path):
+        raise ValueError("LEGACY_ENV_FILE is not configured")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
+    try:
+        st = os.fstat(fd)
+        errors = check_legacy_env_stat(st)
+        if errors:
+            return None, None, errors
+        chunks, total = [], 0
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_LEGACY_ENV_BYTES:
+                return None, None, ["legacy env file is too large"]
+            chunks.append(chunk)
+        raw = b"".join(chunks)
+        return raw, fingerprint(raw, st), []
+    finally:
+        os.close(fd)
+
+
+def legacy_main(check, path, out, err):
+    """``legacy-fingerprint`` prints the fingerprint; ``legacy-credentials`` prints the JSON
+    for the container's stdin. Errors go to ``err`` only, never into the pipe."""
+    try:
+        raw, fp, errors = _read_legacy(path)
+        if not errors and check == "legacy-fingerprint":
+            print(fp, file=out)
+            return 0
+        if not errors:
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                text, errors = None, ["legacy env file is not UTF-8"]
+            if text is not None:
+                creds, errors = parse_legacy_env(text)
+                if not errors:
+                    out.write(legacy_credentials_json(creds))
+                    out.flush()
+                    return 0
+    except Exception as exc:  # class only
+        errors = [f"legacy check failed ({type(exc).__name__})"]
+    for e in errors:
+        print(f"hostcheck: refused: {e}", file=err)
+    return 1
+
+
 def main(argv, environ=None, out=None):
     out = out or sys.stdout
     environ = os.environ if environ is None else environ
@@ -207,10 +366,16 @@ def main(argv, environ=None, out=None):
     try:
         if check == "target" and len(args) == 1:
             errors = check_target(args[0])
-        elif check == "runtime-dirs" and len(args) == 0:
-            errors = check_runtime_path(RUNTIME)
-            errors += check_root_private_dir(_lstat(RUNTIME), "runtime directory")
-            errors += check_root_private_dir(_lstat(SNAPSHOTS), "snapshots directory")
+        elif check == "runtime-dirs" and len(args) <= 1:
+            given = args[0] if args else RUNTIME
+            errors = check_runtime_path(given)
+            if not errors:
+                errors += check_root_private_dir(_lstat(given), "runtime directory")
+                errors += check_root_private_dir(_lstat(given + "/snapshots"), "snapshots directory")
+        elif check in ("legacy-fingerprint", "legacy-credentials") and len(args) == 0:
+            return legacy_main(check, LEGACY_ENV_FILE, out, sys.stderr)
+        elif check == "waiver-file" and len(args) == 0:
+            errors = check_waiver_file_stat(_lstat(WAIVER_FILE))
         elif check == "env-names" and len(args) == 1:
             names, errors = parse_env_names(_read(args[0]))
             if not errors:

@@ -14,6 +14,16 @@ Permitted, with ``vNN.N`` equal to the configured API version:
 * ``GET  {origin}/services/data/vNN.N/sobjects/<ContractObject>/describe/``
 * ``GET  {origin}/services/data/vNN.N/sobjects/<ContractObject>/deleted/?start=&end=``
 * ``GET  {origin}/services/data/vNN.N/limits/``
+
+Only when the policy is built with ``soap_login_host`` (``--auth soap-legacy``, CRM-002-S),
+two SOAP partner entries are added, matched on host, path, ``SOAPAction`` and body root:
+
+* ``POST https://<soap_login_host>/services/Soap/u/vNN.N/`` with ``SOAPAction: login`` and a
+  body byte-identical to the fixed ``login`` template;
+* ``POST {origin}/services/Soap/u/vNN.N/<orgId>`` with ``SOAPAction: logout`` and a body
+  byte-identical to the fixed ``logout`` template.
+
+No other SOAP operation, endpoint or header can pass.
 """
 
 import re
@@ -24,18 +34,23 @@ from .contract import parse_soql
 from .errors import OriginError, RefusedRequest
 from .messages import Request
 
-ORIGIN_RE = re.compile(r"^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.sandbox)?\.my\.salesforce\.com$")
-API_VERSION_RE = re.compile(r"^\d{2,3}\.\d$")
-NEXT_RECORDS_RE = re.compile(r"^/services/data/v\d+\.\d+/query/[A-Za-z0-9-]+$")
-ISO_PARAM_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|\+00:00)$")
+# All anchored with \A...\Z and used with fullmatch: ``$`` would also accept a trailing "\n".
+ORIGIN_RE = re.compile(r"\Ahttps://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.sandbox)?\.my\.salesforce\.com\Z")
+API_VERSION_RE = re.compile(r"\A[0-9]{2,3}\.[0-9]\Z")
+NEXT_RECORDS_RE = re.compile(r"\A/services/data/v[0-9]+\.[0-9]+/query/[A-Za-z0-9-]+\Z")
+ISO_PARAM_RE = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:Z|\+00:00)\Z")
 
 _TOKEN_PATH = "/services/oauth2/token"
-_DATA = r"^/services/data/v(?P<version>\d+\.\d+)/"
-_QUERY_RE = re.compile(_DATA + r"(?P<kind>query|queryAll)/?$")
-_NEXT_RE = re.compile(_DATA + r"query/(?P<locator>[A-Za-z0-9-]+)$")
-_DESCRIBE_RE = re.compile(_DATA + r"sobjects/(?P<object>[A-Za-z][A-Za-z0-9_]*)/describe/?$")
-_DELETED_RE = re.compile(_DATA + r"sobjects/(?P<object>[A-Za-z][A-Za-z0-9_]*)/deleted/?$")
-_LIMITS_RE = re.compile(_DATA + r"limits/?$")
+_DATA = r"\A/services/data/v(?P<version>[0-9]+\.[0-9]+)/"
+_QUERY_RE = re.compile(_DATA + r"(?P<kind>query|queryAll)/?\Z")
+_NEXT_RE = re.compile(_DATA + r"query/(?P<locator>[A-Za-z0-9-]+)\Z")
+_DESCRIBE_RE = re.compile(_DATA + r"sobjects/(?P<object>[A-Za-z][A-Za-z0-9_]*)/describe/?\Z")
+_DELETED_RE = re.compile(_DATA + r"sobjects/(?P<object>[A-Za-z][A-Za-z0-9_]*)/deleted/?\Z")
+_LIMITS_RE = re.compile(_DATA + r"limits/?\Z")
+_SOAP_PREFIX = "/services/Soap/"
+_SOAP_LOGIN_RE = re.compile(r"\A/services/Soap/u/(?P<version>[0-9]+\.[0-9]+)/\Z")
+_SOAP_LOGOUT_RE = re.compile(r"\A/services/Soap/u/(?P<version>[0-9]+\.[0-9]+)/(?P<org>00D[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?)\Z")
+_SOAP_HEADERS = {"accept", "content-type", "soapaction", "user-agent"}
 _ALLOWED_HEADERS = {"accept", "authorization", "content-type", "user-agent"}
 _FORM = "application/x-www-form-urlencoded"
 _CTL_RE = re.compile(r"[\x00-\x20\x7f]")
@@ -43,20 +58,20 @@ _CTL_RE = re.compile(r"[\x00-\x20\x7f]")
 
 def validate_origin(origin):
     """Exact ``https://<mydomain>.my.salesforce.com`` or ``...sandbox.my.salesforce.com``."""
-    if not isinstance(origin, str) or not ORIGIN_RE.match(origin):
+    if not isinstance(origin, str) or not ORIGIN_RE.fullmatch(origin):
         raise OriginError("origin_refused", detail="origin must be https://<mydomain>[.sandbox].my.salesforce.com")
     return origin
 
 
 def validate_api_version(version):
-    if not isinstance(version, str) or not API_VERSION_RE.match(version):
+    if not isinstance(version, str) or not API_VERSION_RE.fullmatch(version):
         raise OriginError("api_version_refused", detail="expected NN.N")
     return version
 
 
 @dataclass(frozen=True)
 class Checked:
-    kind: str            # token | query | queryAll | next | describe | deleted | limits
+    kind: str            # token | query | queryAll | next | describe | deleted | limits | soap_login | soap_logout
     object: str = ""
 
 
@@ -76,10 +91,15 @@ def _parse_params(query):
 
 
 class RequestPolicy:
-    def __init__(self, origin, api_version, contract_fields):
+    def __init__(self, origin, api_version, contract_fields, *, soap_login_host=None):
         self.origin = validate_origin(origin)
         self.api_version = validate_api_version(api_version)
         self._host = urlsplit(self.origin).netloc
+        if soap_login_host is not None:
+            from .auth_soap import validate_login_host, validate_soap_version
+            validate_login_host(soap_login_host)
+            validate_soap_version(self.api_version)
+        self.soap_login_host = soap_login_host
         self._fields = {k: frozenset(v) for k, v in dict(contract_fields).items()}
 
     # -- helpers
@@ -93,7 +113,7 @@ class RequestPolicy:
 
     def check_next_records_url(self, value):
         """A server-supplied nextRecordsUrl: relative, exact pattern, configured version."""
-        if not isinstance(value, str) or not NEXT_RECORDS_RE.match(value):
+        if not isinstance(value, str) or not NEXT_RECORDS_RE.fullmatch(value):
             raise RefusedRequest("next_records_url_refused", detail="nextRecordsUrl must be a relative query locator")
         if not value.startswith(f"/services/data/v{self.api_version}/"):
             raise RefusedRequest("next_records_url_refused", detail="nextRecordsUrl version mismatch")
@@ -115,6 +135,8 @@ class RequestPolicy:
             raise RefusedRequest(detail="malformed url") from None
         if parts.scheme != "https":
             raise OriginError(detail="scheme must be https")
+        if method == "POST" and parts.path.startswith(_SOAP_PREFIX):
+            return self._check_soap(request, parts, url, port)
         if parts.netloc != self._host or port is not None or parts.username or parts.password:
             raise OriginError(detail="host is not the configured origin")
         if parts.fragment or url.endswith("#") or url.endswith("?"):
@@ -152,6 +174,54 @@ class RequestPolicy:
                     self._refuse("api version mismatch")
                 return handler(m, params, path)
         self._refuse("endpoint not permitted")
+
+    # -- SOAP partner login/logout (soap-legacy only)
+    def _check_soap(self, request, parts, url, port):
+        from . import auth_soap
+        if self.soap_login_host is None:
+            self._refuse("SOAP is not enabled for this authentication mode")
+        if port is not None or parts.username or parts.password or parts.query or parts.fragment \
+                or url.endswith("#") or url.endswith("?"):
+            self._refuse("SOAP url must be origin plus path")
+        path = parts.path
+        if "%" in path or "//" in path or "/." in path or ";" in path:
+            self._refuse("path encoding refused")
+        login = _SOAP_LOGIN_RE.fullmatch(path)
+        logout = _SOAP_LOGOUT_RE.fullmatch(path)
+        if login and parts.netloc == self.soap_login_host:
+            kind, action, match = "soap_login", "login", login
+        elif logout and parts.netloc == self._host:
+            kind, action, match = "soap_logout", "logout", logout
+        elif login or logout:
+            raise OriginError(detail="SOAP host is not the login host or the configured origin")
+        else:
+            self._refuse("SOAP endpoint not permitted")
+        if "https://" + parts.netloc + path != url:
+            self._refuse("url is not origin plus path")
+        if match.group("version") != self.api_version:
+            self._refuse("api version mismatch")
+        headers = {}
+        for item in request.headers:
+            if not (isinstance(item, tuple) and len(item) == 2):
+                self._refuse("malformed header")
+            name, value = item
+            lname = str(name).lower()
+            if lname not in _SOAP_HEADERS or lname in headers:
+                self._refuse("header not permitted")
+            if not isinstance(value, str) or "\r" in value or "\n" in value:
+                self._refuse("malformed header")
+            headers[lname] = value
+        if headers.get("soapaction") != action:
+            raise RefusedRequest("soap_action_refused", detail="SOAPAction must match the endpoint")
+        if headers.get("content-type") != auth_soap.CONTENT_TYPE:
+            self._refuse("SOAP content type refused")
+        if not isinstance(request.body, bytes):
+            self._refuse("SOAP request without body")
+        if kind == "soap_login":
+            auth_soap.check_login_body(request.body)
+        else:
+            auth_soap.check_logout_body(request.body)
+        return Checked(kind)
 
     def _check_headers(self, request, path):
         seen = set()
@@ -215,7 +285,7 @@ class RequestPolicy:
         if set(params) != {"start", "end"}:
             self._refuse("deleted takes exactly start and end")
         for key in ("start", "end"):
-            if not ISO_PARAM_RE.match(params[key]):
+            if not ISO_PARAM_RE.fullmatch(params[key]):
                 self._refuse("deleted start/end must be ISO-8601 UTC")
         return Checked("deleted", self._contract_object(m.group("object")))
 
