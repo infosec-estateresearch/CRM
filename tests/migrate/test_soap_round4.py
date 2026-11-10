@@ -211,11 +211,18 @@ class LegacyEnvContinuationAndCrTest(unittest.TestCase):
         for text in ("# comment ends with \\\n" + self.CREDS,
                      "  # indented comment \\\n" + self.CREDS,
                      "OTHER='abc\\'\n" + self.CREDS,                 # backslash inside single quotes
-                     "OTHER=a\\\\\n" + self.CREDS,                   # escaped backslash
-                     "OTHER=x # trailing comment \\\n" + self.CREDS,
                      "OTHER=a\\b\n" + self.CREDS):
             with self.subTest(text=text[:20]):
                 self.assertEqual(hc.parse_legacy_env(text), (ok, []))
+
+    def test_literal_trailing_backslash_is_a_continuation(self):
+        # CRM-002-T: no escape processing, so any non-comment line ending in a backslash is
+        # refused. These two were "not a continuation" under shell rules in CRM-002-S.
+        for text in ("OTHER=a\\\\\n" + self.CREDS,
+                     "OTHER=x # trailing comment \\\n" + self.CREDS,
+                     "OTHER=a\\  \n" + self.CREDS):
+            with self.subTest(text=text[:20]):
+                self.refused(text, self.CONT, 1)
 
 
 class CountsLogSfErrorTest(unittest.TestCase):

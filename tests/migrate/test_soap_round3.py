@@ -235,17 +235,18 @@ class LegacyEnvUnclosedQuoteTest(unittest.TestCase):
     CREDS = "NIF_SRC_SALESFORCE_USER=u\nNIF_SRC_SALESFORCE_PASS=p\n"
 
     def test_quote_spanning_lines_refuses_whole_file(self):
+        # CRM-002-T: the consumer reads line by line with no quote processing, and WO item 3
+        # says other lines are not interpreted beyond the CR and continuation checks. A quote
+        # left open on another line no longer refuses the file; the targets read literally.
         for text in ('OTHER="abc\n' + self.CREDS + 'X=y"\n',
                      "OTHER='abc\n" + self.CREDS + "X=y'\n",
                      "export OTHER=pre\"fix\n" + self.CREDS + "END=\"\n",
                      self.CREDS + "TAIL='" + SENTINEL + "\n"):
             with self.subTest(text=text[:16]):
-                creds, errors = hc.parse_legacy_env(text)
-                self.assertIsNone(creds)
-                self.assertEqual(len(errors), 1)
-                self.assertRegex(errors[0], r"\Alegacy env file line [0-9]+ opens a quote it does not close; file refused\Z")
-                self.assertNotIn(SENTINEL, errors[0])
-        self.assertIn("line 1 ", hc.parse_legacy_env('OTHER="abc\n' + self.CREDS + 'X=y"\n')[1][0])
+                self.assertEqual(hc.parse_legacy_env(text), ({"username": "u", "password": "p"}, []))
+        creds, errors = hc.parse_legacy_env("NIF_SRC_SALESFORCE_USER=u\nNIF_SRC_SALESFORCE_PASS='" + SENTINEL + "\n")
+        self.assertIsNone(creds)                       # an open quote in a target value is refused
+        self.assertEqual(errors, ["legacy env file line 2: refused-character"])
 
     def test_closed_quotes_comments_and_escapes_still_parse(self):
         for text in ('OTHER="a#b \'c"\n' + self.CREDS,

@@ -410,7 +410,8 @@ class LegacyEnvMetacharTest(unittest.TestCase):
         return hc.parse_legacy_env(f"NIF_SRC_SALESFORCE_USER=u\nNIF_SRC_SALESFORCE_PASS={raw}\n")
 
     def test_unquoted_metacharacters_refused(self):
-        for ch in list(";&|<>()$`") + [" ", "\t", " ", "\\", "'", '"']:
+        # CRM-002-T: ;&|<>() moved to test_shell_metacharacters_now_accepted.
+        for ch in list("$`") + [" ", "\t", " ", "\\", "'", '"']:
             with self.subTest(ch=ch):
                 creds, errors = self.parse(f"p{ch}w")
                 self.assertIsNone(creds)
@@ -421,9 +422,16 @@ class LegacyEnvMetacharTest(unittest.TestCase):
             with self.subTest(raw=raw):
                 self.assertIsNone(self.parse(raw)[0])
 
+    def test_shell_metacharacters_now_accepted(self):
+        for ch in ";&|<>()":
+            with self.subTest(ch=ch):
+                self.assertEqual(self.parse(f"p{ch}w"), ({"username": "u", "password": f"p{ch}w"}, []))
+
     def test_quoted_metacharacters_allowed(self):
-        self.assertEqual(self.parse("'a;b&c|d<e>f(g)h$i`j k'")[0]["password"], "a;b&c|d<e>f(g)h$i`j k")
-        self.assertEqual(self.parse('"a;b&c|d<e>f(g)h k"')[0]["password"], "a;b&c|d<e>f(g)h k")
+        # CRM-002-T: quoted target values are refused (the consumer would keep the quotes).
+        self.assertIsNone(self.parse("'a;b&c|d<e>f(g)h$i`j k'")[0])
+        self.assertIsNone(self.parse('"a;b&c|d<e>f(g)h k"')[0])
+        self.assertEqual(self.parse("a;b&c|d<e>f(g)h")[0]["password"], "a;b&c|d<e>f(g)h")
         self.assertEqual(self.parse("plain-pw_1.!@#%^*+=")[0]["password"], "plain-pw_1.!@#%^*+=")
 
 

@@ -35,11 +35,14 @@ LEGACY_USER = "NIF_SRC_SALESFORCE_USER"
 LEGACY_PASS = "NIF_SRC_SALESFORCE_PASS"
 LEGACY_NAMES = (LEGACY_USER, LEGACY_PASS)
 MAX_LEGACY_ENV_BYTES = 1024 * 1024
-_ASSIGN_RE = re.compile(r"\A(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)\Z", re.S)
-_UNQUOTED_RE = re.compile(r"\A[^\s'\"\\`$;&|<>()]+\Z")
-_DQ_INNER_RE = re.compile(r"\A[^\"\\`$]+\Z")
-_SQ_INNER_RE = re.compile(r"\A[^']+\Z")
-_CTL_RE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
+# CRM-002-T: target values are read literally, as the ELT consumer reads them. Refused inside a
+# value: quotes, backtick, dollar, backslash, any whitespace or control character, and anything
+# non-printable (checked with str.isprintable as well).
+_LEGACY_REFUSED_RE = re.compile(r"['\"`$\\\s\x00-\x1f\x7f-\x9f]")
+_EXPORT_TARGET_RE = re.compile(r"\Aexport\s+(" + "|".join(LEGACY_NAMES) + r")\Z")
+# str.splitlines (what the consumer uses) also breaks lines at these; a plain-LF reader does
+# not. Like CR, they make the line structure ambiguous between readers.
+_OTHER_LINE_BREAKS = "\x0b\x0c\x1c\x1d\x1e\x85  "
 
 
 def _mode(st):
@@ -135,128 +138,81 @@ def check_no_exported(environ, names):
     return [f"refusing: {n} is exported in the calling shell" for n in present]
 
 
-def _first_unclosed_quote_line(text):
-    """Line number of the first non-blank, non-comment line that leaves a ``'`` or ``"``
-    open at its end (shell rules: no escapes inside ``'...'``, backslash escapes elsewhere)."""
-    for number, line in enumerate(text.split("\n"), 1):
-        if line.endswith("\r"):
-            line = line[:-1]
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        quote, i = None, 0
-        while i < len(line):
-            ch = line[i]
-            if quote == "'":
-                if ch == "'":
-                    quote = None
-            elif ch == "\\":
-                i += 1                                # skip the escaped character
-            elif quote == '"':
-                if ch == '"':
-                    quote = None
-            elif ch in "'\"":
-                quote = ch
-            elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
-                break                                 # trailing comment outside quotes
-            i += 1
-        if quote is not None:
-            return number
-    return None
-
-
 def _first_cr_line(text):
     """Line number of the first line holding a CR character (any position), else ``None``."""
     pos = text.find("\r")
     return None if pos < 0 else text.count("\n", 0, pos) + 1
 
 
-def _first_continuation_line(text):
-    """Line number of the first non-blank, non-comment line that ends with an unescaped
-    backslash outside single quotes (a shell line continuation), else ``None``."""
-    for number, line in enumerate(text.split("\n"), 1):
+def _first_other_break_line(text):
+    """Line number (LF-counted) of the first line holding a line break other than LF or CR
+    that ``str.splitlines`` honours, else ``None``."""
+    positions = [p for p in (text.find(ch) for ch in _OTHER_LINE_BREAKS) if p >= 0]
+    return None if not positions else text.count("\n", 0, min(positions)) + 1
+
+
+def _first_continuation_line(lines):
+    """Line number of the first non-blank, non-comment line whose stripped text ends with a
+    backslash, else ``None``. Stricter than shell rules on purpose: no escape processing."""
+    for number, line in enumerate(lines, 1):
         stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        quote, i = None, 0
-        while i < len(line):
-            ch = line[i]
-            if quote == "'":
-                if ch == "'":
-                    quote = None
-            elif ch == "\\":
-                if i == len(line) - 1:
-                    return number                     # escapes the newline: continuation
-                i += 1                                # skip the escaped character
-            elif quote == '"':
-                if ch == '"':
-                    quote = None
-            elif ch in "'\"":
-                quote = ch
-            elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
-                break                                 # trailing comment outside quotes
-            i += 1
+        if stripped and not stripped.startswith("#") and stripped.endswith("\\"):
+            return number
     return None
 
 
 def parse_legacy_env(text):
     """Pure strict parser for the ELT env file: returns ``(creds or None, errors)``.
 
-    Only ``NIF_SRC_SALESFORCE_USER`` and ``NIF_SRC_SALESFORCE_PASS`` are extracted; every
-    other name is ignored, but every non-blank, non-comment line must be ``[export ]NAME=...``.
-    The two values may be unquoted (no whitespace, quotes, backslash, backtick or any of
-    ``;&|<>()$``), double-quoted (no ``"``, backslash, backtick or ``$`` inside) or
-    single-quoted; a quoted value must be closed, with nothing after the closing quote. If
-    any line opens a quote it does not close on that line, or any non-comment line ends with
-    an unescaped backslash outside single quotes, or the file holds any CR character, the
-    whole file is refused. A
-    duplicate, missing, empty or ambiguous value is refused. Errors carry line numbers and
-    names only, never a value."""
-    found, errors = {}, []
+    Reads ``NIF_SRC_SALESFORCE_USER`` and ``NIF_SRC_SALESFORCE_PASS`` with the ELT consumer's
+    literal semantics: per line, strip; skip it if empty or starting with ``#``; skip it if it
+    has no ``=``; split at the first ``=``; strip key and value. No quote, escape or shell
+    processing, so a later ``=`` and a ``#`` inside the value are literal. Other lines are not
+    interpreted.
+
+    The whole file is refused if it holds any CR (or another line break that
+    ``str.splitlines`` honours) or any non-comment line ends with a backslash. A target value
+    is refused if it is empty or holds a quote, backtick, ``$``, backslash, whitespace, a
+    control or non-printable character. A duplicate, missing or ``export``-prefixed target
+    definition is refused (the consumer takes the first one, or reads ``export NAME`` as
+    another key). Errors carry only a line number and a reason code, never a value."""
     if not isinstance(text, str):
         return None, ["legacy env file is not text"]
     cr = _first_cr_line(text)
     if cr is not None:                                # CR is ambiguous between parsers: fail closed
         return None, [f"legacy env file line {cr} holds a carriage return; file refused"]
-    continued = _first_continuation_line(text)
+    other = _first_other_break_line(text)
+    if other is not None:                             # splitlines vs LF readers disagree: fail closed
+        return None, [f"legacy env file line {other} holds a line break other than LF; file refused"]
+    lines = text.splitlines()                         # == text.split("\n") now, minus a final ""
+    continued = _first_continuation_line(lines)
     if continued is not None:                         # a value may span lines: ambiguous, fail closed
         return None, [f"legacy env file line {continued} ends with a line continuation; file refused"]
-    unclosed = _first_unclosed_quote_line(text)
-    if unclosed is not None:                          # a value may span lines: ambiguous, fail closed
-        return None, [f"legacy env file line {unclosed} opens a quote it does not close; file refused"]
-    for number, line in enumerate(text.split("\n"), 1):
-        if line.endswith("\r"):
-            line = line[:-1]
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+    found, errors = {}, []
+    for number, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue                                  # the consumer skips these
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if _EXPORT_TARGET_RE.fullmatch(key):
+            errors.append(f"legacy env file line {number}: export-prefix")
             continue
-        m = _ASSIGN_RE.fullmatch(line)
-        if not m:
-            errors.append(f"legacy env file line {number} is not NAME=value")
-            continue
-        name, raw = m.group(1), m.group(2)
-        if name not in LEGACY_NAMES:
+        if key not in LEGACY_NAMES:
             continue                                  # unrelated names are ignored
-        if name in found:
-            errors.append(f"legacy env file repeats {name}")
+        if key in found:
+            errors.append(f"legacy env file line {number}: duplicate-definition")
             continue
-        value = None
-        if _CTL_RE.search(raw):
-            value = None
-        elif len(raw) >= 2 and raw[0] == raw[-1] == '"' and _DQ_INNER_RE.fullmatch(raw[1:-1]):
-            value = raw[1:-1]
-        elif len(raw) >= 2 and raw[0] == raw[-1] == "'" and _SQ_INNER_RE.fullmatch(raw[1:-1]):
-            value = raw[1:-1]
-        elif _UNQUOTED_RE.fullmatch(raw):
-            value = raw
-        if value is None:
-            errors.append(f"legacy env file value of {name} is empty or ambiguous")
-            found[name] = None
-            continue
-        found[name] = value
-    for name in LEGACY_NAMES:
+        found[key] = None
+        if not value:
+            errors.append(f"legacy env file line {number}: empty-value")
+        elif _LEGACY_REFUSED_RE.search(value) or not value.isprintable():
+            errors.append(f"legacy env file line {number}: refused-character")
+        else:
+            found[key] = value
+    for name, code in ((LEGACY_USER, "missing-user"), (LEGACY_PASS, "missing-pass")):
         if name not in found:
-            errors.append(f"legacy env file is missing {name}")
+            errors.append(f"legacy env file: {code}")
     if errors:
         return None, errors
     return {"username": found[LEGACY_USER], "password": found[LEGACY_PASS]}, []
