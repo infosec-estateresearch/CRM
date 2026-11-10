@@ -1,0 +1,671 @@
+{
+  "base": "forge/CRM-002",
+  "base_sha": "98f10ff6654f0c072b932ceff4243022efbfec8e",
+  "branch": "forge/CRM-002-S",
+  "candidate": "01f149ff65651652ea3e7dfa0a5727b7b4eb6fc3",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 4,
+    "devsecops": 4,
+    "engineer": 4,
+    "tester": 4
+  },
+  "created": "2026-11-10T18:00:59Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T18:01:18Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T18:12:41Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "SOAP login/logout adapter, stdin creds, waiver, legacy parser, CRM-002 advisories; 197 tests OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T18:13:19Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "9f3b54a3e6463a819a0aafe9e228734a01342feb",
+      "t": "2026-11-10T18:13:20Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "9f3b54a3e6463a819a0aafe9e228734a01342feb",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-10T18:13:20Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "9f3b54a3e6463a819a0aafe9e228734a01342feb",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-10T18:13:20Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "9f3b54a3e6463a819a0aafe9e228734a01342feb",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-10T18:13:20Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-10T18:20:35Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-10T18:20:35Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "findings",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-10T18:20:35Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "9f3b54a3e6463a819a0aafe9e228734a01342feb",
+      "findings": [
+        {
+          "key": "soap-dtd-check-utf16-bypass",
+          "severity": "blocking"
+        },
+        {
+          "key": "regex-dollar-anchor-partial",
+          "severity": "advisory"
+        },
+        {
+          "key": "fake-soap-write-classification",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-10T18:21:10Z",
+      "type": "result"
+    },
+    {
+      "candidate": "9f3b54a3e6463a819a0aafe9e228734a01342feb",
+      "findings": [
+        {
+          "key": "soap-dtd-utf16-bypass",
+          "severity": "blocking"
+        },
+        {
+          "key": "logout-uncaught-exception",
+          "severity": "advisory"
+        },
+        {
+          "key": "anchors-partial",
+          "severity": "advisory"
+        },
+        {
+          "key": "legacy-env-shell-metachar",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-10T18:21:10Z",
+      "type": "result"
+    },
+    {
+      "candidate": "9f3b54a3e6463a819a0aafe9e228734a01342feb",
+      "findings": [
+        {
+          "key": "xml-dtd-utf16-bypass",
+          "severity": "advisory"
+        },
+        {
+          "key": "logout-exception-escapes",
+          "severity": "advisory"
+        },
+        {
+          "key": "regex-anchor-partial",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-10T18:21:10Z",
+      "type": "result"
+    },
+    {
+      "candidate": "9f3b54a3e6463a819a0aafe9e228734a01342feb",
+      "id": 13,
+      "n": 2,
+      "role": "engineer",
+      "round": 2,
+      "t": "2026-11-10T18:21:10Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/13-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 13,
+      "t": "2026-11-10T18:30:33Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "9f3b54a3e6463a819a0aafe9e228734a01342feb",
+      "findings": [],
+      "note": "r2: 3-layer DTD refusal (strict UTF-8, decoded search, expat handlers), logout catch-all, redacted Request repr, anchors, fake body-root, metachar, legacy path from runtime env; 237 tests OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 2,
+      "spawn": 13,
+      "t": "2026-11-10T18:30:51Z",
+      "type": "result"
+    },
+    {
+      "round": 2,
+      "sha": "525b7a85336bbd0b641b0419c899e791abf791d6",
+      "t": "2026-11-10T18:30:51Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "525b7a85336bbd0b641b0419c899e791abf791d6",
+      "id": 17,
+      "n": 2,
+      "role": "auditor",
+      "round": 2,
+      "t": "2026-11-10T18:30:51Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "525b7a85336bbd0b641b0419c899e791abf791d6",
+      "id": 18,
+      "n": 2,
+      "role": "tester",
+      "round": 2,
+      "t": "2026-11-10T18:30:51Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "525b7a85336bbd0b641b0419c899e791abf791d6",
+      "id": 19,
+      "n": 2,
+      "role": "devsecops",
+      "round": 2,
+      "t": "2026-11-10T18:30:51Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/17-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 17,
+      "t": "2026-11-10T18:38:53Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/18-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 18,
+      "t": "2026-11-10T18:38:53Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/19-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 19,
+      "t": "2026-11-10T18:38:53Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "525b7a85336bbd0b641b0419c899e791abf791d6",
+      "findings": [
+        {
+          "key": "logout-template-untested",
+          "severity": "blocking"
+        },
+        {
+          "key": "faultcode-echo",
+          "severity": "advisory"
+        },
+        {
+          "key": "stdin-size-check-untested",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 2,
+      "spawn": 17,
+      "t": "2026-11-10T18:39:17Z",
+      "type": "result"
+    },
+    {
+      "candidate": "525b7a85336bbd0b641b0419c899e791abf791d6",
+      "findings": [
+        {
+          "key": "env-fallback-test-narrow",
+          "severity": "advisory"
+        },
+        {
+          "key": "legacy-env-multiline-quote",
+          "severity": "advisory"
+        },
+        {
+          "key": "surrogate-credential-exception",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 2,
+      "spawn": 18,
+      "t": "2026-11-10T18:39:17Z",
+      "type": "result"
+    },
+    {
+      "candidate": "525b7a85336bbd0b641b0419c899e791abf791d6",
+      "findings": [
+        {
+          "key": "faultcode-echo",
+          "severity": "advisory"
+        },
+        {
+          "key": "surrogate-credential",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 2,
+      "spawn": 19,
+      "t": "2026-11-10T18:39:17Z",
+      "type": "result"
+    },
+    {
+      "candidate": "525b7a85336bbd0b641b0419c899e791abf791d6",
+      "id": 26,
+      "n": 3,
+      "role": "engineer",
+      "round": 3,
+      "t": "2026-11-10T18:39:17Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/26-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 26,
+      "t": "2026-11-10T18:44:14Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "525b7a85336bbd0b641b0419c899e791abf791d6",
+      "findings": [],
+      "note": "r3: logout template tests (22 variants), fixed faultcode/errorCode sets, stdin size, env-fallback, unclosed quote, strict UTF-8; 250 tests OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 3,
+      "spawn": 26,
+      "t": "2026-11-10T18:45:12Z",
+      "type": "result"
+    },
+    {
+      "round": 3,
+      "sha": "9d26c40f6b25acb456c4e9db1e4bf63c53442c77",
+      "t": "2026-11-10T18:45:12Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "9d26c40f6b25acb456c4e9db1e4bf63c53442c77",
+      "id": 30,
+      "n": 3,
+      "role": "auditor",
+      "round": 3,
+      "t": "2026-11-10T18:45:41Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "9d26c40f6b25acb456c4e9db1e4bf63c53442c77",
+      "id": 31,
+      "n": 3,
+      "role": "tester",
+      "round": 3,
+      "t": "2026-11-10T18:45:41Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "9d26c40f6b25acb456c4e9db1e4bf63c53442c77",
+      "id": 32,
+      "n": 3,
+      "role": "devsecops",
+      "round": 3,
+      "t": "2026-11-10T18:45:41Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/30-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 30,
+      "t": "2026-11-10T18:52:36Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/31-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 31,
+      "t": "2026-11-10T18:52:36Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/32-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 32,
+      "t": "2026-11-10T18:52:36Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "9d26c40f6b25acb456c4e9db1e4bf63c53442c77",
+      "findings": [
+        {
+          "key": "stdin-credential-exception-context",
+          "severity": "blocking"
+        },
+        {
+          "key": "docs-fault-reduction",
+          "severity": "advisory"
+        },
+        {
+          "key": "log-sf-error-shape",
+          "severity": "advisory"
+        },
+        {
+          "key": "env-trailing-backslash",
+          "severity": "advisory"
+        },
+        {
+          "key": "waiver-hides-user-finding",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 3,
+      "spawn": 30,
+      "t": "2026-11-10T18:53:05Z",
+      "type": "result"
+    },
+    {
+      "candidate": "9d26c40f6b25acb456c4e9db1e4bf63c53442c77",
+      "findings": [
+        {
+          "key": "stdin-limit-untested",
+          "severity": "advisory"
+        },
+        {
+          "key": "docs-fault-reduction-stale",
+          "severity": "advisory"
+        },
+        {
+          "key": "log-sf-error-shape",
+          "severity": "advisory"
+        },
+        {
+          "key": "env-backslash-continuation",
+          "severity": "advisory"
+        },
+        {
+          "key": "stdin-exc-context",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 3,
+      "spawn": 31,
+      "t": "2026-11-10T18:53:05Z",
+      "type": "result"
+    },
+    {
+      "candidate": "9d26c40f6b25acb456c4e9db1e4bf63c53442c77",
+      "findings": [
+        {
+          "key": "env-trailing-backslash",
+          "severity": "advisory"
+        },
+        {
+          "key": "log-sf-error-shape-only",
+          "severity": "advisory"
+        },
+        {
+          "key": "docs-fault-reduction-stale",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 3,
+      "spawn": 32,
+      "t": "2026-11-10T18:53:05Z",
+      "type": "result"
+    },
+    {
+      "candidate": "9d26c40f6b25acb456c4e9db1e4bf63c53442c77",
+      "id": 39,
+      "n": 4,
+      "role": "engineer",
+      "round": 4,
+      "t": "2026-11-10T18:53:05Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/39-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 39,
+      "t": "2026-11-10T19:00:02Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "9d26c40f6b25acb456c4e9db1e4bf63c53442c77",
+      "findings": [],
+      "note": "r4: exception context detached on all secret-bearing parse paths (stdin, waiver, SOAP login, OAuth); CountsLog fixed-set re-check; env CR/continuation refusal; literal stdin boundary; User finding under identity waiver; docs. 268 OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 4,
+      "spawn": 39,
+      "t": "2026-11-10T19:00:23Z",
+      "type": "result"
+    },
+    {
+      "round": 4,
+      "sha": "01f149ff65651652ea3e7dfa0a5727b7b4eb6fc3",
+      "t": "2026-11-10T19:00:24Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "01f149ff65651652ea3e7dfa0a5727b7b4eb6fc3",
+      "id": 43,
+      "n": 4,
+      "role": "auditor",
+      "round": 4,
+      "t": "2026-11-10T19:00:43Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "01f149ff65651652ea3e7dfa0a5727b7b4eb6fc3",
+      "id": 44,
+      "n": 4,
+      "role": "tester",
+      "round": 4,
+      "t": "2026-11-10T19:00:43Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "01f149ff65651652ea3e7dfa0a5727b7b4eb6fc3",
+      "id": 45,
+      "n": 4,
+      "role": "devsecops",
+      "round": 4,
+      "t": "2026-11-10T19:00:43Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/43-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 43,
+      "t": "2026-11-10T19:05:17Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/44-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 44,
+      "t": "2026-11-10T19:05:17Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/45-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 45,
+      "t": "2026-11-10T19:05:17Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "01f149ff65651652ea3e7dfa0a5727b7b4eb6fc3",
+      "findings": [],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 4,
+      "spawn": 43,
+      "t": "2026-11-10T19:05:42Z",
+      "type": "result"
+    },
+    {
+      "candidate": "01f149ff65651652ea3e7dfa0a5727b7b4eb6fc3",
+      "findings": [],
+      "note": "",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 4,
+      "spawn": 44,
+      "t": "2026-11-10T19:05:42Z",
+      "type": "result"
+    },
+    {
+      "candidate": "01f149ff65651652ea3e7dfa0a5727b7b4eb6fc3",
+      "findings": [],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 4,
+      "spawn": 45,
+      "t": "2026-11-10T19:05:42Z",
+      "type": "result"
+    },
+    {
+      "note": "Candidate 01f149f: all three PASS at round 4, no open findings. Follow-up CRM-002-T: the legacy env parser must use the consumer's literal semantics (PL L1 pre-check, counts only).",
+      "outcome": "DELIVERED",
+      "t": "2026-11-10T19:05:42Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-002-S",
+  "host": "docker1",
+  "known_commit": "98f10ff6654f0c072b932ceff4243022efbfec8e",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-002-S",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 4,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-002-S",
+  "wo": "CRM-002-S",
+  "worktree": "/srv/CRM/worktrees/CRM-002-S"
+}

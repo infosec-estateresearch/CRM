@@ -5,6 +5,11 @@ contract field present with the expected type and ``referenceTo``; and ``createa
 ``updateable`` and ``deletable`` all false (unless the contract lists an Architect
 waiver). Optional fields that are missing are excluded and reported ``unavailable``.
 The result is a counts-and-flags report plus the effective contract.
+
+CRM-002-S: under ``--auth soap-legacy`` only, a validated write waiver (``waiver.py``)
+waives the write-flag failure for flags that are exactly ``True``. The report then states
+``identity: write-capable (waived: <url>)`` and the count of writable objects. Every other
+gate rule is unchanged, and client-credentials mode never passes a waiver.
 """
 
 from dataclasses import dataclass
@@ -41,13 +46,24 @@ def _reference_ok(spec_field, described):
     return expected == set(actual)
 
 
-def evaluate_gate(contract, describes):
-    """Pure gate decision. ``describes`` maps object name to describe JSON (or None on error)."""
+def identity_label(writable_objects, write_waiver):
+    if not writable_objects:
+        return "read-only"
+    if write_waiver is not None:
+        return f"write-capable (waived: {write_waiver['authorisation']})"
+    return "write-capable"
+
+
+def evaluate_gate(contract, describes, write_waiver=None):
+    """Pure gate decision. ``describes`` maps object name to describe JSON (or None on error).
+
+    ``write_waiver`` (a ``waiver.parse_waiver`` result) is passed only under soap-legacy."""
     objects_report = {}
     effective = []
     summary = {}
     findings = []
     ok = True
+    writable = 0
     waivers = set(contract.waivers)
     for spec in contract.objects:
         rep = {
@@ -70,14 +86,20 @@ def evaluate_gate(contract, describes):
         for flag in REQUIRED_TRUE:
             if rep[flag] is not True:
                 rep["ok"] = False
+        if any(rep[flag] is True for flag in WAIVABLE_FLAGS):
+            writable += 1
         for flag in WAIVABLE_FLAGS:
             if rep[flag] is not False:
                 if rep[flag] is True and (spec.name, flag) in waivers:
                     rep["waived"].append(flag)
                     continue
-                rep["ok"] = False
+                # An identity waiver may pass the gate, but the User finding still reaches the report.
                 if spec.name == "User" and flag == "updateable" and rep[flag] is True:
                     findings.append("User updateable: L1 finding for Architect decision, not waived")
+                if rep[flag] is True and write_waiver is not None:
+                    rep["waived"].append(flag + ":identity")
+                    continue
+                rep["ok"] = False
         fields = _field_map(doc)
         available = []
         for fspec in spec.fields:
@@ -123,6 +145,8 @@ def evaluate_gate(contract, describes):
         "contract_version": contract.version,
         "contract_sha256": contract.sha256,
         "findings": findings,
+        "identity": identity_label(writable, write_waiver),
+        "writable_objects": writable,
         "objects": objects_report,
     }
     return GateResult(ok, report, tuple(effective), summary)
@@ -138,12 +162,14 @@ def run_gate(client, contract, log=None):
             if log:
                 log.event("describe_failed", object=spec.name, code=exc.code, status=exc.status,
                           sf_error=exc.sf_error)
-    result = evaluate_gate(contract, describes)
+    waiver = getattr(client, "write_waiver", None) if getattr(client, "auth_mode", None) == "soap-legacy" else None
+    result = evaluate_gate(contract, describes, waiver)
     if log:
         for name, rep in result.report["objects"].items():
             log.event("gate_object", object=name, ok=rep["ok"], missing_required=len(rep["missing_required"]),
                       type_mismatch=len(rep["type_mismatch"]), reference_mismatch=len(rep["reference_mismatch"]),
                       unavailable_optional=len(rep["unavailable_optional"]), createable=rep["createable"],
                       updateable=rep["updateable"], deletable=rep["deletable"])
-        log.event("gate_result", ok=result.ok, objects_failed=result.report["objects_failed"])
+        log.event("gate_result", ok=result.ok, objects_failed=result.report["objects_failed"],
+                  writable_objects=result.report["writable_objects"])
     return result

@@ -10,8 +10,9 @@ import email.utils
 import json
 from urllib.parse import quote, urlencode
 
+from . import auth_soap
 from .auth import build_token_request, parse_token_response
-from .errors import (HttpError, ProtocolError, RedirectRefused, ResponseTooLarge,
+from .errors import (ConfigError, HttpError, ProtocolError, RedirectRefused, ResponseTooLarge,
                      safe_sf_error_code)
 from .messages import Request, Response
 from .policy import RequestPolicy
@@ -48,14 +49,19 @@ def parse_http_date(value):
 
 
 class SalesforceClient:
-    def __init__(self, origin, api_version, transport, contract, *, max_bytes=DEFAULT_MAX_BYTES):
-        self.policy = RequestPolicy(origin, api_version, contract.fields_by_object())
+    def __init__(self, origin, api_version, transport, contract, *, max_bytes=DEFAULT_MAX_BYTES,
+                 soap_login_host=None):
+        self.policy = RequestPolicy(origin, api_version, contract.fields_by_object(),
+                                    soap_login_host=soap_login_host)
         self.origin = self.policy.origin
         self.api_version = self.policy.api_version
         self.contract = contract
         self._transport = transport
         self._max_bytes = int(max_bytes)
         self._token = None
+        self._soap_session = None
+        self.auth_mode = None            # "client-credentials" | "soap-legacy" once authenticated
+        self.write_waiver = None         # honoured by the metadata gate under soap-legacy only
         self.request_count = 0
         self.last_server_time = None
 
@@ -87,11 +93,58 @@ class SalesforceClient:
         try:
             return json.loads(resp.body.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
-            raise ProtocolError("response_not_json", status=resp.status) from None
+            pass                                  # raised below, outside the except: no chained body
+        raise ProtocolError("response_not_json", status=resp.status)
 
     def authenticate(self, client_id, client_secret):
         resp = self._send(build_token_request(self.origin, client_id, client_secret))
         self._token = parse_token_response(self._json(resp), self.origin)
+        self.auth_mode = "client-credentials"
+
+    # ------------------------------------------------------------- SOAP (CRM-002-S, temporary)
+    def _send_soap(self, request):
+        """Like ``_send`` but a SOAP fault (HTTP 500) is parsed for its code, never kept."""
+        self.policy.check(request)                       # refuse before the transport
+        self.request_count += 1
+        resp = self._transport.send(request)
+        if not isinstance(resp, Response):
+            raise ProtocolError("transport_response", detail="transport returned no Response")
+        if 300 <= resp.status < 400:
+            raise RedirectRefused(status=resp.status)
+        if len(resp.body) > auth_soap.MAX_SOAP_RESPONSE:
+            raise ResponseTooLarge(status=resp.status)
+        return resp
+
+    def authenticate_soap(self, username, password):
+        """SOAP partner ``login``; the session becomes the Bearer token for the configured origin."""
+        host = self.policy.soap_login_host
+        if host is None:
+            raise ConfigError("auth_mode", detail="SOAP login is not enabled for this client")
+        req = Request(method="POST", url=f"https://{host}/services/Soap/u/{self.api_version}/",
+                      headers=auth_soap.soap_headers("login"),
+                      body=auth_soap.render_login_body(username, password))
+        resp = self._send_soap(req)
+        session = auth_soap.parse_login_response(resp.status, resp.body, self.origin, self.api_version,
+                                                 sandbox=host == auth_soap.SANDBOX_LOGIN_HOST)
+        self._soap_session = session
+        self._token = session.session_id
+        self.auth_mode = "soap-legacy"
+
+    def logout_soap(self):
+        """Optional SOAP ``logout`` to the origin ``serverUrl`` gave. Clears the session either way."""
+        session, self._soap_session, self._token = self._soap_session, None, None
+        if session is None:
+            return
+        req = Request(method="POST", url=session.origin + session.server_path,
+                      headers=auth_soap.soap_headers("logout"),
+                      body=auth_soap.render_logout_body(session.session_id))
+        resp = self._send_soap(req)
+        auth_soap.parse_logout_response(resp.status, resp.body)
+
+    def set_write_waiver(self, waiver):
+        if self.auth_mode != "soap-legacy":
+            raise ConfigError("waiver_refused", detail="the write waiver applies to soap-legacy only")
+        self.write_waiver = waiver
 
     def _get(self, path, params=None):
         if self._token is None:
