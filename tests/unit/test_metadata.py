@@ -1,4 +1,8 @@
-"""EspoCRM customisation tests (WO CRM-001 items 2 and 5).
+"""EspoCRM customisation tests (WO CRM-001 items 2 and 5; adapted for CRM-003).
+
+CRM-003 adds audit-only overrides of core fields ({"audited": true}, no type)
+and the Salesforce key fields (sf*); the CRM-003 rules for both are in
+test_access_policy.py.
 
 Core EspoCRM field and link names below come from the Engineer's knowledge of
 EspoCRM conventions; they could not be checked against the 10.0.12 image in
@@ -30,6 +34,7 @@ CORE_FIELDS = {
                 "account", "accounts", "description"},
 }
 CORE_LINKS = {"Account": {"contacts", "opportunities", "cases", "documents"}}
+SF_KEY_FIELDS = {"sfId", "sfOwnerId", "sfCreatedAt"}
 
 
 def load(*parts):
@@ -114,7 +119,11 @@ class TestAccountDefs(unittest.TestCase):
                 self.assertEqual(self.fields[name]["type"], field_type)
 
     def test_every_custom_field_and_link_has_a_label(self):
-        for name in self.fields:
+        # Exempt: audit-only overrides of core fields (core labels apply) and the
+        # CRM-003 Salesforce keys (i18n is outside the CRM-003 allowlist).
+        for name, field in self.fields.items():
+            if "type" not in field or name in SF_KEY_FIELDS:
+                continue
             self.assertIn(name, self.i18n["fields"], f"field label {name}")
         for name in self.links:
             self.assertIn(name, self.i18n["links"], f"link label {name}")
@@ -124,7 +133,7 @@ class TestAccountDefs(unittest.TestCase):
             self.assertIn(name, self.links)
 
     def test_enum_translations_match_options(self):
-        enums = {n: f for n, f in self.fields.items() if f["type"] == "enum"}
+        enums = {n: f for n, f in self.fields.items() if f.get("type") == "enum"}
         self.assertEqual(set(enums), set(self.i18n["options"]))
         for name, field in enums.items():
             self.assertEqual(set(field["options"]), set(self.i18n["options"][name]), name)
@@ -154,7 +163,7 @@ class TestAccountLayouts(unittest.TestCase):
                 for name in layout_names(load("layouts", "Account", f"{layout}.json")):
                     self.assertIn(name, self.known)
                     if name in self.fields:
-                        self.assertNotEqual(self.fields[name]["type"], "linkMultiple",
+                        self.assertNotEqual(self.fields[name].get("type"), "linkMultiple",
                                             "linkMultiple fields are panels, not cells")
 
     def test_required_placement(self):
@@ -212,10 +221,12 @@ class TestDuplicateChecks(unittest.TestCase):
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
 
     def test_no_php_outside_classes(self):
+        # CRM-003 adds the Account deletion guard under Hooks/Account.
         for root, _, files in os.walk(CUSTOM):
             for name in files:
                 if name.endswith(".php"):
-                    self.assertTrue(re.search(r"[\\/]Classes[\\/]", root), root)
+                    self.assertTrue(re.search(r"[\\/]Classes[\\/]", root)
+                                    or re.search(r"[\\/]Hooks[\\/]Account$", root), root)
 
 
 if __name__ == "__main__":

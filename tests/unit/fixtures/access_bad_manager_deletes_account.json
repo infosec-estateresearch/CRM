@@ -1,0 +1,657 @@
+{
+  "roles": [
+    {
+      "name": "ER Staff",
+      "info": "Estate Research staff: read every firm and contact; edit own enquiries; never delete firms (CRM-003).",
+      "data": {
+        "Account": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Contact": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Opportunity": {
+          "create": "yes",
+          "read": "all",
+          "edit": "own",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Call": {
+          "create": "yes",
+          "read": "all",
+          "edit": "own",
+          "delete": "own",
+          "stream": "all"
+        },
+        "Meeting": {
+          "create": "yes",
+          "read": "all",
+          "edit": "own",
+          "delete": "own",
+          "stream": "all"
+        },
+        "Task": {
+          "create": "yes",
+          "read": "all",
+          "edit": "own",
+          "delete": "own",
+          "stream": "all"
+        },
+        "Email": {
+          "create": "yes",
+          "read": "all",
+          "edit": "own",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Currency": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Document": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "DocumentFolder": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "User": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Team": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Lead": false,
+        "Campaign": false,
+        "TargetList": false,
+        "TargetListCategory": false,
+        "KnowledgeBaseArticle": false,
+        "KnowledgeBaseCategory": false,
+        "Template": false,
+        "EmailTemplate": false,
+        "EmailTemplateCategory": false,
+        "Case": false,
+        "Activities": true,
+        "Calendar": true,
+        "GlobalStream": true,
+        "WorkingTimeCalendar": true,
+        "Import": false,
+        "Webhook": false,
+        "OpenApi": false,
+        "ExternalAccount": false,
+        "EmailAccountScope": false
+      },
+      "fieldData": {
+        "Account": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Contact": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "User": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          }
+        }
+      },
+      "assignmentPermission": "all",
+      "userPermission": "all",
+      "messagePermission": "all",
+      "portalPermission": "no",
+      "groupEmailAccountPermission": "no",
+      "exportPermission": "no",
+      "massUpdatePermission": "no",
+      "dataPrivacyPermission": "no",
+      "followerManagementPermission": "no",
+      "auditPermission": "no",
+      "mentionPermission": "all",
+      "userCalendarPermission": "all",
+      "lockPermission": "no"
+    },
+    {
+      "name": "ER Intake",
+      "info": "Ancillary intake: as ER Staff, and may edit every enquiry (CRM-003).",
+      "data": {
+        "Account": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Contact": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Opportunity": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Call": {
+          "create": "yes",
+          "read": "all",
+          "edit": "own",
+          "delete": "own",
+          "stream": "all"
+        },
+        "Meeting": {
+          "create": "yes",
+          "read": "all",
+          "edit": "own",
+          "delete": "own",
+          "stream": "all"
+        },
+        "Task": {
+          "create": "yes",
+          "read": "all",
+          "edit": "own",
+          "delete": "own",
+          "stream": "all"
+        },
+        "Email": {
+          "create": "yes",
+          "read": "all",
+          "edit": "own",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Currency": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Document": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "DocumentFolder": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "User": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Team": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Lead": false,
+        "Campaign": false,
+        "TargetList": false,
+        "TargetListCategory": false,
+        "KnowledgeBaseArticle": false,
+        "KnowledgeBaseCategory": false,
+        "Template": false,
+        "EmailTemplate": false,
+        "EmailTemplateCategory": false,
+        "Case": false,
+        "Activities": true,
+        "Calendar": true,
+        "GlobalStream": true,
+        "WorkingTimeCalendar": true,
+        "Import": false,
+        "Webhook": false,
+        "OpenApi": false,
+        "ExternalAccount": false,
+        "EmailAccountScope": false
+      },
+      "fieldData": {
+        "Account": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Contact": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "User": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          }
+        }
+      },
+      "assignmentPermission": "all",
+      "userPermission": "all",
+      "messagePermission": "all",
+      "portalPermission": "no",
+      "groupEmailAccountPermission": "no",
+      "exportPermission": "no",
+      "massUpdatePermission": "no",
+      "dataPrivacyPermission": "no",
+      "followerManagementPermission": "no",
+      "auditPermission": "no",
+      "mentionPermission": "all",
+      "userCalendarPermission": "all",
+      "lockPermission": "no"
+    },
+    {
+      "name": "ER Manager",
+      "info": "Firm management: edit everything, delete contacts, enquiries and activities; never firms or emails (CRM-003).",
+      "data": {
+        "Account": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "all",
+          "stream": "all"
+        },
+        "Contact": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "all",
+          "stream": "all"
+        },
+        "Opportunity": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "all",
+          "stream": "all"
+        },
+        "Call": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "all",
+          "stream": "all"
+        },
+        "Meeting": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "all",
+          "stream": "all"
+        },
+        "Task": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "all",
+          "stream": "all"
+        },
+        "Email": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Currency": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Document": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "DocumentFolder": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "User": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Team": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Lead": false,
+        "Campaign": false,
+        "TargetList": false,
+        "TargetListCategory": false,
+        "KnowledgeBaseArticle": false,
+        "KnowledgeBaseCategory": false,
+        "Template": false,
+        "EmailTemplate": false,
+        "EmailTemplateCategory": false,
+        "Case": false,
+        "Activities": true,
+        "Calendar": true,
+        "GlobalStream": true,
+        "WorkingTimeCalendar": true,
+        "Import": false,
+        "Webhook": false,
+        "OpenApi": false,
+        "ExternalAccount": false,
+        "EmailAccountScope": false
+      },
+      "fieldData": {
+        "Account": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "Contact": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          }
+        },
+        "User": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          }
+        }
+      },
+      "assignmentPermission": "all",
+      "userPermission": "all",
+      "messagePermission": "all",
+      "portalPermission": "no",
+      "groupEmailAccountPermission": "no",
+      "exportPermission": "no",
+      "massUpdatePermission": "yes",
+      "dataPrivacyPermission": "no",
+      "followerManagementPermission": "all",
+      "auditPermission": "yes",
+      "mentionPermission": "all",
+      "userCalendarPermission": "all",
+      "lockPermission": "no"
+    },
+    {
+      "name": "ER Import",
+      "info": "API only, for the Salesforce importer. Create and edit, never delete. Deactivate the API user after the load (CRM-003).",
+      "data": {
+        "Account": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Contact": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Opportunity": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Call": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Meeting": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Task": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Email": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Currency": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Document": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "DocumentFolder": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "User": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Team": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "Lead": false,
+        "Campaign": false,
+        "TargetList": false,
+        "TargetListCategory": false,
+        "KnowledgeBaseArticle": false,
+        "KnowledgeBaseCategory": false,
+        "Template": false,
+        "EmailTemplate": false,
+        "EmailTemplateCategory": false,
+        "Case": false,
+        "Activities": false,
+        "Calendar": false,
+        "GlobalStream": false,
+        "WorkingTimeCalendar": false,
+        "Import": false,
+        "Webhook": false,
+        "OpenApi": false,
+        "ExternalAccount": false,
+        "EmailAccountScope": false
+      },
+      "fieldData": {
+        "Account": {
+          "sfId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "yes"
+          }
+        },
+        "Contact": {
+          "sfId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "yes"
+          }
+        },
+        "User": {
+          "sfId": {
+            "read": "yes",
+            "edit": "yes"
+          }
+        }
+      },
+      "assignmentPermission": "all",
+      "userPermission": "all",
+      "messagePermission": "no",
+      "portalPermission": "no",
+      "groupEmailAccountPermission": "no",
+      "exportPermission": "no",
+      "massUpdatePermission": "no",
+      "dataPrivacyPermission": "no",
+      "followerManagementPermission": "no",
+      "auditPermission": "no",
+      "mentionPermission": "no",
+      "userCalendarPermission": "no",
+      "lockPermission": "no"
+    }
+  ],
+  "teams": [
+    {
+      "name": "Enquiries"
+    },
+    {
+      "name": "Ancillary intake"
+    },
+    {
+      "name": "Firm management"
+    }
+  ],
+  "apiUsers": [
+    {
+      "userName": "er-import",
+      "lastName": "ER Import",
+      "roles": [
+        "ER Import"
+      ],
+      "teams": []
+    }
+  ]
+}

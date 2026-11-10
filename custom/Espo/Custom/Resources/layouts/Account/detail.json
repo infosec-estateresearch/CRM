@@ -10,5 +10,12 @@
             [{"name": "shippingAddress"}, false],
             [{"name": "description", "fullWidth": true}]
         ]
+    },
+    {
+        "label": "Salesforce",
+        "rows": [
+            [{"name": "sfId"}, {"name": "sfOwnerId"}],
+            [{"name": "sfCreatedAt"}, false]
+        ]
     }
 ]

@@ -1,0 +1,12 @@
+{
+    "apiUsers": [
+        {
+            "userName": "er-import",
+            "lastName": "ER Import",
+            "roles": [
+                "ER Import"
+            ],
+            "teams": []
+        }
+    ]
+}

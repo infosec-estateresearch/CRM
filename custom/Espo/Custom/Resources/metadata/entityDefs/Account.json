@@ -1,16 +1,24 @@
 {
     "fields": {
+        "name": {
+            "audited": true
+        },
         "type": {
             "type": "enum",
             "options": ["", "Tier 1", "Tier 2", "Tier 3", "Tier 4", "Tier 5", "Prospect", "Closed/Ceased Trading"],
             "default": "",
-            "isSorted": false
+            "isSorted": false,
+            "audited": true
         },
         "industry": {
             "type": "enum",
             "options": ["", "Solicitor", "Other Legal Service", "Barrister", "Accountant", "Other"],
             "default": "",
-            "isSorted": false
+            "isSorted": false,
+            "audited": true
+        },
+        "assignedUser": {
+            "audited": true
         },
         "practiceManagementSystem": {
             "type": "varchar",
@@ -27,6 +35,7 @@
         },
         "parent": {
             "type": "link",
+            "audited": true,
             "isCustom": true
         },
         "branches": {
@@ -37,6 +46,30 @@
             "noLoad": true,
             "importDisabled": true,
             "isCustom": true
+        },
+        "sfId": {
+            "type": "varchar",
+            "maxLength": 18,
+            "readOnlyAfterCreate": true,
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        },
+        "sfOwnerId": {
+            "type": "varchar",
+            "maxLength": 18,
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        },
+        "sfCreatedAt": {
+            "type": "datetime",
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
         }
     },
     "links": {
@@ -55,5 +88,11 @@
     },
     "collection": {
         "textFilterFields": ["name", "emailAddress", "phoneNumber", "billingAddressPostalCode"]
+    },
+    "indexes": {
+        "sfId": {
+            "type": "unique",
+            "columns": ["sfId"]
+        }
     }
 }

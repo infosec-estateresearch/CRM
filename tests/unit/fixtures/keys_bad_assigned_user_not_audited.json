@@ -1,0 +1,196 @@
+{
+  "User": {
+    "fields": {
+      "sfId": {
+        "type": "varchar",
+        "maxLength": 18,
+        "readOnlyAfterCreate": true,
+        "audited": false,
+        "isCustom": true,
+        "layoutListDisabled": true,
+        "layoutMassUpdateDisabled": true
+      }
+    },
+    "indexes": {
+      "sfId": {
+        "type": "unique",
+        "columns": [
+          "sfId"
+        ]
+      }
+    }
+  },
+  "Account": {
+    "fields": {
+      "name": {
+        "audited": true
+      },
+      "type": {
+        "type": "enum",
+        "options": [
+          "",
+          "Tier 1",
+          "Tier 2",
+          "Tier 3",
+          "Tier 4",
+          "Tier 5",
+          "Prospect",
+          "Closed/Ceased Trading"
+        ],
+        "default": "",
+        "isSorted": false,
+        "audited": true
+      },
+      "industry": {
+        "type": "enum",
+        "options": [
+          "",
+          "Solicitor",
+          "Other Legal Service",
+          "Barrister",
+          "Accountant",
+          "Other"
+        ],
+        "default": "",
+        "isSorted": false,
+        "audited": true
+      },
+      "assignedUser": {},
+      "practiceManagementSystem": {
+        "type": "varchar",
+        "maxLength": 100,
+        "isCustom": true
+      },
+      "learningPlatformAccess": {
+        "type": "enum",
+        "options": [
+          "No",
+          "TLP",
+          "Full Access",
+          "E-Course"
+        ],
+        "default": "No",
+        "isSorted": false,
+        "audited": true,
+        "isCustom": true
+      },
+      "parent": {
+        "type": "link",
+        "audited": true,
+        "isCustom": true
+      },
+      "branches": {
+        "type": "linkMultiple",
+        "layoutDetailDisabled": true,
+        "layoutListDisabled": true,
+        "layoutMassUpdateDisabled": true,
+        "noLoad": true,
+        "importDisabled": true,
+        "isCustom": true
+      },
+      "sfId": {
+        "type": "varchar",
+        "maxLength": 18,
+        "readOnlyAfterCreate": true,
+        "audited": false,
+        "isCustom": true,
+        "layoutListDisabled": true,
+        "layoutMassUpdateDisabled": true
+      },
+      "sfOwnerId": {
+        "type": "varchar",
+        "maxLength": 18,
+        "audited": false,
+        "isCustom": true,
+        "layoutListDisabled": true,
+        "layoutMassUpdateDisabled": true
+      },
+      "sfCreatedAt": {
+        "type": "datetime",
+        "audited": false,
+        "isCustom": true,
+        "layoutListDisabled": true,
+        "layoutMassUpdateDisabled": true
+      }
+    },
+    "links": {
+      "parent": {
+        "type": "belongsTo",
+        "entity": "Account",
+        "foreign": "branches",
+        "isCustom": true
+      },
+      "branches": {
+        "type": "hasMany",
+        "entity": "Account",
+        "foreign": "parent",
+        "isCustom": true
+      }
+    },
+    "collection": {
+      "textFilterFields": [
+        "name",
+        "emailAddress",
+        "phoneNumber",
+        "billingAddressPostalCode"
+      ]
+    },
+    "indexes": {
+      "sfId": {
+        "type": "unique",
+        "columns": [
+          "sfId"
+        ]
+      }
+    }
+  },
+  "Contact": {
+    "fields": {
+      "account": {
+        "audited": true
+      },
+      "emailAddress": {
+        "audited": true
+      },
+      "sfId": {
+        "type": "varchar",
+        "maxLength": 18,
+        "readOnlyAfterCreate": true,
+        "audited": false,
+        "isCustom": true,
+        "layoutListDisabled": true,
+        "layoutMassUpdateDisabled": true
+      },
+      "sfOwnerId": {
+        "type": "varchar",
+        "maxLength": 18,
+        "audited": false,
+        "isCustom": true,
+        "layoutListDisabled": true,
+        "layoutMassUpdateDisabled": true
+      },
+      "sfCreatedAt": {
+        "type": "datetime",
+        "audited": false,
+        "isCustom": true,
+        "layoutListDisabled": true,
+        "layoutMassUpdateDisabled": true
+      }
+    },
+    "collection": {
+      "textFilterFields": [
+        "name",
+        "emailAddress",
+        "phoneNumber"
+      ]
+    },
+    "indexes": {
+      "sfId": {
+        "type": "unique",
+        "columns": [
+          "sfId"
+        ]
+      }
+    }
+  }
+}
