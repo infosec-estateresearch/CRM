@@ -657,7 +657,9 @@ class TestMapping(Base):
                          [{"phoneNumber": "+44 7700 900001", "type": "Mobile", "primary": True,
                            "optOut": False, "invalid": False}])                 # read back with extra keys
         self.assertEqual([p["type"] for p in con[fx.C[2]]["phoneNumberData"]], ["Office"])
-        self.assertNotIn("phoneNumber", con[fx.C[0]])
+        # The importer never sends phoneNumber for a Contact; the server derives it from the primary.
+        self.assertFalse([b for m, e, b in self.espo.writes if e == "Contact" and "phoneNumber" in b])
+        self.assertEqual(con[fx.C[0]]["phoneNumber"], "01632 960100")
         self.assertEqual((self.opp[fx.O[0]]["amount"], self.opp[fx.O[0]]["amountCurrency"]), (100.5, "GBP"))
         attrs, _exc = self.mapper().opportunity(dict(Id=fx.O[0], StageName="Closed Won", Amount=None),
                                                  _NullCtx())
@@ -830,7 +832,8 @@ class TestServerBehaviour(Base):
                          (400, {"field": "phoneNumber", "type": "valid"}))
         _st, doc = intl.send("POST", "Account", body={"sfId": "b", "name": "b", "phoneNumber": "+44 1632 960000"})
         self.assertEqual(intl.db["Account"][doc["id"]]["phoneNumber"], "+441632960000")
-        _st, doc = f.send("POST", "Email", body={"sfId": "e", "from": "N <a@example.test>", "messageId": "<m>"})
+        _st, doc = f.send("POST", "Email", body={"sfId": "e", "from": "N <a@example.test>", "to": "b@example.test",
+                                                 "messageId": "<m>"})
         self.assertIsNone(f.db["Email"][doc["id"]]["from"])
         self.assertEqual(f.db["Email"][doc["id"]]["messageId"], f"dummy:{doc['id']}")
         _st, doc = f.send("POST", "Call", body={"sfId": "c", "dateStart": "2025-01-01 00:00:00", "assignedUserId": "u"})
@@ -1605,7 +1608,7 @@ class TestRound2(Base):
         espo = Toggle()
         self.assertEqual(self.run_load(espo=espo), 0, self.last_err)
         espo.refuse = True
-        espo.by_sf("Contact")[fx.C[2]]["phoneNumberData"] = []         # only its refused number differs
+        espo.by_sf("Contact")[fx.C[2]].update(phoneNumberData=[], phoneNumber=None)   # only its refused number differs
         n = len(espo.writes)
         self.assertEqual(self.run_load(espo=espo), 0, self.last_err)
         self.assertTrue(espo.writes[n:])                                # attempted (and refused)
@@ -2143,6 +2146,266 @@ class TestSyntheticEventType(Base):
         self.assertEqual(attrs["meetingType"], "Call")
         self.assertIn("synthetic_enum_mapped", exc)
         self.assertNotIn("enum_unmapped", exc)
+
+
+class TestCrm008F(Base):
+    """CRM-008-F: live-server fidelity from the second crm-dev load (all data synthetic)."""
+
+    def load(self, data=None, name="f", espo=None):
+        snap = write_snapshot(os.path.join(self.tmp, name), data=data or fx.org())
+        espo = espo or FakeEspo()
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        self.assertNotIn("write_rejected", self.report()["exceptions"]["byReason"])
+        return snap, espo
+
+    def codes(self, sf_id):
+        return {e["reason"] for e in self.exceptions() if e["sfId"] == sf_id}
+
+    def rerun_writes(self, snap, espo):
+        n = len(espo.writes)
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        return espo.writes[n:]
+
+    # ------------------------------------------------------------ the fake (facts 1-4)
+    def test_fake_list_omits_phone_data_single_read_returns_it(self):
+        f = FakeEspo()
+        data = [{"phoneNumber": " 01632 960000 ", "type": "Office", "primary": True},
+                {"phoneNumber": "07700 900000", "type": "Mobile", "primary": False}]
+        _st, doc = f.send("POST", "Contact", body={"sfId": "x", "phoneNumberData": data})
+        _st, page = f.send("GET", "Contact", [("select", "id,sfId,phoneNumberData,phoneNumber"), ("maxSize", "200"),
+                                              ("offset", "0"), ("where[0][type]", "isNotNull"),
+                                              ("where[0][attribute]", "sfId")])
+        self.assertNotIn("phoneNumberData", page["list"][0])
+        self.assertEqual(page["list"][0]["phoneNumber"], "01632 960000")          # the primary, trimmed
+        st, rec = f.send("GET", f"Contact/{doc['id']}")
+        self.assertEqual(st, 200)
+        self.assertEqual(rec["phoneNumberData"][1], {"phoneNumber": "07700 900000", "type": "Mobile",
+                                                     "primary": False, "optOut": False, "invalid": False})
+        self.assertEqual(f.send("GET", "Contact/nope"), (404, None))
+
+    def test_fake_title_needs_account_and_date_completed_needs_completed(self):
+        f = FakeEspo()
+        _st, a = f.send("POST", "Contact", body={"sfId": "a", "title": "T", "accountId": None})
+        _st, b = f.send("POST", "Contact", body={"sfId": "b", "title": "T", "accountId": "acc"})
+        self.assertIsNone(f.db["Contact"][a["id"]]["title"])
+        self.assertEqual(f.db["Contact"][b["id"]]["title"], "T")
+        f.send("PUT", f"Contact/{a['id']}", body={"title": "T2"})
+        self.assertIsNone(f.db["Contact"][a["id"]]["title"])
+        task = {"assignedUserId": "u", "priority": "Normal", "dateCompleted": "2025-01-01 00:00:00"}
+        _st, t1 = f.send("POST", "Task", body=dict(task, sfId="t1", status="Not Started"))
+        _st, t2 = f.send("POST", "Task", body=dict(task, sfId="t2", status="Completed"))
+        self.assertIsNone(f.db["Task"][t1["id"]]["dateCompleted"])
+        self.assertEqual(f.db["Task"][t2["id"]]["dateCompleted"], "2025-01-01 00:00:00")
+
+    def test_fake_email_to_required(self):
+        f = FakeEspo()
+        for to in (None, "", "  "):
+            self.assertEqual(f.send("POST", "Email", body={"sfId": f"e{to!r}", "from": "a@example.test", "to": to}),
+                             (400, {"field": "to", "type": "required"}))
+        self.assertEqual(f.send("POST", "Email", body={"sfId": "e0", "from": "a@example.test"})[0], 400)
+        _st, doc = f.send("POST", "Email", body={"sfId": "e1", "from": "a@example.test", "to": "b@example.test"})
+        self.assertEqual(f.send("PUT", f"Email/{doc['id']}", body={"to": None}),
+                         (400, {"field": "to", "type": "required"}))
+        self.assertEqual(f.send("PUT", f"Email/{doc['id']}", body={"name": "n"})[0], 200)   # to not sent
+
+    # ------------------------------------------------------------ 1 phones
+    def test_phones_second_run_zero_writes_with_bounded_single_reads(self):
+        snap, espo = self.load()
+        con = espo.by_sf("Contact")
+        reads_before = len(espo.single_reads)
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+        # Only C[0] has two numbers (with a matching primary): one GET; C[1] and C[2] have one.
+        self.assertEqual(espo.single_reads[reads_before:], [("Contact", con[fx.C[0]]["id"])])
+        self.assertEqual(self.report()["objects"]["Contact"]["targets"]["Contact"]["unchanged"], 3)
+
+    def test_phones_primary_differs_writes_without_a_read(self):
+        snap, espo = self.load()
+        rec = espo.by_sf("Contact")[fx.C[0]]
+        rec["phoneNumber"] = "01632 999999"
+        reads_before = len(espo.single_reads)
+        writes = self.rerun_writes(snap, espo)
+        self.assertEqual([(m, e, sorted(b)) for m, e, b in writes], [("PUT", "Contact", ["phoneNumberData"])])
+        self.assertEqual(espo.single_reads[reads_before:], [])
+        self.assertEqual(rec["phoneNumber"], "01632 960100")
+
+    def test_phones_secondary_differs_found_by_the_single_read(self):
+        snap, espo = self.load()
+        rec = espo.by_sf("Contact")[fx.C[0]]
+        rec["phoneNumberData"] = rec["phoneNumberData"][:1]          # the Mobile was lost server-side
+        reads_before, req_before = len(espo.single_reads), len(espo.requests)
+        writes = self.rerun_writes(snap, espo)
+        self.assertEqual([(m, e, sorted(b)) for m, e, b in writes], [("PUT", "Contact", ["phoneNumberData"])])
+        self.assertEqual(espo.single_reads[reads_before:], [("Contact", rec["id"])])
+        self.assertEqual(len(rec["phoneNumberData"]), 2)
+        # requests.reads counts the single-record GET with the paged reads (the load's own client).
+        gets = [p for m, p in espo.requests[req_before:] if m == "GET" and p != "Settings"]
+        self.assertEqual(self.report()["requests"]["reads"], len(gets))
+        self.assertEqual(sum(1 for p in gets if "/" in p), 1)
+
+    def test_phones_single_number_and_none(self):
+        data = fx.org()
+        data["Contact"][1]["MobilePhone"] = None                    # C[1]: no phone at all
+        snap, espo = self.load(data)
+        self.assertIsNone(espo.by_sf("Contact")[fx.C[1]].get("phoneNumberData"))
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+        espo.by_sf("Contact")[fx.C[1]]["phoneNumber"] = "01632 960555"     # a stored number, none in source
+        writes = self.rerun_writes(snap, espo)
+        self.assertEqual(writes, [("PUT", "Contact", {"phoneNumberData": None})])
+
+    def test_single_read_failure_is_a_transport_error(self):
+        snap, espo = self.load()
+
+        class NoRead(FakeEspo):
+            def send(self, method, path, query=None, body=None, headers=None):
+                if method == "GET" and "/" in path:
+                    return 403, None
+                return super().send(method, path, query, body, headers)
+        bad = NoRead()
+        bad.db, bad._n = espo.db, espo._n
+        self.assertEqual(self.run_load(snap=snap, espo=bad), 4)
+        self.assertIn("code=read_failed", self.last_err)
+
+    # ------------------------------------------------------------ 2 title
+    def test_title_not_sent_without_account(self):
+        data = fx.org()
+        data["Contact"][1]["AccountId"] = None                       # C[1]: no account
+        snap, espo = self.load(data)
+        con = espo.by_sf("Contact")
+        sent = [b for m, e, b in espo.writes if e == "Contact" and b.get("sfId") == fx.C[1]]
+        self.assertNotIn("title", sent[0])
+        self.assertIn("title_unstorable_without_account", self.codes(fx.C[1]))
+        self.assertIn("title_unstorable_without_account", self.codes(fx.C[2]))   # account soft-deleted
+        self.assertEqual(con[fx.C[0]]["title"], "T" + SENTINEL)                 # with an account: kept
+        self.assertNotIn("title_unstorable_without_account", self.codes(fx.C[0]))
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+
+    def test_title_blank_without_account_has_no_code(self):
+        attrs, exc = self.mapper().contact(dict(Id=fx.C[0], Title=None, AccountId=None), _NullCtx())
+        self.assertNotIn("title", attrs)
+        self.assertNotIn("title_unstorable_without_account", exc)
+
+    # ------------------------------------------------------------ 3 dateCompleted
+    def test_date_completed_only_with_status_completed(self):
+        data = fx.org()
+        data["Task"][5]["CompletedDateTime"] = "2025-05-06T10:00:00.000+0000"     # Open, with a date
+        snap, espo = self.load(data)
+        tasks = espo.by_sf("Task")
+        self.assertEqual(tasks[fx.T[0]]["dateCompleted"], "2025-05-05 10:00:00")
+        self.assertIsNone(tasks[fx.T[5]].get("dateCompleted"))
+        sent = [b for m, e, b in espo.writes if e == "Task" and b.get("sfId") == fx.T[5]]
+        self.assertNotIn("dateCompleted", sent[0])
+        self.assertIn("date_completed_not_storable", self.codes(fx.T[5]))
+        self.assertNotIn("date_completed_not_storable", self.codes(fx.T[0]))
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+
+    def test_open_task_without_date_has_no_code(self):
+        attrs, exc = self.mapper().task(dict(Id=fx.T[5], Status="Open", CompletedDateTime=None, OwnerId=fx.U1),
+                                        _NullCtx())[1:]
+        self.assertNotIn("dateCompleted", attrs)
+        self.assertNotIn("date_completed_not_storable", exc)
+
+    # ------------------------------------------------------------ 4 email without recipient
+    def test_email_without_recipient_is_a_task(self):
+        data = fx.org()
+        data["EmailMessage"][1]["ToAddress"] = None                         # M[1]: linked to T[2]
+        data["EmailMessage"][1]["TextBody"] = "Plain " + SENTINEL
+        data["EmailMessage"][0]["ToAddress"] = "Value A; not-an-address"     # M[0]: none valid
+        snap, espo = self.load(data)
+        self.assertNotIn(fx.M[0], espo.by_sf("Email"))
+        self.assertNotIn(fx.M[1], espo.by_sf("Email"))
+        t = espo.by_sf("Task")[fx.M[1]]
+        self.assertEqual((t["name"], t["description"], t["status"], t["dateCompleted"]),
+                         ("Re2", "Plain " + SENTINEL, "Completed", "2025-07-02 12:00:00"))
+        self.assertEqual(t["assignedUserId"], next(r["id"] for r in espo.db["User"].values() if r["sfId"] == fx.U1))
+        t0 = espo.by_sf("Task")[fx.M[0]]
+        self.assertEqual((t0["parentType"], t0["parentId"]), ("Opportunity", espo.by_sf("Opportunity")[fx.O[0]]["id"]))
+        for m in (fx.M[0], fx.M[1]):
+            self.assertIn("email_without_recipient_imported_as_task", self.codes(m))
+        self.assertIn("email_address_invalid", self.codes(fx.M[0]))
+        self.assertEqual((t["priority"], t0["priority"]), ("Normal", "Normal"))
+        self.assertEqual(self.report()["exceptions"]["byReason"]["priority_server_default"], 2)
+        self.assertEqual(self.report()["objects"]["EmailMessage"]["targets"]["Task"]["created"], 2)
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+        self.assertNotIn("exists_not_in_snapshot", self.codes(fx.M[0]))
+
+    def test_email_without_recipient_and_owner_is_refused_not_sent(self):
+        data = fx.org()
+        data["EmailMessage"][0].update(ToAddress=None, ActivityId=None)     # no linked Task, no owner
+        snap, espo = self.load(data)
+        self.assertNotIn(fx.M[0], espo.by_sf("Task"))
+        self.assertNotIn(fx.M[0], espo.by_sf("Email"))
+        self.assertIn("owner_required_unresolved", self.codes(fx.M[0]))
+        self.assertNotIn("owner_from_created_by", self.codes(fx.M[0]))
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+
+    # ------------------------------------------------------------ round 2: owner fallback, priority
+    def _uid(self, espo, sf):
+        return next(r["id"] for r in espo.db["User"].values() if r["sfId"] == sf)
+
+    def test_email_task_owner_from_created_by_without_linked_task(self):
+        data = fx.org()
+        data["EmailMessage"][0].update(ToAddress=None, ActivityId=None, CreatedById=fx.U2)
+        snap, espo = self.load(data)
+        t = espo.by_sf("Task")[fx.M[0]]
+        self.assertEqual((t["assignedUserId"], t["sfOwnerId"]), (self._uid(espo, fx.U2), fx.U2))
+        self.assertEqual(t["priority"], "Normal")                     # server default, never sent
+        sent = [b for m, e, b in espo.writes if e == "Task" and b.get("sfId") == fx.M[0]]
+        self.assertNotIn("priority", sent[0])
+        codes = self.codes(fx.M[0])
+        self.assertTrue({"owner_from_created_by", "priority_server_default"} <= codes, codes)
+        self.assertNotIn("owner_required_unresolved", codes)
+        self.assertEqual(sum(1 for e in self.exceptions() if e["sfId"] == fx.M[0]
+                             and e["reason"] == "priority_server_default"), 1)
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+
+    def test_email_task_owner_from_created_by_when_linked_owner_unresolved(self):
+        data = fx.org()
+        data["EmailMessage"][1].update(ToAddress=None, CreatedById=fx.U2)    # linked to T[2]
+        next(r for r in data["Task"] if r["Id"] == fx.T[2])["OwnerId"] = fx.QUEUE
+        snap, espo = self.load(data)
+        self.assertEqual(espo.by_sf("Task")[fx.M[1]]["assignedUserId"], self._uid(espo, fx.U2))
+        codes = self.codes(fx.M[1])
+        self.assertIn("owner_from_created_by", codes)
+        self.assertFalse({"owner_queue_or_group", "owner_unresolved", "owner_required_unresolved"} & codes, codes)
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+
+    def test_email_task_linked_owner_wins_over_created_by(self):
+        data = fx.org()
+        data["EmailMessage"][1].update(ToAddress=None, CreatedById=fx.U2)    # T[2] owned by U1
+        snap, espo = self.load(data)
+        self.assertEqual(espo.by_sf("Task")[fx.M[1]]["assignedUserId"], self._uid(espo, fx.U1))
+        self.assertNotIn("owner_from_created_by", self.codes(fx.M[1]))
+        self.assertIn("priority_server_default", self.codes(fx.M[1]))
+
+    def test_email_task_created_by_not_provisioned_is_refused(self):
+        for created_by in (fx.U_MISSING, fx.U_AUTOMATED, fx.QUEUE, None, {"Id": fx.U1}):
+            data = fx.org()
+            data["EmailMessage"][0].update(ToAddress=None, ActivityId=None, CreatedById=created_by)
+            snap, espo = self.load(data, name=f"f{created_by!s:.3}{id(created_by)}")
+            self.assertNotIn(fx.M[0], espo.by_sf("Task"), created_by)
+            codes = self.codes(fx.M[0])
+            self.assertIn("owner_required_unresolved", codes)
+            self.assertNotIn("owner_from_created_by", codes)
+
+    def test_plain_email_ignores_created_by(self):
+        data = fx.org()
+        data["EmailMessage"][0]["CreatedById"] = fx.U2
+        snap, espo = self.load(data)
+        e = espo.by_sf("Email")[fx.M[0]]
+        self.assertIsNone(e.get("assignedUserId"))
+        self.assertFalse({"owner_from_created_by", "priority_server_default"} & self.codes(fx.M[0]))
+
+    def test_existing_email_stays_an_email(self):
+        snap, espo = self.load()
+        data = fx.org()
+        data["EmailMessage"][1]["ToAddress"] = None
+        snap2 = write_snapshot(os.path.join(self.tmp, "f2"), data=data)
+        n = len(espo.writes)
+        self.assertEqual(self.run_load(snap=snap2, espo=espo), 0, self.last_err)
+        self.assertEqual(espo.writes[n:], [])                       # to is never sent as null
+        self.assertNotIn(fx.M[1], espo.by_sf("Task"))
+        self.assertEqual(espo.by_sf("Email")[fx.M[1]]["to"], "y@example.test")
+        self.assertNotIn("email_without_recipient_imported_as_task", self.codes(fx.M[1]))
 
 
 if __name__ == "__main__":
