@@ -1,0 +1,452 @@
+{
+  "base": "forge/CRM-005",
+  "base_sha": "188af96db1f032a993448accb7ed6657f2ed2f6d",
+  "branch": "forge/CRM-006R",
+  "candidate": "375e1ca890161b0a9d569432e28f1e21905bbd6a",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 2,
+    "devsecops": 2,
+    "engineer": 4,
+    "tester": 2
+  },
+  "created": "2026-11-10T19:49:38Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T19:49:59Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T19:58:35Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r1: patch restored; v4, parent_soft_deleted, X-Skip-Duplicate-Check, role options, user types, value tables, load.sh, IMPORT.md; 62 load OK, 1 unit test blocked on scope",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T19:59:52Z",
+      "type": "result"
+    },
+    {
+      "candidate": null,
+      "id": 3,
+      "n": 2,
+      "role": "engineer",
+      "round": 2,
+      "t": "2026-11-10T19:59:52Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/3-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 3,
+      "t": "2026-11-10T20:08:07Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r2: test exception, snapshot layouts, --accept-drift/--resume, --reconciliation, mutation evidence; 82 load + 311 unit OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 2,
+      "spawn": 3,
+      "t": "2026-11-10T20:08:58Z",
+      "type": "result"
+    },
+    {
+      "candidate": null,
+      "id": 6,
+      "n": 3,
+      "role": "engineer",
+      "round": 3,
+      "t": "2026-11-10T20:08:58Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 6,
+      "t": "2026-11-10T20:14:04Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r3: real reconcile layout (report/), reconciliation bound to snapshot t_start/status/contract sha+version, unknown absent_unexplained, beta requires --reconciliation; 88 load + 311 unit OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 3,
+      "spawn": 6,
+      "t": "2026-11-10T20:14:31Z",
+      "type": "result"
+    },
+    {
+      "round": 3,
+      "sha": "b683d1a4bc9076de64d6385f9f45d330d808ba85",
+      "t": "2026-11-10T20:14:31Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "b683d1a4bc9076de64d6385f9f45d330d808ba85",
+      "id": 10,
+      "n": 1,
+      "role": "auditor",
+      "round": 3,
+      "t": "2026-11-10T20:14:32Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "b683d1a4bc9076de64d6385f9f45d330d808ba85",
+      "id": 11,
+      "n": 1,
+      "role": "tester",
+      "round": 3,
+      "t": "2026-11-10T20:14:32Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "b683d1a4bc9076de64d6385f9f45d330d808ba85",
+      "id": 12,
+      "n": 1,
+      "role": "devsecops",
+      "round": 3,
+      "t": "2026-11-10T20:14:32Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/10-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 10,
+      "t": "2026-11-10T20:24:16Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/11-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 11,
+      "t": "2026-11-10T20:24:16Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/12-devsecops.json",
+      "reported": "findings",
+      "role": "devsecops",
+      "spawn": 12,
+      "t": "2026-11-10T20:24:16Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "b683d1a4bc9076de64d6385f9f45d330d808ba85",
+      "findings": [
+        {
+          "key": "selftest-snapshot-classed-real",
+          "severity": "blocking"
+        },
+        {
+          "key": "scope-outside-allowlist",
+          "severity": "blocking"
+        },
+        {
+          "key": "second-run-writes-phones",
+          "severity": "blocking"
+        },
+        {
+          "key": "call-direction-manufactured",
+          "severity": "blocking"
+        },
+        {
+          "key": "d8-no-patterns",
+          "severity": "advisory"
+        },
+        {
+          "key": "api-key-in-argv",
+          "severity": "advisory"
+        },
+        {
+          "key": "email-contacts-unlinked",
+          "severity": "advisory"
+        },
+        {
+          "key": "username-collision",
+          "severity": "advisory"
+        },
+        {
+          "key": "misleading-name",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 3,
+      "spawn": 10,
+      "t": "2026-11-10T20:26:20Z",
+      "type": "result"
+    },
+    {
+      "candidate": "b683d1a4bc9076de64d6385f9f45d330d808ba85",
+      "findings": [
+        {
+          "key": "synthetic-marker-never-produced",
+          "severity": "blocking"
+        },
+        {
+          "key": "scope-test-files",
+          "severity": "advisory"
+        },
+        {
+          "key": "call-direction-default",
+          "severity": "advisory"
+        },
+        {
+          "key": "link-to-sf-soft-deleted-parent",
+          "severity": "advisory"
+        },
+        {
+          "key": "nonscalar-crash",
+          "severity": "advisory"
+        },
+        {
+          "key": "real-espo-roundtrip-unverified",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 3,
+      "spawn": 11,
+      "t": "2026-11-10T20:26:20Z",
+      "type": "result"
+    },
+    {
+      "candidate": "b683d1a4bc9076de64d6385f9f45d330d808ba85",
+      "findings": [
+        {
+          "key": "call-direction-manufactured",
+          "severity": "blocking"
+        },
+        {
+          "key": "idempotency-only-vs-fake",
+          "severity": "advisory"
+        },
+        {
+          "key": "scope-test-files",
+          "severity": "advisory"
+        },
+        {
+          "key": "output-dir-placement",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "devsecops",
+      "round": 3,
+      "spawn": 12,
+      "t": "2026-11-10T20:26:20Z",
+      "type": "result"
+    },
+    {
+      "candidate": "b683d1a4bc9076de64d6385f9f45d330d808ba85",
+      "id": 19,
+      "n": 4,
+      "role": "engineer",
+      "round": 4,
+      "t": "2026-11-10T20:26:20Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/19-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 19,
+      "t": "2026-11-10T20:38:50Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "b683d1a4bc9076de64d6385f9f45d330d808ba85",
+      "findings": [],
+      "note": "r4: synthetic rule by selftest location + sentinel refusal in beta; realistic fake (phones, from, messageId, dates), zero-write second run; no manufactured direction, date-derivation exceptions; argv-free key; collisions; value_shape; 112 load + 311 unit OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 4,
+      "spawn": 19,
+      "t": "2026-11-10T20:39:14Z",
+      "type": "result"
+    },
+    {
+      "round": 4,
+      "sha": "375e1ca890161b0a9d569432e28f1e21905bbd6a",
+      "t": "2026-11-10T20:39:15Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "375e1ca890161b0a9d569432e28f1e21905bbd6a",
+      "id": 23,
+      "n": 2,
+      "role": "auditor",
+      "round": 4,
+      "t": "2026-11-10T20:39:30Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "375e1ca890161b0a9d569432e28f1e21905bbd6a",
+      "id": 24,
+      "n": 2,
+      "role": "tester",
+      "round": 4,
+      "t": "2026-11-10T20:39:30Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "375e1ca890161b0a9d569432e28f1e21905bbd6a",
+      "id": 25,
+      "n": 2,
+      "role": "devsecops",
+      "round": 4,
+      "t": "2026-11-10T20:39:30Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/23-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 23,
+      "t": "2026-11-10T20:48:07Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/24-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 24,
+      "t": "2026-11-10T20:48:07Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/25-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 25,
+      "t": "2026-11-10T20:48:07Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "375e1ca890161b0a9d569432e28f1e21905bbd6a",
+      "findings": [
+        {
+          "key": "server-defaults-rerun-writes",
+          "severity": "blocking"
+        },
+        {
+          "key": "phone-international-unenforced",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 4,
+      "spawn": 23,
+      "t": "2026-11-10T20:49:02Z",
+      "type": "result"
+    },
+    {
+      "candidate": "375e1ca890161b0a9d569432e28f1e21905bbd6a",
+      "findings": [
+        {
+          "key": "phone-international-precondition-unenforced",
+          "severity": "advisory"
+        },
+        {
+          "key": "refused-phone-retried-every-run",
+          "severity": "advisory"
+        },
+        {
+          "key": "synthetic-users-not-exportable",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 4,
+      "spawn": 24,
+      "t": "2026-11-10T20:49:02Z",
+      "type": "result"
+    },
+    {
+      "candidate": "375e1ca890161b0a9d569432e28f1e21905bbd6a",
+      "findings": [
+        {
+          "key": "rerun-writes-if-server-trims",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 4,
+      "spawn": 25,
+      "t": "2026-11-10T20:49:02Z",
+      "type": "result"
+    },
+    {
+      "note": "Candidate 375e1ca: round-1 blockers all fixed (Auditor/Tester/DevSecOps verified). One new blocking finding (server-defaults-rerun-writes) with the engineer execution limit reached. Continued in CRM-006S (PL-verified facts: explicit null accepted and clears enums; varchar trimmed on save, text not; Settings exposes phoneNumberInternational).",
+      "outcome": "ESCALATED",
+      "t": "2026-11-10T20:49:02Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-006R",
+  "host": "docker1",
+  "known_commit": "188af96db1f032a993448accb7ed6657f2ed2f6d",
+  "limit": 4,
+  "outcome": "ESCALATED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-006R",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 4,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-006R",
+  "wo": "CRM-006R",
+  "worktree": "/srv/CRM/worktrees/CRM-006R"
+}

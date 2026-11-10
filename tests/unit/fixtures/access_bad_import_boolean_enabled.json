@@ -898,7 +898,7 @@
         "Calendar": false,
         "GlobalStream": true,
         "WorkingTimeCalendar": false,
-        "Import": false,
+        "Import": true,
         "Webhook": false,
         "OpenApi": false,
         "ExternalAccount": false,

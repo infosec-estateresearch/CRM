@@ -299,6 +299,26 @@ class TestBrokenFixtures(unittest.TestCase):
             self.assertEqual({r: v for r, v in result.items() if v}, {})
 
 
+# Core fields: CRM-003 only switches field history on ({"audited": true}). The one
+# exception (CRM-006, PL-authorised): Contact.opportunityRole may also set its options, so
+# the enquiry contact-role column accepts the Salesforce roles. Any other key is refused.
+CORE_OVERRIDE_EXCEPTIONS = {("Contact", "opportunityRole"): {"audited", "options"}}
+
+
+def core_override_violations(entity, name, field):
+    allowed = CORE_OVERRIDE_EXCEPTIONS.get((entity, name))
+    if allowed is None:
+        return [] if field == {"audited": True} else [
+            f"{entity}.{name} overrides {k}" for k in sorted(set(field) - {"audited"}) or ["audited"]]
+    out = [f"{entity}.{name} overrides {k}" for k in sorted(set(field) - allowed)]
+    if "audited" in field and field["audited"] is not True:
+        out.append(f"{entity}.{name} audited must be true")
+    options = field.get("options")
+    if "options" in field and not (isinstance(options, list) and all(isinstance(o, str) for o in options)):
+        out.append(f"{entity}.{name} options must be a list of strings")
+    return out
+
+
 class TestMetadataConsistency(unittest.TestCase):
     """Fields, indexes and layouts agree (WO CRM-003 item 7)."""
 
@@ -326,8 +346,19 @@ class TestMetadataConsistency(unittest.TestCase):
                         self.assertTrue(field.get("layoutMassUpdateDisabled"))
                         self.assertTrue(field.get("layoutListDisabled"))
                     elif "type" not in field:
-                        # a core field: CRM-003 only switches its field history on
-                        self.assertEqual(field, {"audited": True})
+                        self.assertEqual(core_override_violations(entity, name, field), [])
+
+    def test_core_override_refuses_other_keys_on_opportunity_role(self):
+        # CRM-006 exception: Contact.opportunityRole may carry options (and audited) only.
+        defs = policy.load_entity_defs(overrides={
+            "Contact": os.path.join(FIXTURES, "overrides_bad_opportunity_role_required.json")})
+        field = defs["Contact"]["fields"]["opportunityRole"]
+        self.assertEqual(core_override_violations("Contact", "opportunityRole", field),
+                         ["Contact.opportunityRole overrides required"])
+        self.assertEqual(core_override_violations("Contact", "emailAddress", {"options": ["x"]}),
+                         ["Contact.emailAddress overrides options"])
+        self.assertEqual(core_override_violations("Contact", "opportunityRole", {"options": "Other"}),
+                         ["Contact.opportunityRole options must be a list of strings"])
 
     def test_crm001_account_definitions_preserved(self):
         fields = self.defs["Account"]["fields"]
