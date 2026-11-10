@@ -88,6 +88,13 @@
           "delete": "no",
           "stream": "all"
         },
+        "ServiceType": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
         "Lead": false,
         "Campaign": false,
         "TargetList": false,
@@ -140,6 +147,36 @@
         "User": {
           "sfId": {
             "read": "no",
+            "edit": "no"
+          }
+        },
+        "Opportunity": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfStageName": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfLeadSource": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "legacyStale": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "lossReasonLegacyMissing": {
+            "read": "yes",
             "edit": "no"
           }
         }
@@ -246,6 +283,13 @@
           "delete": "no",
           "stream": "all"
         },
+        "ServiceType": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
         "Lead": false,
         "Campaign": false,
         "TargetList": false,
@@ -298,6 +342,36 @@
         "User": {
           "sfId": {
             "read": "no",
+            "edit": "no"
+          }
+        },
+        "Opportunity": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfStageName": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfLeadSource": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "legacyStale": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "lossReasonLegacyMissing": {
+            "read": "yes",
             "edit": "no"
           }
         }
@@ -404,6 +478,13 @@
           "delete": "no",
           "stream": "all"
         },
+        "ServiceType": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
         "Lead": false,
         "Campaign": false,
         "TargetList": false,
@@ -456,6 +537,36 @@
         "User": {
           "sfId": {
             "read": "no",
+            "edit": "no"
+          }
+        },
+        "Opportunity": {
+          "sfId": {
+            "read": "no",
+            "edit": "no"
+          },
+          "sfStageName": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfLeadSource": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "legacyStale": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "lossReasonLegacyMissing": {
+            "read": "yes",
             "edit": "no"
           }
         }
@@ -562,6 +673,13 @@
           "delete": "no",
           "stream": "all"
         },
+        "ServiceType": {
+          "create": "yes",
+          "read": "all",
+          "edit": "all",
+          "delete": "no",
+          "stream": "all"
+        },
         "Lead": false,
         "Campaign": false,
         "TargetList": false,
@@ -613,6 +731,36 @@
         },
         "User": {
           "sfId": {
+            "read": "yes",
+            "edit": "yes"
+          }
+        },
+        "Opportunity": {
+          "sfId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfStageName": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfLeadSource": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfOwnerId": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfCreatedAt": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "legacyStale": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "lossReasonLegacyMissing": {
             "read": "yes",
             "edit": "yes"
           }

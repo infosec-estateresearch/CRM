@@ -1,0 +1,10 @@
+[
+    {
+        "label": "",
+        "rows": [
+            [{"name": "account"}, {"name": "contact"}],
+            [{"name": "serviceType"}, {"name": "name"}],
+            [{"name": "description", "fullWidth": true}]
+        ]
+    }
+]

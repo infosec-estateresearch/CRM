@@ -63,6 +63,16 @@ BROKEN_ACCESS = {
     "access_bad_staff_edits_sf_owner.json": {"sf_fields_read_only_for_people"},
     "access_bad_intake_provenance_hidden.json": {"sf_fields_read_only_for_people"},
     "access_bad_import_cannot_edit_sf.json": {"import_edits_sf_fields"},
+    # CRM-004
+    "access_bad_staff_creates_service_type.json": {"service_type_admin_managed",
+                                                   "matches_work_order_table"},
+    "access_bad_import_deletes_service_type.json": {"service_type_admin_managed",
+                                                    "import_never_deletes",
+                                                    "matches_work_order_table"},
+    "access_bad_staff_edits_legacy_stale.json": {"sf_fields_read_only_for_people"},
+    "access_bad_import_cannot_edit_legacy.json": {"import_edits_sf_fields"},
+    # CRM-004 round 2: a human role reading Opportunity.sfId
+    "access_bad_opportunity_sfid_readable.json": {"sf_id_admin_only"},
 }
 BROKEN_KEYS = {
     "keys_bad_sfid_writable.json": {"sf_id_field"},
@@ -221,7 +231,8 @@ class TestScopeSet(unittest.TestCase):
         self.assertFalse(set(policy.ACL_ENTITY_SCOPES) & set(policy.ACL_BOOLEAN_SCOPES))
         self.assertEqual(len(policy.ACL_SCOPES), len(set(policy.ACL_SCOPES)))
         self.assertEqual(set(policy.MAIN_SCOPES) | set(policy.READ_ONLY_SCOPES)
-                         | set(policy.UNUSED_SCOPES), set(policy.ACL_ENTITY_SCOPES))
+                         | set(policy.UNUSED_SCOPES) | set(policy.ADMIN_MANAGED_SCOPES),
+                         set(policy.ACL_ENTITY_SCOPES))
         self.assertEqual(set(policy.HUMAN_BOOLEAN), set(policy.ACL_BOOLEAN_SCOPES))
 
     def test_expected_table_covers_every_scope_for_every_role(self):
@@ -229,16 +240,25 @@ class TestScopeSet(unittest.TestCase):
             self.assertEqual(set(data), set(policy.ACL_SCOPES), role)
 
     def test_a_newly_listed_scope_is_required_of_every_role(self):
-        # CRM-004 will add ServiceType: listing it alone must make every role fail.
+        # CRM-004 added ServiceType; a further (hypothetical) scope listed alone must
+        # still make every role fail.
         doc = policy.load_access()
         original = list(policy.ACL_ENTITY_SCOPES)
         try:
-            policy.ACL_ENTITY_SCOPES.append("ServiceType")
-            policy.ACL_SCOPES.append("ServiceType")
+            policy.ACL_ENTITY_SCOPES.append("FutureScope")
+            policy.ACL_SCOPES.append("FutureScope")
             found = policy.rule_every_acl_scope_explicit(doc)
         finally:
             policy.ACL_ENTITY_SCOPES[:] = original
-            policy.ACL_SCOPES.remove("ServiceType")
+            policy.ACL_SCOPES.remove("FutureScope")
+        self.assertEqual(len([v for v in found if "FutureScope" in v]), len(policy.ROLES))
+
+    def test_service_type_is_explicit_in_every_role(self):
+        # CRM-004: removing ServiceType from the roles makes every role fail.
+        doc = policy.load_access()
+        for role in doc["roles"]:
+            del role["data"]["ServiceType"]
+        found = policy.rule_every_acl_scope_explicit(doc)
         self.assertEqual(len([v for v in found if "ServiceType" in v]), len(policy.ROLES))
 
 
@@ -329,18 +349,25 @@ class TestMetadataConsistency(unittest.TestCase):
                     continue
                 with self.subTest(layout=f"{entity}/{name}"):
                     with open(os.path.join(layouts, entity, name), encoding="utf-8") as fh:
-                        self.assertNotRegex(fh.read(), r'"sf[A-Z]\w*"')
+                        text = fh.read()
+                    if entity == "ServiceType":
+                        # CRM-004: ServiceType.sfValue is the Salesforce picklist value
+                        # it maps, reference data rather than a Salesforce key.
+                        text = text.replace('"sfValue"', '""')
+                    self.assertNotRegex(text, r'"sf[A-Z]\w*"')
 
     def test_layouts_only_for_allowlisted_entities(self):
-        self.assertTrue(set(os.listdir(os.path.join(RES, "layouts"))) <= {"User", "Account",
-                                                                          "Contact"})
+        self.assertTrue(set(os.listdir(os.path.join(RES, "layouts"))) <= {
+            "User", "Account", "Contact", "Opportunity", "ServiceType"})  # CRM-004 adds two
 
     def test_role_field_data_names_real_fields(self):
+        defs = dict(self.defs, Opportunity=load_json(  # CRM-004 adds Opportunity fieldData
+            os.path.join(policy.ENTITY_DEFS_DIR, "Opportunity.json")))
         for role in policy.load_access()["roles"]:
             for entity, fields in role["fieldData"].items():
                 for name in fields:
                     with self.subTest(role=role["name"], field=f"{entity}.{name}"):
-                        self.assertIn(name, self.defs[entity]["fields"])
+                        self.assertIn(name, defs[entity]["fields"])
 
     def test_role_documents_use_only_espocrm_role_attributes(self):
         config = provision_access.load_config()  # raises on unknown attributes
@@ -360,7 +387,8 @@ class TestHookFile(unittest.TestCase):
         hooks = os.path.join(REPO, "custom", "Espo", "Custom", "Hooks")
         found = [os.path.relpath(os.path.join(r, f), hooks)
                  for r, _, files in os.walk(hooks) for f in files]
-        self.assertEqual(found, [os.path.join("Account", "RestrictDeleteWithEnquiries.php")])
+        self.assertEqual(sorted(found), [os.path.join("Account", "RestrictDeleteWithEnquiries.php"),
+                                         os.path.join("Opportunity", "RequireLossReason.php")])
 
     def test_braces_balance(self):
         code = policy._code(policy.load_hook())

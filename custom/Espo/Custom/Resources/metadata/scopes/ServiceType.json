@@ -1,0 +1,16 @@
+{
+    "entity": true,
+    "object": true,
+    "layouts": true,
+    "tab": false,
+    "acl": true,
+    "aclPortal": false,
+    "customizable": true,
+    "importable": false,
+    "notifications": false,
+    "stream": false,
+    "disabled": false,
+    "type": "Base",
+    "module": "Custom",
+    "isCustom": true
+}

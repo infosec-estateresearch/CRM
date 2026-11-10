@@ -1,0 +1,10 @@
+{
+    "scopeNames": {
+        "Opportunity": "Enquiry",
+        "ServiceType": "Service Type"
+    },
+    "scopeNamesPlural": {
+        "Opportunity": "Enquiries",
+        "ServiceType": "Service Types"
+    }
+}
