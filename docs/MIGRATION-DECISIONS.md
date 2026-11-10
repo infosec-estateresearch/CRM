@@ -1,6 +1,6 @@
 # Migration decisions, entity contract and route to a real-data beta
 
-- **Status:** PROPOSED, 2026-11-10, for CGPT Architect review. Business decisions marked **PO** need Matt's validation before they are final.
+- **Status:** PROPOSED, 2026-11-10 (rev. 2: D13 and §5 now name the External Client App and add O1), for CGPT Architect review. Business decisions marked **PO** need Matt's validation before they are final.
 - **Evidence:** the accepted inventory (`docs/SALESFORCE-DATA-INVENTORY.md`), plus read-only aggregates of the ERiC copy (latest version of each record, 66,103 opportunities). Counts only; no record content.
 
 ## 1. Enquiry stage mapping (R7)
@@ -32,7 +32,7 @@ Every enquiry keeps its **original Salesforce stage** in a read-only field `sfSt
 | D10 | Untyped Events (1,627) | Import them as Meetings, with type "Unspecified (legacy)". | default |
 | D11 | Email history | Archived, read-only Email records, linked to the enquiry, contact and firm. Body only; no attachments, no HTML, no sending, no live mailbox. | default (R10/R11, D5) |
 | D12 | Firms with no activity (M4) | Import everything. Archiving is decided after the beta. | default |
-| D13 | Salesforce access | A dedicated read-only integration user with a client-credentials Connected App, provisioned by the Salesforce admin. ERiC's credentials are not reused. | **PO / Salesforce admin** |
+| D13 | Salesforce access | A dedicated read-only integration user (Salesforce Integration licence, API only) as the Run As user of an **External Client App** using OAuth client credentials, set up per `docs/SALESFORCE-ADMIN-SETUP.md`. An existing Connected App is only a verified fallback. ERiC's credentials are not reused. | **PO / Salesforce admin** |
 
 ## 3. Shared entity contract for CRM-003 to CRM-005 (proposed)
 - **Salesforce id fields.** Every migrated entity has `sfId` (varchar 18, unique index, read-only in the UI) and, where useful, `sfCreatedDate` and `sfCreatedById`. Loads are idempotent on `sfId` (M2).
@@ -79,7 +79,8 @@ Every enquiry keeps its **original Salesforce stage** in a read-only field `sfSt
 ## 5. Evidence required before any Salesforce access
 - **Before L1 (metadata):**
   - CRM-002 is accepted by the Architect;
-  - the integration user and Connected App exist, with a profile export showing no Create, Edit or Delete;
+  - the integration user and External Client App exist per `docs/SALESFORCE-ADMIN-SETUP.md` (or the verified Connected App fallback), with no Create, Edit or Delete granted;
+  - O1, the synthetic self-test in the real container on DOCKER1, has passed;
   - `/srv/CRM/runtime/migrate` is prepared;
   - the PO's L1 authorisation is recorded on the CRM-002 Issue.
 - **Before L2 (counts):** the L1 result shows every object as non-createable, non-updateable and non-deletable, and every field readable, plus the PO's L2 authorisation.
