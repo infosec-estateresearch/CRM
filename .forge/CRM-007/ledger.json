@@ -1,0 +1,607 @@
+{
+  "base": "forge/CRM-006R",
+  "base_sha": "e1f9a6899e82ac5862849db0bf1f00dbcae51244",
+  "branch": "forge/CRM-007",
+  "candidate": "82c05ef3abe444c1f8f01a0ed11483e526e27f40",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 3,
+    "devsecops": 3,
+    "engineer": 4,
+    "tester": 3
+  },
+  "created": "2026-11-10T20:55:38Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T20:56:18Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T21:08:15Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "Steps 1-4,6 core + docs minimal; 339 unit OK; known gaps: beta-safe suite, restoretest, timer, docs",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T21:09:02Z",
+      "type": "result"
+    },
+    {
+      "candidate": null,
+      "id": 3,
+      "n": 2,
+      "role": "engineer",
+      "round": 2,
+      "t": "2026-11-10T21:09:06Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/3-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 3,
+      "t": "2026-11-10T21:21:58Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "Gaps closed: beta-safe GET-only suite, restoretest, timer templates, deploy functions tested, docs; 376 unit OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 2,
+      "spawn": 3,
+      "t": "2026-11-10T21:22:24Z",
+      "type": "result"
+    },
+    {
+      "round": 2,
+      "sha": "31b63b522f26ed3ac1204ea954dba25e2a8bbc67",
+      "t": "2026-11-10T21:22:25Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "31b63b522f26ed3ac1204ea954dba25e2a8bbc67",
+      "id": 7,
+      "n": 1,
+      "role": "auditor",
+      "round": 2,
+      "t": "2026-11-10T21:22:25Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "31b63b522f26ed3ac1204ea954dba25e2a8bbc67",
+      "id": 8,
+      "n": 1,
+      "role": "tester",
+      "round": 2,
+      "t": "2026-11-10T21:22:25Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "31b63b522f26ed3ac1204ea954dba25e2a8bbc67",
+      "id": 9,
+      "n": 1,
+      "role": "devsecops",
+      "round": 2,
+      "t": "2026-11-10T21:22:25Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/7-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 7,
+      "t": "2026-11-10T21:31:11Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/8-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 8,
+      "t": "2026-11-10T21:31:11Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/9-devsecops.json",
+      "reported": "findings",
+      "role": "devsecops",
+      "spawn": 9,
+      "t": "2026-11-10T21:31:11Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "31b63b522f26ed3ac1204ea954dba25e2a8bbc67",
+      "findings": [
+        {
+          "key": "tamper-verifies",
+          "severity": "blocking"
+        },
+        {
+          "key": "beta-db-dir-unchecked",
+          "severity": "blocking"
+        },
+        {
+          "key": "bundle-ships-forge",
+          "severity": "advisory"
+        },
+        {
+          "key": "retention-doc",
+          "severity": "advisory"
+        },
+        {
+          "key": "verify-then-reread",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 2,
+      "spawn": 7,
+      "t": "2026-11-10T21:31:36Z",
+      "type": "result"
+    },
+    {
+      "candidate": "31b63b522f26ed3ac1204ea954dba25e2a8bbc67",
+      "findings": [
+        {
+          "key": "db-dir-unvalidated",
+          "severity": "blocking"
+        },
+        {
+          "key": "bundle-sha-optional",
+          "severity": "blocking"
+        },
+        {
+          "key": "edge-policy-tokenisation",
+          "severity": "advisory"
+        },
+        {
+          "key": "src-trailing-slash",
+          "severity": "advisory"
+        },
+        {
+          "key": "compose-policy-gaps",
+          "severity": "advisory"
+        },
+        {
+          "key": "upgrade-reuses-unverified",
+          "severity": "advisory"
+        },
+        {
+          "key": "restoretest-missing-passes",
+          "severity": "advisory"
+        },
+        {
+          "key": "unit-test-gaps",
+          "severity": "advisory"
+        },
+        {
+          "key": "browser-ac5",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 2,
+      "spawn": 8,
+      "t": "2026-11-10T21:31:36Z",
+      "type": "result"
+    },
+    {
+      "candidate": "31b63b522f26ed3ac1204ea954dba25e2a8bbc67",
+      "findings": [
+        {
+          "key": "bundle-self-attested",
+          "severity": "blocking"
+        },
+        {
+          "key": "beta-db-dir-unchecked",
+          "severity": "blocking"
+        },
+        {
+          "key": "upgrade-skips-reverify",
+          "severity": "advisory"
+        },
+        {
+          "key": "restoretest-dir-scope",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "devsecops",
+      "round": 2,
+      "spawn": 9,
+      "t": "2026-11-10T21:31:36Z",
+      "type": "result"
+    },
+    {
+      "candidate": "31b63b522f26ed3ac1204ea954dba25e2a8bbc67",
+      "id": 16,
+      "n": 3,
+      "role": "engineer",
+      "round": 3,
+      "t": "2026-11-10T21:31:36Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/16-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 16,
+      "t": "2026-11-10T21:40:22Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "31b63b522f26ed3ac1204ea954dba25e2a8bbc67",
+      "findings": [],
+      "note": "R3: mandatory --sha256 anchor, verify-tree, CRM_DB_DIR both targets, edge/compose policy hardening, .forge excluded, restoretest fixes; 396 unit OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 3,
+      "spawn": 16,
+      "t": "2026-11-10T21:42:06Z",
+      "type": "result"
+    },
+    {
+      "round": 3,
+      "sha": "4ba1a5476c3dabf13f650667a42d54eb9399da1f",
+      "t": "2026-11-10T21:42:06Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "4ba1a5476c3dabf13f650667a42d54eb9399da1f",
+      "id": 20,
+      "n": 2,
+      "role": "auditor",
+      "round": 3,
+      "t": "2026-11-10T21:42:06Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "4ba1a5476c3dabf13f650667a42d54eb9399da1f",
+      "id": 21,
+      "n": 2,
+      "role": "tester",
+      "round": 3,
+      "t": "2026-11-10T21:42:06Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "4ba1a5476c3dabf13f650667a42d54eb9399da1f",
+      "id": 22,
+      "n": 2,
+      "role": "devsecops",
+      "round": 3,
+      "t": "2026-11-10T21:42:06Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/20-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 20,
+      "t": "2026-11-10T21:46:26Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/21-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 21,
+      "t": "2026-11-10T21:46:26Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/22-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 22,
+      "t": "2026-11-10T21:46:26Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "4ba1a5476c3dabf13f650667a42d54eb9399da1f",
+      "findings": [
+        {
+          "key": "readme-status-out-of-scope",
+          "severity": "blocking"
+        },
+        {
+          "key": "dead-target-guards",
+          "severity": "advisory"
+        },
+        {
+          "key": "beta-runtime-overridable",
+          "severity": "advisory"
+        },
+        {
+          "key": "crm-002-record-null",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 3,
+      "spawn": 20,
+      "t": "2026-11-10T21:46:54Z",
+      "type": "result"
+    },
+    {
+      "candidate": "4ba1a5476c3dabf13f650667a42d54eb9399da1f",
+      "findings": [
+        {
+          "key": "readme-status-outside-allowlist",
+          "severity": "blocking"
+        },
+        {
+          "key": "compose-policy-isolation-gaps",
+          "severity": "advisory"
+        },
+        {
+          "key": "dev-db-dir-guard-tightened",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 3,
+      "spawn": 21,
+      "t": "2026-11-10T21:46:54Z",
+      "type": "result"
+    },
+    {
+      "candidate": "4ba1a5476c3dabf13f650667a42d54eb9399da1f",
+      "findings": [
+        {
+          "key": "edge-cfg-not-revalidated",
+          "severity": "advisory"
+        },
+        {
+          "key": "export-beta-base-url",
+          "severity": "advisory"
+        },
+        {
+          "key": "verify-tree-modes",
+          "severity": "advisory"
+        },
+        {
+          "key": "readme-status-scope",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 3,
+      "spawn": 22,
+      "t": "2026-11-10T21:46:54Z",
+      "type": "result"
+    },
+    {
+      "candidate": "4ba1a5476c3dabf13f650667a42d54eb9399da1f",
+      "id": 29,
+      "n": 4,
+      "role": "engineer",
+      "round": 4,
+      "t": "2026-11-10T21:46:54Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/29-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 29,
+      "t": "2026-11-10T21:54:51Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "4ba1a5476c3dabf13f650667a42d54eb9399da1f",
+      "findings": [],
+      "note": "R4: README reverted to base outside Usage; compose key allowlist + image pin; edge cfg revalidation; export beta URL; verify-tree modes; beta runtime pinned; dead code removed; unit 407 OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 4,
+      "spawn": 29,
+      "t": "2026-11-10T21:55:12Z",
+      "type": "result"
+    },
+    {
+      "round": 4,
+      "sha": "82c05ef3abe444c1f8f01a0ed11483e526e27f40",
+      "t": "2026-11-10T21:55:12Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "82c05ef3abe444c1f8f01a0ed11483e526e27f40",
+      "id": 33,
+      "n": 3,
+      "role": "auditor",
+      "round": 4,
+      "t": "2026-11-10T21:55:21Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "82c05ef3abe444c1f8f01a0ed11483e526e27f40",
+      "id": 34,
+      "n": 3,
+      "role": "tester",
+      "round": 4,
+      "t": "2026-11-10T21:55:21Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "82c05ef3abe444c1f8f01a0ed11483e526e27f40",
+      "id": 35,
+      "n": 3,
+      "role": "devsecops",
+      "round": 4,
+      "t": "2026-11-10T21:55:21Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/33-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 33,
+      "t": "2026-11-10T22:01:00Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/34-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 34,
+      "t": "2026-11-10T22:01:00Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/35-devsecops.json",
+      "reported": "findings",
+      "role": "devsecops",
+      "spawn": 35,
+      "t": "2026-11-10T22:01:00Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "82c05ef3abe444c1f8f01a0ed11483e526e27f40",
+      "findings": [
+        {
+          "key": "cross-target-restore",
+          "severity": "blocking"
+        },
+        {
+          "key": "deploy-root-seam",
+          "severity": "advisory"
+        },
+        {
+          "key": "deploy-skips-access",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 4,
+      "spawn": 33,
+      "t": "2026-11-10T22:01:21Z",
+      "type": "result"
+    },
+    {
+      "candidate": "82c05ef3abe444c1f8f01a0ed11483e526e27f40",
+      "findings": [
+        {
+          "key": "restore-cross-env",
+          "severity": "blocking"
+        },
+        {
+          "key": "provision-beta-url-unpinned",
+          "severity": "blocking"
+        },
+        {
+          "key": "deploy-root-second-seam",
+          "severity": "advisory"
+        },
+        {
+          "key": "browser-ac5",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 4,
+      "spawn": 34,
+      "t": "2026-11-10T22:01:21Z",
+      "type": "result"
+    },
+    {
+      "candidate": "82c05ef3abe444c1f8f01a0ed11483e526e27f40",
+      "findings": [
+        {
+          "key": "cross-env-restore-backup",
+          "severity": "blocking"
+        },
+        {
+          "key": "compose-allowlist-network-spec",
+          "severity": "advisory"
+        },
+        {
+          "key": "deploy-root-seam",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "devsecops",
+      "round": 4,
+      "spawn": 35,
+      "t": "2026-11-10T22:01:21Z",
+      "type": "result"
+    },
+    {
+      "note": "Candidate 82c05ef: round-1/2 blockers fixed and verified; round-3 blockers (cross-env restore/backup dir, provision beta URL unpinned) with the engineer execution limit reached. Continued in CRM-007R.",
+      "outcome": "ESCALATED",
+      "t": "2026-11-10T22:01:21Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-007",
+  "host": "docker1",
+  "known_commit": "e1f9a6899e82ac5862849db0bf1f00dbcae51244",
+  "limit": 4,
+  "outcome": "ESCALATED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-007",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 4,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-007",
+  "wo": "CRM-007",
+  "worktree": "/srv/CRM/worktrees/CRM-007"
+}
