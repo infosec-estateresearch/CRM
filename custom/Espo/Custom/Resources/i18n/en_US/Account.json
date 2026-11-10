@@ -10,7 +10,8 @@
     },
     "links": {
         "parent": "Head Office",
-        "branches": "Branches"
+        "branches": "Branches",
+        "opportunities": "Enquiries"
     },
     "options": {
         "type": {

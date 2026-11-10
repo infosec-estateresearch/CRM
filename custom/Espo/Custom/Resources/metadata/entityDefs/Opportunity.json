@@ -25,12 +25,14 @@
             "isSorted": false
         },
         "amount": {
+            "required": false,
             "audited": true
         },
         "assignedUser": {
             "audited": true
         },
         "closeDate": {
+            "required": false,
             "audited": true
         },
         "serviceType": {

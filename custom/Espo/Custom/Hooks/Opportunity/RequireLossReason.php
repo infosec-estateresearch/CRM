@@ -12,7 +12,8 @@ use Espo\ORM\Repository\Option\SaveOptions;
  * CRM-004 (R7, D3): an enquiry (Opportunity) cannot be saved as Lost without a
  * loss reason. Two exemptions, both only for records flagged
  * lossReasonLegacyMissing (a Salesforce record closed as lost without a reason):
- * - the API user (ER Import) may write such a record;
+ * - the ER Import API user (type api, userName 'er-import', as in
+ *   config/access/api_users.json) may write such a record; no other API user may;
  * - anyone may save such a record while neither the stage nor the loss reason
  *   is being changed.
  * People cannot set the flag: role fieldData makes it read-only for them.
@@ -37,7 +38,10 @@ class RequireLossReason implements BeforeSave
 
         $legacyMissing = $entity->get('lossReasonLegacyMissing') === true;
 
-        if ($legacyMissing && $this->user->getType() === User::TYPE_API) {
+        $isImportUser = $this->user->getType() === User::TYPE_API &&
+            $this->user->getUserName() === 'er-import';
+
+        if ($legacyMissing && $isImportUser) {
             return;
         }
 

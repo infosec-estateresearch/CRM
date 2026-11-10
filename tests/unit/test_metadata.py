@@ -130,7 +130,8 @@ class TestAccountDefs(unittest.TestCase):
         for name in self.i18n["fields"]:
             self.assertIn(name, self.fields.keys() | CORE_FIELDS["Account"])
         for name in self.i18n["links"]:
-            self.assertIn(name, self.links)
+            # CRM-004 relabels the core opportunities link "Enquiries".
+            self.assertIn(name, set(self.links) | CORE_LINKS["Account"])
 
     def test_enum_translations_match_options(self):
         enums = {n: f for n, f in self.fields.items() if f.get("type") == "enum"}

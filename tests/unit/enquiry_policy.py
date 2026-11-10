@@ -16,6 +16,9 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CUSTOM = os.path.join(REPO, "custom", "Espo", "Custom")
 RES = os.path.join(CUSTOM, "Resources")
 HOOK_PATH = os.path.join(CUSTOM, "Hooks", "Opportunity", "RequireLossReason.php")
+API_USERS_PATH = os.path.join(REPO, "config", "access", "api_users.json")
+# The one API user the loss-reason hook exempts (PL decision, CRM-004 round 2).
+IMPORT_ROLE = "ER Import"
 FILTER_DIR = os.path.join(CUSTOM, "Classes", "Select", "Opportunity", "PrimaryFilters")
 
 # Core Opportunity fields in EspoCRM 10.0.12 (verified by the operator, WO CRM-004).
@@ -44,6 +47,9 @@ CUSTOM_TYPES = dict(
     **{name: "enum" for name in ENUMS})
 LEGACY_FIELDS = ["sfId", "sfStageName", "sfLeadSource", "sfOwnerId", "sfCreatedAt",
                  "legacyStale", "lossReasonLegacyMissing"]
+# Core marks these required; quick create (R8) and the import (fees on only 2-68% of
+# Salesforce enquiries) need them optional (PL decision, CRM-004 round 2).
+NOT_REQUIRED = ["amount", "closeDate"]
 AUDITED = ["stage", "amount", "assignedUser", "closeDate", "lossReason"]
 LIST_LAYOUT = ["name", "account", "stage", "amount", "serviceType", "assignedUser", "closeDate"]
 FILTERS_LAYOUT = ["stage", "assignedUser", "serviceType", "enquiryCategory", "legacyStale"]
@@ -54,9 +60,13 @@ PRIMARY_FILTERS = {"openEnquiries": "OpenEnquiries", "myOpenEnquiries": "MyOpenE
 FILTER_NS = "Espo\\Custom\\Classes\\Select\\Opportunity\\PrimaryFilters"
 
 
-def _load(*parts):
-    with open(os.path.join(RES, *parts), encoding="utf-8") as fh:
+def _json(path):
+    with open(path, encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _load(*parts):
+    return _json(os.path.join(RES, *parts))
 
 
 def _text(path):
@@ -81,6 +91,9 @@ def load_bundle():
                     for name, cls in PRIMARY_FILTERS.items()
                     if os.path.isfile(os.path.join(FILTER_DIR, f"{cls}.php"))},
         "hook": _text(HOOK_PATH),
+        "apiUsers": _json(API_USERS_PATH).get("apiUsers") or [],
+        "accountI18n": _load("i18n", "en_US", "Account.json"),
+        "contactI18n": _load("i18n", "en_US", "Contact.json"),
     }
 
 
@@ -104,7 +117,8 @@ def layout_names(layout):
 
 def loss_reason_allowed(stage, loss_reason, legacy_missing, stage_changed, reason_changed,
                         is_api_user):
-    """WO CRM-004 item 4: may an Opportunity be saved?"""
+    """WO CRM-004 item 4: may an Opportunity be saved? is_api_user means the named
+    ER Import API user (type api and userName 'er-import'), not any API user."""
     if stage != "Lost":
         return True
     if loss_reason:
@@ -154,6 +168,12 @@ def rule_custom_fields(b):
 def rule_audited(b):
     return [f"{n} is not audited" for n in AUDITED
             if (_fields(b).get(n) or {}).get("audited") is not True]
+
+
+def rule_fee_and_close_date_optional(b):
+    """amount and closeDate are core-required; the custom defs must set required false."""
+    return [f"{n}: must set \"required\": false (core default is required)" for n in NOT_REQUIRED
+            if (_fields(b).get(n) or {}).get("required") is not False]
 
 
 def rule_legacy_fields(b):
@@ -327,6 +347,9 @@ def rule_labels(b):
     for name in CUSTOM_TYPES:
         if name not in (i18n.get("fields") or {}):
             out.append(f"no label for {name}")
+    for key in ("accountI18n", "contactI18n"):
+        if ((b.get(key) or {}).get("links") or {}).get("opportunities") != "Enquiries":
+            out.append(f"{key}: links.opportunities must be labelled 'Enquiries'")
     for name, f in _fields(b).items():
         if f.get("type") == "enum" and set((i18n.get("options") or {}).get(name) or {}) != \
                 set(f.get("options") or []):
@@ -342,8 +365,9 @@ _HOOK_BODY = re.compile(r"""
 \s*if\s*\(\s*\$entity->get\('stage'\)\s*!==\s*'Lost'\s*\)\s*\{\s*return\s*;\s*\}
 \s*if\s*\(\s*\(string\)\s*\$entity->get\('lossReason'\)\s*!==\s*''\s*\)\s*\{\s*return\s*;\s*\}
 \s*\$legacyMissing\s*=\s*\$entity->get\('lossReasonLegacyMissing'\)\s*===\s*true\s*;
-\s*if\s*\(\s*\$legacyMissing\s*&&\s*\$this->user->getType\(\)\s*===\s*User::TYPE_API\s*\)
-\s*\{\s*return\s*;\s*\}
+\s*\$isImportUser\s*=\s*\$this->user->getType\(\)\s*===\s*User::TYPE_API\s*&&
+\s*\$this->user->getUserName\(\)\s*===\s*'(?P<user>[^'\\]+)'\s*;
+\s*if\s*\(\s*\$legacyMissing\s*&&\s*\$isImportUser\s*\)\s*\{\s*return\s*;\s*\}
 \s*\$unchanged\s*=\s*!\$entity->isAttributeChanged\('stage'\)\s*&&
 \s*!\$entity->isAttributeChanged\('lossReason'\)\s*;
 \s*if\s*\(\s*\$legacyMissing\s*&&\s*\$unchanged\s*\)\s*\{\s*return\s*;\s*\}
@@ -379,10 +403,21 @@ def rule_hook_shape(b):
     return out
 
 
+def import_user_names(b):
+    """userNames of the API users holding the ER Import role (config/access/api_users.json)."""
+    return [u.get("userName") for u in b.get("apiUsers") or []
+            if isinstance(u, dict) and IMPORT_ROLE in (u.get("roles") or [])]
+
+
 def rule_hook_body(b):
     body = _method_body(_php(b.get("hook") or ""), "beforeSave")
-    if body is None or not _HOOK_BODY.fullmatch(body):
+    match = _HOOK_BODY.fullmatch(body) if body is not None else None
+    if not match:
         return ["beforeSave is not exactly the loss-reason rule (see loss_reason_allowed)"]
+    names = import_user_names(b)
+    if names != [match.group("user")]:
+        return [f"hook exempts API user {match.group('user')!r}, but the ER Import API users "
+                f"in api_users.json are {names}"]
     return []
 
 
@@ -390,6 +425,7 @@ RULES = {
     "stage": rule_stage,
     "custom_fields": rule_custom_fields,
     "audited": rule_audited,
+    "fee_and_close_date_optional": rule_fee_and_close_date_optional,
     "legacy_fields": rule_legacy_fields,
     "service_type_entity": rule_service_type_entity,
     "dynamic_logic": rule_dynamic_logic,

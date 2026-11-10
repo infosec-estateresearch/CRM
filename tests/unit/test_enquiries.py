@@ -121,14 +121,27 @@ BROKEN = {
                              {"hook_shape"}),
     "hook_no_throw": (_hook("throw new BadRequest('A lost enquiry needs a loss reason.');", ""),
                       {"hook_body"}),
-    "hook_api_bypass_without_flag": (_hook("if ($legacyMissing && $this->user->getType()",
-                                           "if ($legacyMissing || $this->user->getType()"),
+    "hook_api_bypass_without_flag": (_hook("if ($legacyMissing && $isImportUser)",
+                                           "if ($legacyMissing || $isImportUser)"),
                                      {"hook_body"}),
     "hook_flag_alone_exempts": (_hook("if ($legacyMissing && $unchanged)",
                                       "if ($legacyMissing)"), {"hook_body"}),
     "hook_commented_throw": (_hook("throw new BadRequest(", "// throw new BadRequest("),
                              {"hook_body"}),
     "hook_wrong_stage": (_hook("!== 'Lost'", "!== 'Closed Lost'"), {"hook_body"}),
+    # CRM-004 round 2
+    "amount_required": (_set(["defs", "fields", "amount", "required"], True),
+                        {"fee_and_close_date_optional"}),
+    "close_date_required_by_core": (_del(["defs", "fields", "closeDate", "required"]),
+                                    {"fee_and_close_date_optional"}),
+    "hook_any_api_user_exempt": (_hook("User::TYPE_API &&\n"
+                                       "            $this->user->getUserName() === 'er-import';",
+                                       "User::TYPE_API;"), {"hook_body"}),
+    "hook_other_user_name": (_hook("=== 'er-import'", "=== 'sync-bot'"), {"hook_body"}),
+    "api_user_renamed": (_set(["apiUsers", 0, "userName"], "er-loader"), {"hook_body"}),
+    "account_link_not_relabelled": (_del(["accountI18n", "links", "opportunities"]), {"labels"}),
+    "contact_link_not_relabelled": (_set(["contactI18n", "links", "opportunities"],
+                                         "Opportunities"), {"labels"}),
 }
 
 
@@ -171,6 +184,17 @@ class TestRepository(unittest.TestCase):
                               "stream": "all"}, name)
         self.assertEqual(roles["ER Import"]["data"]["ServiceType"]["delete"], "no")
         self.assertEqual(roles["ER Import"]["data"]["ServiceType"]["create"], "yes")
+
+    def test_fee_and_close_date_not_required_but_audited(self):
+        fields = _fields(policy.load_bundle())
+        for name in ("amount", "closeDate"):
+            self.assertIs(fields[name]["required"], False, name)
+            self.assertIs(fields[name]["audited"], True, name)
+
+    def test_hook_exempts_only_the_named_import_user(self):
+        b = policy.load_bundle()
+        self.assertEqual(policy.import_user_names(b), ["er-import"])
+        self.assertIn("getUserName() === 'er-import'", b["hook"])
 
     def test_contact_metadata_unchanged(self):
         # The Salesforce contact roles are stored raw by the importer; Contact's

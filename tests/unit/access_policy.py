@@ -279,12 +279,16 @@ def rule_matches_work_order_table(doc):
     return out
 
 
+# CRM-004 (round 2): Opportunity.sfId is hidden from people as well.
+SF_ID_HIDDEN_ENTITIES = SF_KEY_ENTITIES + ["Opportunity"]
+
+
 def rule_sf_id_admin_only(doc):
-    """Human roles cannot read or edit sfId on User, Account or Contact."""
+    """Human roles cannot read or edit sfId on User, Account, Contact or Opportunity."""
     out = []
     for name in NON_ADMIN_HUMAN_ROLES:
         field_data = (_roles(doc).get(name) or {}).get("fieldData") or {}
-        for entity in SF_KEY_ENTITIES:
+        for entity in SF_ID_HIDDEN_ENTITIES:
             if (field_data.get(entity) or {}).get("sfId") != {"read": "no", "edit": "no"}:
                 out.append(f"{name}: {entity}.sfId is not hidden (read no, edit no)")
     return out

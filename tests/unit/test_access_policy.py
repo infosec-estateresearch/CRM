@@ -71,6 +71,8 @@ BROKEN_ACCESS = {
                                                     "matches_work_order_table"},
     "access_bad_staff_edits_legacy_stale.json": {"sf_fields_read_only_for_people"},
     "access_bad_import_cannot_edit_legacy.json": {"import_edits_sf_fields"},
+    # CRM-004 round 2: a human role reading Opportunity.sfId
+    "access_bad_opportunity_sfid_readable.json": {"sf_id_admin_only"},
 }
 BROKEN_KEYS = {
     "keys_bad_sfid_writable.json": {"sf_id_field"},
