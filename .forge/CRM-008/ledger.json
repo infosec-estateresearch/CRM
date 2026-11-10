@@ -1,0 +1,509 @@
+{
+  "base": "forge/CRM-003-F",
+  "base_sha": "dfe1d55f658b40082403f716c56b2b378fcf4163",
+  "branch": "forge/CRM-008",
+  "candidate": "f86cc0b028a3ac673e72605fd34ce89ea8d6146a",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 3,
+    "devsecops": 3,
+    "engineer": 4,
+    "tester": 3
+  },
+  "created": "2026-11-10T22:00:07Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T22:00:07Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T22:07:47Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "Changes 1-9 done with mutation evidence; unit 333, load 144 OK; gaps: A2 fake extensions, full-selftest e2e",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T22:08:05Z",
+      "type": "result"
+    },
+    {
+      "candidate": null,
+      "id": 3,
+      "n": 2,
+      "role": "engineer",
+      "round": 2,
+      "t": "2026-11-10T22:08:05Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/3-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 3,
+      "t": "2026-11-10T22:13:56Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "R2: faithful fake (owner/maxLength/currency/email refusals), full selftest e2e: run1 0 write_rejected, run2 0 writes; unit 333, load 150 OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 2,
+      "spawn": 3,
+      "t": "2026-11-10T22:14:15Z",
+      "type": "result"
+    },
+    {
+      "round": 2,
+      "sha": "68c32e2f59b45b1a1058873e46f55e3b3e6778b0",
+      "t": "2026-11-10T22:14:16Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "68c32e2f59b45b1a1058873e46f55e3b3e6778b0",
+      "id": 7,
+      "n": 1,
+      "role": "auditor",
+      "round": 2,
+      "t": "2026-11-10T22:14:16Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "68c32e2f59b45b1a1058873e46f55e3b3e6778b0",
+      "id": 8,
+      "n": 1,
+      "role": "tester",
+      "round": 2,
+      "t": "2026-11-10T22:14:16Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "68c32e2f59b45b1a1058873e46f55e3b3e6778b0",
+      "id": 9,
+      "n": 1,
+      "role": "devsecops",
+      "round": 2,
+      "t": "2026-11-10T22:14:16Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/7-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 7,
+      "t": "2026-11-10T22:23:54Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/8-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 8,
+      "t": "2026-11-10T22:23:54Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/9-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 9,
+      "t": "2026-11-10T22:23:54Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "68c32e2f59b45b1a1058873e46f55e3b3e6778b0",
+      "findings": [
+        {
+          "key": "import-md-settings-undocumented",
+          "severity": "blocking"
+        },
+        {
+          "key": "owner-not-required-untested",
+          "severity": "advisory"
+        },
+        {
+          "key": "null-required-name",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 2,
+      "spawn": 7,
+      "t": "2026-11-10T22:24:30Z",
+      "type": "result"
+    },
+    {
+      "candidate": "68c32e2f59b45b1a1058873e46f55e3b3e6778b0",
+      "findings": [
+        {
+          "key": "required-attr-nulled",
+          "severity": "advisory"
+        },
+        {
+          "key": "servicetype-attr-ambiguous",
+          "severity": "advisory"
+        },
+        {
+          "key": "exec-no-shebang",
+          "severity": "advisory"
+        },
+        {
+          "key": "email-stricter-than-php",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 2,
+      "spawn": 8,
+      "t": "2026-11-10T22:24:31Z",
+      "type": "result"
+    },
+    {
+      "candidate": "68c32e2f59b45b1a1058873e46f55e3b3e6778b0",
+      "findings": [
+        {
+          "key": "email-validator-stricter-than-php",
+          "severity": "advisory"
+        },
+        {
+          "key": "too-long-null-on-update",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 2,
+      "spawn": 9,
+      "t": "2026-11-10T22:24:31Z",
+      "type": "result"
+    },
+    {
+      "candidate": "68c32e2f59b45b1a1058873e46f55e3b3e6778b0",
+      "id": 16,
+      "n": 3,
+      "role": "engineer",
+      "round": 3,
+      "t": "2026-11-10T22:24:31Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/16-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 16,
+      "t": "2026-11-10T22:29:09Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "68c32e2f59b45b1a1058873e46f55e3b3e6778b0",
+      "findings": [],
+      "note": "R3: IMPORT.md settings prerequisites, required over-length refuses record, qualified attribute names, owner tests, notes; unit 333, load 155 OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 3,
+      "spawn": 16,
+      "t": "2026-11-10T22:29:26Z",
+      "type": "result"
+    },
+    {
+      "round": 3,
+      "sha": "ea07c2f25ff37160633573dd953979a9519ce763",
+      "t": "2026-11-10T22:29:26Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "ea07c2f25ff37160633573dd953979a9519ce763",
+      "id": 20,
+      "n": 2,
+      "role": "auditor",
+      "round": 3,
+      "t": "2026-11-10T22:29:26Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "ea07c2f25ff37160633573dd953979a9519ce763",
+      "id": 21,
+      "n": 2,
+      "role": "tester",
+      "round": 3,
+      "t": "2026-11-10T22:29:26Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "ea07c2f25ff37160633573dd953979a9519ce763",
+      "id": 22,
+      "n": 2,
+      "role": "devsecops",
+      "round": 3,
+      "t": "2026-11-10T22:29:26Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/20-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 20,
+      "t": "2026-11-10T22:39:59Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/21-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 21,
+      "t": "2026-11-10T22:39:59Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/22-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 22,
+      "t": "2026-11-10T22:39:59Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "ea07c2f25ff37160633573dd953979a9519ce763",
+      "findings": [
+        {
+          "key": "refused-account-second-pass-write",
+          "severity": "blocking"
+        },
+        {
+          "key": "service-type-silent-null",
+          "severity": "advisory"
+        },
+        {
+          "key": "import-md-table-split",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 3,
+      "spawn": 20,
+      "t": "2026-11-10T22:40:21Z",
+      "type": "result"
+    },
+    {
+      "candidate": "ea07c2f25ff37160633573dd953979a9519ce763",
+      "findings": [
+        {
+          "key": "import-md-table-split",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 3,
+      "spawn": 21,
+      "t": "2026-11-10T22:40:21Z",
+      "type": "result"
+    },
+    {
+      "candidate": "ea07c2f25ff37160633573dd953979a9519ce763",
+      "findings": [
+        {
+          "key": "import-md-table",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 3,
+      "spawn": 22,
+      "t": "2026-11-10T22:40:21Z",
+      "type": "result"
+    },
+    {
+      "candidate": "ea07c2f25ff37160633573dd953979a9519ce763",
+      "id": 29,
+      "n": 4,
+      "role": "engineer",
+      "round": 4,
+      "t": "2026-11-10T22:40:21Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/29-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 29,
+      "t": "2026-11-10T22:43:32Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "ea07c2f25ff37160633573dd953979a9519ce763",
+      "findings": [],
+      "note": "R4: refused records skip every later pass, service_type_refused per Opportunity, IMPORT.md table; unit 333, load 158 OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 4,
+      "spawn": 29,
+      "t": "2026-11-10T22:43:47Z",
+      "type": "result"
+    },
+    {
+      "round": 4,
+      "sha": "f86cc0b028a3ac673e72605fd34ce89ea8d6146a",
+      "t": "2026-11-10T22:43:47Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "f86cc0b028a3ac673e72605fd34ce89ea8d6146a",
+      "id": 33,
+      "n": 3,
+      "role": "auditor",
+      "round": 4,
+      "t": "2026-11-10T22:43:47Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "f86cc0b028a3ac673e72605fd34ce89ea8d6146a",
+      "id": 34,
+      "n": 3,
+      "role": "tester",
+      "round": 4,
+      "t": "2026-11-10T22:43:47Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "f86cc0b028a3ac673e72605fd34ce89ea8d6146a",
+      "id": 35,
+      "n": 3,
+      "role": "devsecops",
+      "round": 4,
+      "t": "2026-11-10T22:43:47Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/33-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 33,
+      "t": "2026-11-10T22:48:50Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/34-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 34,
+      "t": "2026-11-10T22:48:50Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/35-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 35,
+      "t": "2026-11-10T22:48:50Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "f86cc0b028a3ac673e72605fd34ce89ea8d6146a",
+      "findings": [],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 4,
+      "spawn": 33,
+      "t": "2026-11-10T22:49:14Z",
+      "type": "result"
+    },
+    {
+      "candidate": "f86cc0b028a3ac673e72605fd34ce89ea8d6146a",
+      "findings": [],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 4,
+      "spawn": 35,
+      "t": "2026-11-10T22:49:14Z",
+      "type": "result"
+    },
+    {
+      "candidate": "f86cc0b028a3ac673e72605fd34ce89ea8d6146a",
+      "findings": [
+        {
+          "key": "value-shape-opp-roles",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 4,
+      "spawn": 34,
+      "t": "2026-11-10T22:49:21Z",
+      "type": "result"
+    },
+    {
+      "note": "Candidate f86cc0b: round 3 Auditor/DevSecOps PASS, Tester advisory only (pre-existing value_shape Opportunity contact-role write)",
+      "outcome": "DELIVERED",
+      "t": "2026-11-10T22:49:22Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-008",
+  "host": "docker1",
+  "known_commit": "dfe1d55f658b40082403f716c56b2b378fcf4163",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-008",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 4,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-008",
+  "wo": "CRM-008",
+  "worktree": "/srv/CRM/worktrees/CRM-008"
+}
