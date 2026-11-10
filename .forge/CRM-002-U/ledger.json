@@ -1,0 +1,183 @@
+{
+  "base": "forge/CRM-002-T",
+  "base_sha": "ecf2a169ecd4da1f11147cd122d785ad3f66cfbf",
+  "branch": "forge/CRM-002-U",
+  "candidate": "63c93d0fa9fe059cf6428b5678fab172d75cbd8e",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-10T19:24:21Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T19:24:27Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T19:28:49Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r1: contract v3 (4 L1 corrections), mismatch reports described type names, full selftest test; L1-shaped fixture passes v3 gate",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T19:29:24Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "63c93d0fa9fe059cf6428b5678fab172d75cbd8e",
+      "t": "2026-11-10T19:29:24Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "63c93d0fa9fe059cf6428b5678fab172d75cbd8e",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-10T19:29:30Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "63c93d0fa9fe059cf6428b5678fab172d75cbd8e",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-10T19:29:30Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "63c93d0fa9fe059cf6428b5678fab172d75cbd8e",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-10T19:29:30Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-10T19:32:55Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-10T19:32:55Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-10T19:32:55Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "63c93d0fa9fe059cf6428b5678fab172d75cbd8e",
+      "findings": [
+        {
+          "key": "expected-reference-to-extra-key",
+          "severity": "advisory"
+        },
+        {
+          "key": "no-forge-evidence",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-10T19:33:22Z",
+      "type": "result"
+    },
+    {
+      "candidate": "63c93d0fa9fe059cf6428b5678fab172d75cbd8e",
+      "findings": [
+        {
+          "key": "ref-unhashable-crash",
+          "severity": "advisory"
+        },
+        {
+          "key": "oos-3-float-version",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-10T19:33:22Z",
+      "type": "result"
+    },
+    {
+      "candidate": "63c93d0fa9fe059cf6428b5678fab172d75cbd8e",
+      "findings": [
+        {
+          "key": "version-float",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-10T19:33:22Z",
+      "type": "result"
+    },
+    {
+      "note": "Candidate 63c93d0: all PASS at round 1. Next: O1 and L1 re-run on the delivered commit.",
+      "outcome": "DELIVERED",
+      "t": "2026-11-10T19:33:22Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-002-U",
+  "host": "docker1",
+  "known_commit": "ecf2a169ecd4da1f11147cd122d785ad3f66cfbf",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-002-U",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-002-U",
+  "wo": "CRM-002-U",
+  "worktree": "/srv/CRM/worktrees/CRM-002-U"
+}

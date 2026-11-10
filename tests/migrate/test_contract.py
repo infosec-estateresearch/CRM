@@ -1,4 +1,4 @@
-"""Contract v2 content and the contract-to-SOQL rule (WO Change 1, AC2)."""
+"""Contract v3 content and the contract-to-SOQL rule (WO Change 1, AC2)."""
 
 import copy
 import datetime as dt
@@ -24,8 +24,7 @@ WO_TABLE = {
                + " ".join("Mailing" + a for a in ADDR)
                + " OwnerId IsDeleted CreatedDate CreatedById LastModifiedDate SystemModstamp",
     "Opportunity": "Id AccountId Name StageName Amount Probability CloseDate Type LeadSource Description OwnerId "
-                   "IsClosed IsWon Loss_Reason__c Paid_geneology_enquiry__c Opportunity_Service__c Post_code__c "
-                   "Key_Information__c IsDeleted CreatedDate CreatedById LastModifiedDate SystemModstamp",
+                   "IsClosed IsWon Loss_Reason__c Paid_geneology_enquiry__c Opportunity_Service__c IsDeleted CreatedDate CreatedById LastModifiedDate SystemModstamp",
     "OpportunityContactRole": "Id OpportunityId ContactId Role IsPrimary IsDeleted CreatedDate SystemModstamp",
     "Task": "Id AccountId WhoId WhatId OwnerId Subject Status Priority ActivityDate Description TaskSubtype CallType "
             "CallDurationInSeconds CallDisposition CompletedDateTime IsClosed IsArchived IsRecurrence IsDeleted "
@@ -40,8 +39,7 @@ WO_TABLE = {
                             "CreatedDate SystemModstamp",
     "Note": "Id ParentId Title Body OwnerId IsPrivate IsDeleted CreatedDate LastModifiedDate SystemModstamp",
 }
-OPTIONAL = {("Opportunity", "Opportunity_Service__c"), ("Opportunity", "Post_code__c"),
-            ("Opportunity", "Key_Information__c"), ("Task", "IsArchived"), ("Event", "IsArchived"),
+OPTIONAL = {("Opportunity", "Opportunity_Service__c"), ("Task", "IsArchived"), ("Event", "IsArchived"),
             ("Account", "MasterRecordId"), ("Contact", "MasterRecordId"),
             ("EmailMessage", "MessageIdentifier"), ("EmailMessage", "ThreadIdentifier")}
 OWNER_CHECK = {"Account", "Contact", "Opportunity", "Task", "Event", "Note"}
@@ -50,7 +48,7 @@ OWNER_CHECK = {"Account", "Contact", "Opportunity", "Task", "Event", "Note"}
 class ContractContentTest(unittest.TestCase):
     def test_objects_and_fields_match_the_work_order_table(self):
         c = contract()
-        self.assertEqual(c.version, 2)
+        self.assertEqual(c.version, 3)
         self.assertEqual(list(c.object_names), list(WO_TABLE))
         for obj in c.objects:
             self.assertEqual(list(obj.field_names), WO_TABLE[obj.name].split(), obj.name)
@@ -98,7 +96,7 @@ class ContractValidationTest(unittest.TestCase):
         return next(f for f in self.obj(doc, obj)["fields"] if f["name"] == name)
 
     def test_real_contract_parses(self):
-        self.assertEqual(contract_from_doc(self.doc).version, 2)
+        self.assertEqual(contract_from_doc(self.doc).version, 3)
 
     def test_broken_contracts_are_refused(self):
         cases = {

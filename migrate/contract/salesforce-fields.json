@@ -1,6 +1,6 @@
 {
   "contract": "crm-migrate source-field contract",
-  "contractVersion": 2,
+  "contractVersion": 3,
   "workOrder": "CRM-002 v1.2",
   "notes": [
     "SOQL is built only from this file. Compound address fields are never selected; only their components.",
@@ -339,7 +339,7 @@
         },
         {
           "name": "Interested_in_integration__c",
-          "type": "boolean",
+          "type": "picklist",
           "purpose": "M1 mapping (custom field)",
           "required": true
         },
@@ -642,18 +642,6 @@
           "name": "Opportunity_Service__c",
           "type": "picklist",
           "purpose": "R7 service type reference list",
-          "required": false
-        },
-        {
-          "name": "Post_code__c",
-          "type": "string",
-          "purpose": "R7 postcode",
-          "required": false
-        },
-        {
-          "name": "Key_Information__c",
-          "type": "textarea",
-          "purpose": "R7 key information",
           "required": false
         },
         {
@@ -1259,7 +1247,7 @@
         },
         {
           "name": "RelationAddress",
-          "type": "email",
+          "type": "string",
           "purpose": "R11 unknown senders allowed",
           "required": true
         },
