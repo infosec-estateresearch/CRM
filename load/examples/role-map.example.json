@@ -1,0 +1,17 @@
+{
+    "_comment": "Operator-supplied Profile/Role -> EspoCRM teams and roles table for 'crm-load users'. Placeholders only: replace the keys with the Salesforce Profile and UserRole names. Teams and roles must exist in config/access. legacyShared lists the sfIds of shared logins (D4), made inactive and assigned to legacyShared.teams.",
+    "profiles": {
+        "<Salesforce Profile name A>": {"teams": ["Enquiries"], "roles": ["ER Staff"]},
+        "<Salesforce Profile name B>": {"teams": ["Firm management"], "roles": ["ER Manager"]}
+    },
+    "userRoles": {
+        "<Salesforce UserRole name C>": {"teams": ["Ancillary intake"], "roles": ["ER Intake"]}
+    },
+    "legacyShared": {
+        "sfIds": ["<18-character User sfId of the shared Ancillary Services login>"],
+        "firstName": "Ancillary Services",
+        "lastName": "(shared, legacy)",
+        "teams": ["Ancillary intake"],
+        "roles": []
+    }
+}

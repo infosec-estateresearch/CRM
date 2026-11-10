@@ -51,11 +51,13 @@ READ_ONLY_SCOPES = ["Currency", "Document", "DocumentFolder", "User", "Team"]
 # Added by CRM-004: reference data that admins maintain. Human roles read all and
 # change nothing (admins bypass role ACL); ER Import creates and edits, never deletes.
 ADMIN_MANAGED_SCOPES = ["ServiceType"]
-# Boolean scopes for the human roles; ER Import has every boolean scope false.
+# Boolean scopes for the human roles; ER Import has every boolean scope false except
+# Import (CRM-006): EspoCRM 10.0.12 CheckFromAddress refuses a non-admin creating an
+# Email whose from is not their own unless the Import scope is granted.
 HUMAN_BOOLEAN = {"Activities": True, "Calendar": True, "GlobalStream": True,
                  "WorkingTimeCalendar": True, "Import": False, "Webhook": False,
                  "OpenApi": False, "ExternalAccount": False, "EmailAccountScope": False}
-IMPORT_BOOLEAN = {s: False for s in ACL_BOOLEAN_SCOPES}
+IMPORT_BOOLEAN = dict({s: False for s in ACL_BOOLEAN_SCOPES}, Import=True)
 ACTIONS = ["create", "read", "edit", "delete", "stream"]
 LEVELS = {"create": {"yes", "no"}, "read": {"all", "team", "own", "no"},
           "edit": {"all", "team", "own", "no"}, "delete": {"all", "team", "own", "no"},

@@ -197,12 +197,19 @@ class TestRepository(unittest.TestCase):
         self.assertIn("getUserName() === 'er-import'", b["hook"])
 
     def test_contact_metadata_unchanged(self):
-        # The Salesforce contact roles are stored raw by the importer; Contact's
-        # opportunityRole options are not changed by CRM-004.
+        # CRM-006R: Contact.opportunityRole options are the Salesforce
+        # OpportunityContactRole.Role picklist read at L1 (the CRM-004 deferral);
+        # core validates contactsColumns.role against them. Nothing else changes.
         with open(os.path.join(policy.RES, "metadata", "entityDefs", "Contact.json"),
                   encoding="utf-8") as fh:
             contact = json.load(fh)
-        self.assertNotIn("opportunityRole", contact.get("fields", {}))
+        self.assertEqual(contact["fields"]["opportunityRole"],
+                         {"options": ["", "Business User", "Decision Maker", "Economic Buyer",
+                                      "Economic Decision Maker", "Evaluator", "Executive Sponsor",
+                                      "Influencer", "Technical Buyer", "Other"]})
+        self.assertEqual(set(contact["fields"]),
+                         {"account", "emailAddress", "opportunityRole", "sfId", "sfOwnerId",
+                          "sfCreatedAt"})
 
     def test_every_new_json_file_names_only_opportunity_or_service_type(self):
         for kind in ("entityDefs", "clientDefs", "logicDefs", "selectDefs", "scopes"):
