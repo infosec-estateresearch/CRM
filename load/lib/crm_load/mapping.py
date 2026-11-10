@@ -36,6 +36,9 @@ EXCEPTION_CODES = frozenset({
     # CRM-008
     "owner_required_unresolved", "task_email_imported_as_task", "value_too_long",
     "email_address_invalid", "email_from_invalid", "service_type_refused",
+    # CRM-008-F
+    "title_unstorable_without_account", "date_completed_not_storable",
+    "email_without_recipient_imported_as_task", "owner_from_created_by", "priority_server_default",
 })
 # Codes that refuse the record: it is never sent (CRM-008).
 REFUSING_CODES = frozenset({"owner_required_unresolved", "email_from_invalid"})
@@ -323,6 +326,12 @@ class Mapper:
         attrs["phoneNumberData"] = self.phones(row, exc)
         attrs.update(self._legacy(row, ctx, exc))
         attrs["accountId"] = self.ref("Account", row.get("AccountId"), ctx, exc, "account_unresolved")
+        if attrs["accountId"] is None:
+            # CRM-008-F fact 2: EspoCRM stores a Contact's title through its account link; without
+            # one it reads back null. It is not sent, and not compared.
+            if attrs.get("title") is not None:
+                exc.append("title_unstorable_without_account")
+            attrs.pop("title", None)
         return attrs, exc
 
     def opportunity(self, row, ctx):
@@ -399,7 +408,12 @@ class Mapper:
             if not blank(prio) and attrs["priority"] is None:
                 exc.append("enum_unmapped")
             attrs["dateEndDate"] = self._date(row.get("ActivityDate"), exc)
-            attrs["dateCompleted"] = self._dt(row.get("CompletedDateTime"), exc)
+            # CRM-008-F fact 3: dateCompleted is kept only with status Completed; otherwise it reads
+            # back null, so it is neither sent nor compared.
+            if attrs["status"] == "Completed":
+                attrs["dateCompleted"] = completed
+            elif completed is not None:
+                exc.append("date_completed_not_storable")
             attrs["description"] = text(row.get("Description"))
         elif entity == "Call":
             attrs["status"] = self.m["callStatus"]
@@ -501,7 +515,57 @@ class Mapper:
         attrs["sfEmailMessageId"] = row["Id"]
         attrs["sfThreadIdentifier"] = text(row.get("ThreadIdentifier"))
         attrs["sfActivityId"] = text(row.get("ActivityId"))
-        # parent: RelatedToId (Opportunity/Account), else the linked Task's parent
+        attrs["parentType"], attrs["parentId"] = self._email_parent(row, task_rows, ctx, exc)
+        users = []
+        for rel in relations:
+            rid = rel.get("RelationId")
+            if self.object_of(rid) == "User":
+                uid = ctx.user_id(rid)
+                if uid is not None and uid not in users:
+                    users.append(uid)
+        attrs["usersIds"] = sorted(users)
+        attrs["assignedUserId"] = None
+        attrs["sfOwnerId"] = None
+        return attrs, exc
+
+    def email_message_as_task(self, row, task_rows, ctx):
+        """CRM-008-F change 4: an EmailMessage whose To list is empty after validation (Email.to
+        is required) -> Task, as the CRM-008 Task-Email rule: Subject is the name, TextBody the
+        description, status Completed, dateCompleted from MessageDate, the parent as for the Email.
+        The owner is the linked Task's (ActivityId); if there is none or it doesn't resolve, the
+        EmailMessage's CreatedById when it is a provisioned user (owner_from_created_by, a recorded
+        fact); otherwise the record is refused (owner_required_unresolved). Never guessed.
+        priority has no source and is not sent: core default Normal (priority_server_default)."""
+        exc = []
+        addresses(row.get("ToAddress"), exc)
+        addresses(row.get("CcAddress"), exc)
+        attrs = self._legacy(row, ctx, exc, owner=False)
+        linked = task_rows.get(row.get("ActivityId")) if isinstance(row.get("ActivityId"), str) else None
+        owner_exc = []
+        attrs["sfOwnerId"] = text(linked.get("OwnerId")) if linked else None
+        attrs["assignedUserId"] = self.owner(linked, ctx, owner_exc) if linked else None
+        created_by = row.get("CreatedById")
+        if attrs["assignedUserId"] is None and isinstance(created_by, str) and ctx.user_id(created_by) is not None:
+            # Fallback (CRM-008-F round 2): the Salesforce user who logged the message. The linked
+            # Task's owner_unresolved/owner_queue_or_group is dropped: the record has an owner.
+            attrs["sfOwnerId"] = created_by
+            attrs["assignedUserId"] = ctx.user_id(created_by)
+            exc.append("owner_from_created_by")
+        else:
+            exc.extend(owner_exc)
+        self.require_owner(attrs, exc)
+        exc.append("priority_server_default")
+        attrs["name"] = text(row.get("Subject"))
+        attrs["status"] = "Completed"
+        attrs["dateEndDate"] = None
+        attrs["dateCompleted"] = self._dt(row.get("MessageDate"), exc)
+        attrs["description"] = text(row.get("TextBody"))
+        attrs["parentType"], attrs["parentId"] = self._email_parent(row, task_rows, ctx, exc)
+        exc.append("email_without_recipient_imported_as_task")
+        return attrs, exc
+
+    def _email_parent(self, row, task_rows, ctx, exc):
+        """parent: RelatedToId (Opportunity/Account), else the linked Task's parent."""
         ptype = pid = None
         related = row.get("RelatedToId")
         deleted = False
@@ -518,15 +582,4 @@ class Mapper:
             exc.append("parent_soft_deleted_in_sf")
         elif pid is None and (not blank(related) or not blank(row.get("ActivityId"))):
             exc.append("activity_parent_unresolved")
-        attrs["parentType"], attrs["parentId"] = ptype, pid
-        users = []
-        for rel in relations:
-            rid = rel.get("RelationId")
-            if self.object_of(rid) == "User":
-                uid = ctx.user_id(rid)
-                if uid is not None and uid not in users:
-                    users.append(uid)
-        attrs["usersIds"] = sorted(users)
-        attrs["assignedUserId"] = None
-        attrs["sfOwnerId"] = None
-        return attrs, exc
+        return ptype, pid

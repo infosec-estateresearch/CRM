@@ -228,6 +228,9 @@ class Loader:
             return ["sfId"]
         attrs = list(spec.get("copy", {})) + list(spec.get("enum", {})) + spec.get("attributes", [])
         attrs += spec.get("secondPass", [])
+        if "phoneNumberData" in attrs:
+            # List reads omit phoneNumberData (CRM-008-F fact 1); phoneNumber is the primary.
+            attrs.append("phoneNumber")
         return list(dict.fromkeys([spec.get("key", "sfId")] + attrs))
 
     def build_index(self):
@@ -345,6 +348,9 @@ class Loader:
                             merged.update(v or {})
                             if merged != (old or {}):
                                 diff[a] = merged
+                    elif a == "phoneNumberData" and a not in existing:
+                        if not self._phones_same(entity, existing, v):
+                            diff[a] = None if _norm(v) is None else v
                     elif not same_value(a, v, old, a in text, entity):
                         diff[a] = None if _norm(v) is None else v
                 if diff:
@@ -384,6 +390,20 @@ class Loader:
         return self.index[entity].get(key)
 
     # ---------------------------------------------------------------- phones
+    def _phones_same(self, entity, existing, new):
+        """CRM-008-F change 1: a list row has no phoneNumberData, only phoneNumber (the primary).
+        A different primary needs a write; one source number equal to it needs none; with two or
+        more numbers the record is read once (GET {Entity}/{id}) and the full set compared."""
+        numbers = [p for p in new or [] if isinstance(p, dict)]
+        primary = next((_phone_text(p.get("phoneNumber")) for p in numbers if p.get("primary") is True), None)
+        if _norm(primary) != _norm(_phone_text(existing.get("phoneNumber"))):
+            return False
+        if len(numbers) <= 1:
+            return True
+        stored = self.client.get(entity, existing["id"]).get("phoneNumberData")
+        existing["phoneNumberData"] = stored
+        return same_value("phoneNumberData", new, stored)
+
     def _known_refusals(self, obj, sf_id, attrs):
         """Drop numbers the server refused before (same sfId, field and value): never retried."""
         memory = self.refused_before | self.refused
@@ -558,6 +578,16 @@ class Loader:
             relations.setdefault(rel.get("EmailMessageId"), []).append(rel)
         for r in emails:
             attrs, exc = m.email_message(r, relations.get(r["Id"], []), task_by_id, ctx)
+            if attrs["to"] is None:
+                if r["Id"] not in self.index["Email"]:
+                    # CRM-008-F change 4: Email.to is required; no recipient -> a Task.
+                    attrs, exc = m.email_message_as_task(r, task_by_id, ctx)
+                    if self._record_exc("EmailMessage", r, exc):
+                        continue
+                    self.upsert("email_message", "EmailMessage", r["Id"], "Task", r["Id"], attrs)
+                    continue
+                # An Email from an earlier run stays an Email; null to would be refused (400).
+                del attrs["to"]
             if self._record_exc("EmailMessage", r, exc):
                 continue
             self.upsert("email_message", "EmailMessage", r["Id"], "Email", r["Id"], attrs)
@@ -612,7 +642,7 @@ class Loader:
         deleted = {}
         for obj, entities in (("Account", ("Account",)), ("Contact", ("Contact",)),
                               ("Opportunity", ("Opportunity",)), ("Task", ("Task", "Call", "Email")),
-                              ("Event", ("Meeting",)), ("EmailMessage", ("Email",))):
+                              ("Event", ("Meeting",)), ("EmailMessage", ("Email", "Task"))):
             for r in self.s.rows(obj):
                 if r.get("IsDeleted") is True:
                     deleted[r["Id"]] = obj

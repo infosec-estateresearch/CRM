@@ -1,4 +1,4 @@
-"""EspoCRM REST client: paged list, create, update, with retry on 429 and 5xx. Never deletes."""
+"""EspoCRM REST client: paged list, single read, create, update, with retry on 429 and 5xx. Never deletes."""
 
 import time
 
@@ -58,6 +58,15 @@ class EspoClient:
             offset += len(doc["list"])
             if not doc["list"] or offset >= int(doc.get("total", 0)):
                 return out
+
+    def get(self, entity, record_id):
+        """One single-record read, ``GET {Entity}/{id}`` (CRM-008-F: list reads omit
+        phoneNumberData; a single-record read returns it). Counted in ``reads``."""
+        self.reads += 1
+        status, doc = self._send("GET", f"{entity}/{record_id}")
+        if status != 200 or not isinstance(doc, dict):
+            raise TransportError("read_failed", status)
+        return doc
 
     def setting(self, name):
         """One application setting from ``GET Settings``; ``unknown`` if the read is refused."""

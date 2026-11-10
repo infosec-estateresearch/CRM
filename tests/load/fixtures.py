@@ -385,6 +385,7 @@ class FakeEspo:
         self.db = {e: {} for e in self.ENTITIES}
         self.writes = []
         self.requests = []
+        self.single_reads = []             # (entity, id) of each GET {Entity}/{id}
         self.hidden = set(hidden_sfids)    # soft-deleted EspoCRM rows holding a unique sfId
         self.fail_next = []                # statuses to return before serving (e.g. 429, 503)
         self._n = 0
@@ -418,6 +419,11 @@ class FakeEspo:
             return 200, json.loads(json.dumps(self.settings))
         if entity not in self.db:
             return 404, None
+        if method == "GET" and len(parts) == 2:
+            # A single-record read returns phoneNumberData (with optOut/invalid), as on crm-dev.
+            self.single_reads.append((entity, parts[1]))
+            rec = self.db[entity].get(parts[1])
+            return (200, json.loads(json.dumps(rec))) if rec is not None else (404, None)
         if method == "GET":
             q = dict(query or [])
             assert int(q["maxSize"]) <= 200
@@ -426,7 +432,10 @@ class FakeEspo:
             select = q["select"].split(",")
             rows = [r for _, r in sorted(self.db[entity].items()) if r.get(attr) not in (None, "")]
             off, size = int(q["offset"]), int(q["maxSize"])
-            page = [{k: json.loads(json.dumps(r.get(k))) for k in select} for r in rows[off:off + size]]
+            # 10.0.12 list reads never return phoneNumberData, even when selected (CRM-008-F fact 1).
+            hidden = {"phoneNumberData"} if "phone_list" in self._checks() else set()
+            page = [{k: json.loads(json.dumps(r.get(k))) for k in select if k not in hidden}
+                    for r in rows[off:off + size]]
             return 200, {"total": len(rows), "list": page}
         if method == "POST":
             self.writes.append((method, entity, json.loads(json.dumps(body))))
@@ -453,6 +462,7 @@ class FakeEspo:
                 return 400, {"field": "phoneNumber", "type": "valid"}
             for attr, default in self.DEFAULTS.get(entity, {}).items():
                 stored.setdefault(attr, default)               # omitted: the entityDefs default
+            self._unstorable(entity, stored, stored)
             rid = self._insert(entity, stored)
             if entity == "Email":
                 self.db[entity][rid]["messageId"] = f"dummy:{rid}"     # always replaced
@@ -475,15 +485,33 @@ class FakeEspo:
                 return 400, {"field": "phoneNumber", "type": "valid"}
             stored.pop("messageId", None)
             rec.update(stored)
+            self._unstorable(entity, stored, rec)
             return 200, dict(rec)
         return 405, None
 
     # Each check can be switched off (mutation tests prove each one is exercised).
-    CHECKS = ("owner", "required", "max_length", "currency", "email")
+    # CRM-008-F: phone_list (list rows omit phoneNumberData), title_account (title stored only
+    # with an account), date_completed (kept only when Completed), email_to (Email.to required).
+    CHECKS = ("owner", "required", "max_length", "currency", "email",
+              "phone_list", "title_account", "date_completed", "email_to")
+
+    def _checks(self):
+        return set(self.CHECKS) - getattr(self, "disabled_checks", set())
+
+    def _unstorable(self, entity, sent, rec):
+        """What 10.0.12 does not keep (PL-verified on crm-dev, CRM-008-F facts 2 and 3): a sent
+        Contact title reads back null without an account; a sent Task dateCompleted reads back
+        null unless the status is Completed."""
+        checks = self._checks()
+        if "title_account" in checks and entity == "Contact" and "title" in sent and not rec.get("accountId"):
+            rec["title"] = None
+        if "date_completed" in checks and entity == "Task" and "dateCompleted" in sent and \
+                rec.get("status") != "Completed":
+            rec["dateCompleted"] = None
 
     def _refused(self, entity, body, create, current=None):
         """The 400 body EspoCRM 10.0.12 returns for ``body``, or None (CRM-008 refusals)."""
-        checks = set(self.CHECKS) - getattr(self, "disabled_checks", set())
+        checks = self._checks()
         if "owner" in checks and entity in self.OWNER_REQUIRED and \
                 (create or "assignedUserId" in body) and body.get("assignedUserId") in (None, ""):
             return {"field": "assignedUser", "type": "required"}
@@ -503,6 +531,9 @@ class FakeEspo:
             currency = body.get("amountCurrency", (current or {}).get("amountCurrency"))
             if currency not in self.currency_list:
                 return {"field": "amount", "type": "validCurrency"}
+        if "email_to" in checks and entity == "Email" and (create or "to" in body) and \
+                (not isinstance(body.get("to"), str) or not body["to"].strip()):
+            return {"field": "to", "type": "required"}           # CRM-008-F fact 4
         if "email" in checks and entity == "Email":
             if (create or "from" in body) and (not isinstance(body.get("from"), str) or not body["from"].strip()):
                 return {"field": "from", "type": "required"}
@@ -583,6 +614,10 @@ class FakeEspo:
                 bad = bad or refused
                 data.append(dict(p, phoneNumber=number, optOut=False, invalid=False))
             stored["phoneNumberData"] = data
+        if "phoneNumberData" in stored and "phone_list" in self._checks():
+            # phoneNumber is the primary of phoneNumberData (what a list read returns, fact 1).
+            stored["phoneNumber"] = next((p["phoneNumber"] for p in stored["phoneNumberData"] or []
+                                          if p.get("primary")), None)
         for attr, value in stored.items():
             if isinstance(value, str) and attr not in self.TEXT and attr not in ("phoneNumber",):
                 stored[attr] = value.strip()                 # StringTrim on varchar
