@@ -47,7 +47,17 @@ BROKEN_ACCESS = {
     "access_bad_import_role_widened.json": {"import_api_only"},
     "access_bad_stream_not_read.json": {"stream_as_read", "matches_work_order_table"},
     "access_bad_invalid_level.json": {"known_levels", "matches_work_order_table"},
-    "access_bad_missing_scope.json": {"known_levels", "matches_work_order_table"},
+    "access_bad_missing_scope.json": {"every_acl_scope_explicit", "matches_work_order_table"},
+    "access_bad_missing_lead.json": {"every_acl_scope_explicit", "unused_scopes_disabled",
+                                     "matches_work_order_table"},
+    "access_bad_unknown_scope.json": {"every_acl_scope_explicit", "matches_work_order_table"},
+    "access_bad_boolean_as_levels.json": {"every_acl_scope_explicit", "boolean_scopes",
+                                          "matches_work_order_table"},
+    "access_bad_unused_scope_enabled.json": {"unused_scopes_disabled", "matches_work_order_table"},
+    "access_bad_import_deletes_user.json": {"import_never_deletes", "read_only_reference_scopes",
+                                            "matches_work_order_table"},
+    "access_bad_staff_import_tool.json": {"boolean_scopes", "matches_work_order_table"},
+    "access_bad_import_boolean_enabled.json": {"boolean_scopes", "matches_work_order_table"},
     "access_bad_missing_team.json": {"teams_and_roles_present"},
     "access_bad_sfid_visible.json": {"sf_id_admin_only"},
     "access_bad_staff_edits_sf_owner.json": {"sf_fields_read_only_for_people"},
@@ -67,12 +77,16 @@ BROKEN_KEYS = {
     "keys_bad_contact_email_not_audited.json": {"audited_fields"},
 }
 BROKEN_HOOK = {
-    "hook_bad_no_throw.php": {"hook_throws_forbidden"},
-    "hook_bad_commented_throw.php": {"hook_throws_forbidden"},
-    "hook_bad_wrong_relation.php": {"hook_counts_opportunities"},
-    "hook_bad_admin_bypass.php": {"hook_no_admin_bypass"},
-    "hook_bad_options_skip.php": {"hook_no_admin_bypass"},
+    "hook_bad_no_throw.php": {"hook_throws_forbidden", "hook_body_is_the_guard"},
+    "hook_bad_commented_throw.php": {"hook_throws_forbidden", "hook_body_is_the_guard"},
+    "hook_bad_wrong_relation.php": {"hook_counts_opportunities", "hook_body_is_the_guard"},
+    "hook_bad_admin_bypass.php": {"hook_no_admin_bypass", "hook_body_is_the_guard"},
+    "hook_bad_options_skip.php": {"hook_no_admin_bypass", "hook_body_is_the_guard"},
     "hook_bad_before_save.php": {"hook_shape"},
+    "hook_bad_count_times_zero.php": {"hook_body_is_the_guard"},
+    "hook_bad_false_and.php": {"hook_throws_forbidden", "hook_body_is_the_guard"},
+    "hook_bad_early_return.php": {"hook_throws_forbidden", "hook_no_admin_bypass",
+                                  "hook_body_is_the_guard"},
 }
 
 
@@ -102,8 +116,20 @@ class TestDeployedRoles(unittest.TestCase):
     def test_the_three_teams_and_four_roles(self):
         self.assertRule("teams_and_roles_present")
 
+    def test_every_verified_acl_scope_is_explicit_in_every_role(self):
+        self.assertRule("every_acl_scope_explicit")
+
     def test_every_scope_and_action_has_a_valid_level(self):
         self.assertRule("known_levels")
+
+    def test_unused_crm_scopes_are_disabled(self):
+        self.assertRule("unused_scopes_disabled")
+
+    def test_reference_scopes_are_read_only(self):
+        self.assertRule("read_only_reference_scopes")
+
+    def test_boolean_scopes_are_as_ruled(self):
+        self.assertRule("boolean_scopes")
 
     def test_stream_access_is_as_for_read(self):
         self.assertRule("stream_as_read")
@@ -183,6 +209,37 @@ class TestDeployedHook(unittest.TestCase):
 
     def test_applies_to_admins_too(self):
         self.assertRule("hook_no_admin_bypass")
+
+    def test_before_remove_body_is_exactly_the_guard(self):
+        self.assertRule("hook_body_is_the_guard")
+
+
+class TestScopeSet(unittest.TestCase):
+    """The authoritative scope set is well formed and fully covered by the expectations."""
+
+    def test_scope_lists_are_disjoint_and_complete(self):
+        self.assertFalse(set(policy.ACL_ENTITY_SCOPES) & set(policy.ACL_BOOLEAN_SCOPES))
+        self.assertEqual(len(policy.ACL_SCOPES), len(set(policy.ACL_SCOPES)))
+        self.assertEqual(set(policy.MAIN_SCOPES) | set(policy.READ_ONLY_SCOPES)
+                         | set(policy.UNUSED_SCOPES), set(policy.ACL_ENTITY_SCOPES))
+        self.assertEqual(set(policy.HUMAN_BOOLEAN), set(policy.ACL_BOOLEAN_SCOPES))
+
+    def test_expected_table_covers_every_scope_for_every_role(self):
+        for role, data in policy.EXPECTED_DATA.items():
+            self.assertEqual(set(data), set(policy.ACL_SCOPES), role)
+
+    def test_a_newly_listed_scope_is_required_of_every_role(self):
+        # CRM-004 will add ServiceType: listing it alone must make every role fail.
+        doc = policy.load_access()
+        original = list(policy.ACL_ENTITY_SCOPES)
+        try:
+            policy.ACL_ENTITY_SCOPES.append("ServiceType")
+            policy.ACL_SCOPES.append("ServiceType")
+            found = policy.rule_every_acl_scope_explicit(doc)
+        finally:
+            policy.ACL_ENTITY_SCOPES[:] = original
+            policy.ACL_SCOPES.remove("ServiceType")
+        self.assertEqual(len([v for v in found if "ServiceType" in v]), len(policy.ROLES))
 
 
 class TestBrokenFixtures(unittest.TestCase):

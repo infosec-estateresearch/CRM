@@ -21,12 +21,26 @@ Named EspoCRM logins with Estate Research roles and teams. The roles and teams a
 
 Levels follow EspoCRM's role table. `create` is yes or no; `read`, `edit`, `delete` and `stream` are all, team, own or no. In every scope, `stream` is the same as `read`.
 
-| Role | Account (firm) | Contact | Opportunity (enquiry) | Call, Meeting, Task | Email | Case, Document, User, Team |
+| Role | Account (firm) | Contact | Opportunity (enquiry) | Call, Meeting, Task | Email | Other scopes |
 |---|---|---|---|---|---|---|
-| `ER Staff` | create; read all; edit all; **delete no** | create; read all; edit all; delete no | create; read all; **edit own**; delete no | create; read all; edit own; delete own | create; read all; edit own; delete no | read all only |
-| `ER Intake` | as Staff | as Staff | create; read all; **edit all**; delete no | as Staff | as Staff | read all only |
-| `ER Manager` | create; read all; edit all; delete no | create; read all; edit all; delete all | create; read all; edit all; delete all | create; read all; edit all; delete all | create; read all; edit all; delete no | read all only |
-| `ER Import` (API only) | create; read all; edit all; delete no | the same | the same | the same | the same | read all only |
+| `ER Staff` | create; read all; edit all; **delete no** | create; read all; edit all; delete no | create; read all; **edit own**; delete no | create; read all; edit own; delete own | create; read all; edit own; delete no | see §2.1 |
+| `ER Intake` | as Staff | as Staff | create; read all; **edit all**; delete no | as Staff | as Staff | see §2.1 |
+| `ER Manager` | create; read all; edit all; delete no | create; read all; edit all; delete all | create; read all; edit all; delete all | create; read all; edit all; delete all | create; read all; edit all; delete no | see §2.1 |
+| `ER Import` (API only) | create; read all; edit all; delete no | the same | the same | the same | the same | see §2.1 |
+
+### 2.1 Every ACL scope is explicit
+
+EspoCRM 10.0.12 has no `aclStrictMode` setting here, so it runs in non-strict mode: **a scope a role leaves unset is allowed**. Every role therefore lists every ACL-enabled scope of the image (verified by the PL in the running espocrm 10.0.12 image; the list is the `ACL_ENTITY_SCOPES` / `ACL_BOOLEAN_SCOPES` constants in `tests/unit/access_policy.py`):
+
+| Scopes | `ER Staff`, `ER Intake`, `ER Manager` | `ER Import` |
+|---|---|---|
+| Account, Contact, Opportunity, Call, Meeting, Task, Email | as the table above | as the table above |
+| Currency, Document, DocumentFolder, User, Team | read all only (no create, edit or delete) | see §2.1 |
+| Lead, Campaign, TargetList, TargetListCategory, KnowledgeBaseArticle, KnowledgeBaseCategory, Template, EmailTemplate, EmailTemplateCategory, Case (generic CRM features Estate Research does not use) | `false` (no access, hidden) | `false` |
+| Activities, Calendar, GlobalStream, WorkingTimeCalendar (boolean) | `true` | `false` |
+| Import, Webhook, OpenApi, ExternalAccount, EmailAccountScope (boolean) | `false` | `false` (the importer uses REST, not EspoCRM's Import tool) |
+
+`ER Import` has no `delete` in any scope. A scope missing from a role, a scope not in the verified list, or a boolean scope given as anything but `true`/`false` fails the policy test. To add a scope (CRM-004 adds `ServiceType`), add it to one of the two constants and give it a row in `EXPECTED_DATA`; every rule then requires it of every role.
 
 Other role permissions:
 - **Assignment and user permissions:** "all" for every role, so enquiries can be assigned to anyone.
@@ -43,7 +57,8 @@ Field-level access:
 Administration stays with EspoCRM **admin** users, the user type `admin`. No role grants it. Every login is named; there is no shared login.
 
 `tests/unit/test_access_policy.py` enforces these rules:
-- roles.json equals the table above;
+- roles.json equals the tables above;
+- every role sets every verified ACL scope explicitly, unused CRM scopes are `false`, reference scopes are read-only and boolean scopes are as in §2.1;
 - no role deletes an Account;
 - Staff edits only its own Opportunities, and Intake edits all of them;
 - Import never deletes, and only API users hold it;

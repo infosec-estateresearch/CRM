@@ -220,13 +220,17 @@ def ensure_api_user(client, spec, role_ids, team_ids, key_file, active, counter)
     if found is None:
         data = dict(desired, userName=user_name, type="api", lastName=spec.get("lastName", user_name),
                     isActive=True if active is None else active)
-        record = client.create("User", data)
-        api_key = record.get("apiKey") or (get(client, "User", record["id"]) or {}).get("apiKey")
-        if not api_key:
-            raise ProvisionError(f"API user {user_name} was created but EspoCRM returned no API key; "
-                                 "generate one in Administration > API Users")
+        # Open the key file (O_EXCL, 0600) before the user exists, so a key EspoCRM
+        # returns always has somewhere to go (as PasswordFile.open() does).
         with create_private_file(key_file) as fh:
+            record = client.create("User", data)
+            api_key = record.get("apiKey") or (get(client, "User", record["id"]) or {}).get("apiKey")
+            if not api_key:
+                raise ProvisionError(f"API user {user_name} was created but EspoCRM returned no API "
+                                     "key; generate one in Administration > API Users")
             fh.write(f"CRM_IMPORT_USERNAME={user_name}\nCRM_IMPORT_API_KEY={api_key}\n")
+            fh.flush()
+            os.fsync(fh.fileno())
         counter.add("apiUser", "created")
         log(f"API user {user_name}: created; key written to {key_file}")
         return

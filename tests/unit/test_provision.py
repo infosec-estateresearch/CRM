@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import os
+import shutil
 import stat
 import string
 import sys
@@ -232,6 +233,35 @@ class TestProvisionAccess(TmpDir):
             self.assertEqual(fh.read(), "CRM_IMPORT_USERNAME=er-import\n"
                                         f"CRM_IMPORT_API_KEY={API_KEY_SENTINEL}\n")
         self.assertNotIn(API_KEY_SENTINEL, out + err)
+
+    def test_key_file_is_opened_before_the_api_user_is_created(self):
+        key = self.path("key.env")
+        seen = []
+        fake = FakeEspo()
+        request = fake.request
+
+        def spy(method, url, headers, body):
+            if method == "POST" and "/api/v1/User" in url:
+                seen.append(os.path.lexists(key) and stat.S_IMODE(os.stat(key).st_mode))
+            return request(method, url, headers, body)
+        fake.request = spy
+        code, _, err = self.provision_access(fake)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(seen, [0o600], "key file must exist (0600) when the user is created")
+
+    def test_key_file_that_cannot_be_opened_creates_no_api_user(self):
+        fake = FakeEspo()
+        real = provision_access.create_private_file
+
+        def refuse(path):
+            raise provision_access.ProvisionError(f"refusing to overwrite an existing file: {path}")
+        provision_access.create_private_file = refuse
+        try:
+            code, _, err = self.provision_access(fake)
+        finally:
+            provision_access.create_private_file = real
+        self.assertEqual(code, 1)
+        self.assertFalse([u for u in fake.records["User"].values() if u.get("type") == "api"])
 
     def test_second_run_changes_nothing_and_writes_no_key(self):
         fake = FakeEspo()
@@ -490,6 +520,100 @@ class TestProvisionUsers(UsersBase):
         self.assertEqual(code, 1)
         self.assertIn("run provision_access.py first", err)
         self.assertEqual(self.fake.writes(), [])
+
+
+class TestStickyLegacyShared(UsersBase):
+    """config/access/legacy_shared.json applies whatever the flags or input say."""
+
+    STAFF = "ZZZTEST00000001AAA"
+
+    def config_dir(self, legacy):
+        target = self.path("config")
+        shutil.copytree(provision_access.CONFIG_DIR, target)
+        with open(os.path.join(target, "legacy_shared.json"), "w", encoding="utf-8") as fh:
+            json.dump({"legacyShared": legacy}, fh)
+        return target
+
+    def run_users(self, csv_name, *extra):
+        return self.provision_users(self.fake, synthetic_users(), csv_name, *extra)
+
+    def test_repository_list_is_valid_and_starts_empty(self):
+        self.assertEqual(provision_users.load_legacy_shared(provision_access.CONFIG_DIR), set())
+
+    def test_listed_identity_is_created_inactive_without_a_password_and_no_flag(self):
+        cfg = self.config_dir([self.STAFF])
+        code, out, err = self.run_users("pw.csv", "--config-dir", cfg)
+        self.assertEqual(code, 0, err)
+        self.assertFalse(self.fake.by_user_name("staff.one")["isActive"])
+        self.assertEqual({r[1] for r in self.read_csv()[1:]}, {"intake.one", "shared.intake"})
+        self.assertEqual(json.loads(out)["passwordsIssued"], 2)
+
+    def test_listed_identity_is_forced_inactive_again_on_rerun(self):
+        cfg = self.config_dir([self.STAFF])
+        self.assertEqual(self.run_users("pw.csv", "--config-dir", cfg)[0], 0)
+        self.fake.by_user_name("staff.one")["isActive"] = True  # someone re-enabled it
+        self.fake.calls.clear()
+        code, _, err = self.run_users("pw2.csv", "--config-dir", cfg)
+        self.assertEqual(code, 0, err)
+        self.assertEqual([c["data"] for c in self.fake.writes()], [{"isActive": False}])
+        self.assertFalse(self.fake.by_user_name("staff.one")["isActive"])
+        self.assertFalse(os.path.lexists(self.path("pw2.csv")))
+
+    def test_reset_is_refused_for_a_listed_identity_before_any_http(self):
+        self.assertEqual(self.run_users("pw.csv")[0], 0)  # created active, before listing
+        cfg = self.config_dir([self.STAFF])
+        self.fake.calls.clear()
+        code, _, err = run(provision_users.main, ["dev", "--reset", self.STAFF, "--password-file",
+                                                  self.path("reset.csv"), "--config-dir", cfg],
+                           self.fake)
+        self.assertEqual(code, 1)
+        self.assertIn("legacy shared identity", err)
+        self.assertEqual(self.fake.calls, [])
+        self.assertFalse(os.path.lexists(self.path("reset.csv")))
+
+    def test_reset_is_refused_for_a_flagged_identity(self):
+        self.assertEqual(self.run_users("pw.csv")[0], 0)
+        self.fake.calls.clear()
+        code, _, _ = run(provision_users.main, ["dev", "--reset", self.STAFF, "--password-file",
+                                                self.path("reset.csv"), "--legacy-shared",
+                                                self.STAFF], self.fake)
+        self.assertEqual(code, 1)
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_malformed_list_is_refused_before_any_http(self):
+        for bad in ("not-an-sfid", 42):
+            with self.subTest(bad=bad):
+                shutil.rmtree(self.path("config"), ignore_errors=True)
+                cfg = self.config_dir([bad])
+                self.fake.calls.clear()
+                code, _, err = self.run_users(f"pw-{bad}.csv", "--config-dir", cfg)
+                self.assertEqual(code, 1)
+                self.assertIn("legacyShared", err)
+                self.assertEqual(self.fake.calls, [])
+
+
+class TestEmptyNames(UsersBase):
+    def test_null_and_empty_first_and_last_names_compare_equal(self):
+        users = synthetic_users()
+        users[0]["firstName"] = ""
+        code, _, err = self.provision_users(self.fake, users, "pw.csv", "--legacy-shared", LEGACY)
+        self.assertEqual(code, 0, err)
+        self.fake.by_user_name("staff.one")["firstName"] = None  # as EspoCRM may store it
+        self.fake.calls.clear()
+        code, _, err = self.provision_users(self.fake, users, "pw2.csv", "--legacy-shared", LEGACY)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_a_real_name_change_is_still_sent(self):
+        users = synthetic_users()
+        self.assertEqual(self.provision_users(self.fake, users, "pw.csv", "--legacy-shared",
+                                              LEGACY)[0], 0)
+        self.fake.by_user_name("staff.one")["firstName"] = None
+        self.fake.calls.clear()
+        self.assertEqual(self.provision_users(self.fake, users, "pw2.csv", "--legacy-shared",
+                                              LEGACY)[0], 0)
+        self.assertEqual([c["data"] for c in self.fake.writes()],
+                         [{"firstName": users[0]["firstName"]}])
 
 
 class TestReset(UsersBase):

@@ -53,7 +53,7 @@
           "delete": "no",
           "stream": "all"
         },
-        "Case": {
+        "Currency": {
           "create": "no",
           "read": "all",
           "edit": "no",
@@ -61,6 +61,13 @@
           "stream": "all"
         },
         "Document": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "DocumentFolder": {
           "create": "no",
           "read": "all",
           "edit": "no",
@@ -80,7 +87,26 @@
           "edit": "no",
           "delete": "no",
           "stream": "all"
-        }
+        },
+        "Lead": false,
+        "Campaign": false,
+        "TargetList": false,
+        "TargetListCategory": false,
+        "KnowledgeBaseArticle": false,
+        "KnowledgeBaseCategory": false,
+        "Template": false,
+        "EmailTemplate": false,
+        "EmailTemplateCategory": false,
+        "Case": false,
+        "Activities": true,
+        "Calendar": true,
+        "GlobalStream": true,
+        "WorkingTimeCalendar": true,
+        "Import": false,
+        "Webhook": false,
+        "OpenApi": false,
+        "ExternalAccount": false,
+        "EmailAccountScope": false
       },
       "fieldData": {
         "Account": {
@@ -185,7 +211,7 @@
           "delete": "no",
           "stream": "all"
         },
-        "Case": {
+        "Currency": {
           "create": "no",
           "read": "all",
           "edit": "no",
@@ -193,6 +219,13 @@
           "stream": "all"
         },
         "Document": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "DocumentFolder": {
           "create": "no",
           "read": "all",
           "edit": "no",
@@ -212,7 +245,26 @@
           "edit": "no",
           "delete": "no",
           "stream": "all"
-        }
+        },
+        "Lead": false,
+        "Campaign": false,
+        "TargetList": false,
+        "TargetListCategory": false,
+        "KnowledgeBaseArticle": false,
+        "KnowledgeBaseCategory": false,
+        "Template": false,
+        "EmailTemplate": false,
+        "EmailTemplateCategory": false,
+        "Case": false,
+        "Activities": true,
+        "Calendar": true,
+        "GlobalStream": true,
+        "WorkingTimeCalendar": true,
+        "Import": false,
+        "Webhook": false,
+        "OpenApi": false,
+        "ExternalAccount": false,
+        "EmailAccountScope": false
       },
       "fieldData": {
         "Account": {
@@ -317,7 +369,7 @@
           "delete": "no",
           "stream": "all"
         },
-        "Case": {
+        "Currency": {
           "create": "no",
           "read": "all",
           "edit": "no",
@@ -325,6 +377,13 @@
           "stream": "all"
         },
         "Document": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "DocumentFolder": {
           "create": "no",
           "read": "all",
           "edit": "no",
@@ -344,7 +403,26 @@
           "edit": "no",
           "delete": "no",
           "stream": "all"
-        }
+        },
+        "Lead": false,
+        "Campaign": false,
+        "TargetList": false,
+        "TargetListCategory": false,
+        "KnowledgeBaseArticle": false,
+        "KnowledgeBaseCategory": false,
+        "Template": false,
+        "EmailTemplate": false,
+        "EmailTemplateCategory": false,
+        "Case": false,
+        "Activities": true,
+        "Calendar": true,
+        "GlobalStream": true,
+        "WorkingTimeCalendar": true,
+        "Import": false,
+        "Webhook": false,
+        "OpenApi": false,
+        "ExternalAccount": false,
+        "EmailAccountScope": false
       },
       "fieldData": {
         "Account": {
@@ -449,7 +527,7 @@
           "delete": "no",
           "stream": "all"
         },
-        "Case": {
+        "Currency": {
           "create": "no",
           "read": "all",
           "edit": "no",
@@ -457,6 +535,13 @@
           "stream": "all"
         },
         "Document": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        },
+        "DocumentFolder": {
           "create": "no",
           "read": "all",
           "edit": "no",
@@ -476,7 +561,26 @@
           "edit": "no",
           "delete": "no",
           "stream": "all"
-        }
+        },
+        "Lead": false,
+        "Campaign": false,
+        "TargetList": false,
+        "TargetListCategory": false,
+        "KnowledgeBaseArticle": false,
+        "KnowledgeBaseCategory": false,
+        "Template": false,
+        "EmailTemplate": false,
+        "EmailTemplateCategory": false,
+        "Case": false,
+        "Activities": false,
+        "Calendar": false,
+        "GlobalStream": false,
+        "WorkingTimeCalendar": false,
+        "Import": false,
+        "Webhook": false,
+        "OpenApi": false,
+        "ExternalAccount": false,
+        "EmailAccountScope": false
       },
       "fieldData": {
         "Account": {

@@ -24,6 +24,9 @@ isActive, teams[], roles[]}. Team and role names must exist in config/access.
 - Temporary passwords are written only to --password-file: a new file, mode
   0600, created only when a password is issued. They are never printed or
   logged, and sendAccessInfo is always false, so no email is sent.
+- The sfIds in config/access/legacy_shared.json are legacy shared identities on
+  every run, whatever the flags or input say: always inactive, never a recorded
+  password, and --reset is refused for them.
 - --reset issues a new temporary password for one active user.
 - --report-never-logged-in lists active regular users whose lastAccess is empty.
 
@@ -155,6 +158,16 @@ def validate_users(users, config):
         seen_names.add(u["userName"].lower())
 
 
+def load_legacy_shared(config_dir):
+    """The sticky legacy shared identities from config/access/legacy_shared.json."""
+    path = os.path.join(config_dir, "legacy_shared.json")
+    doc = access._load_json(path)
+    ids = doc.get("legacyShared") if isinstance(doc, dict) else None
+    if not isinstance(ids, list) or not all(isinstance(i, str) and SF_ID.match(i) for i in ids):
+        raise ProvisionError(f"{path}: legacyShared must be a list of sfIds")
+    return set(ids)
+
+
 def load_users(path):
     try:
         with open(path, encoding="utf-8") as fh:
@@ -171,6 +184,9 @@ def _find_by_sf_id(client, sf_id):
 
 def _user_changes(current, desired):
     changes = access.diff(current, desired)
+    for key in ("firstName", "lastName"):  # EspoCRM may store an empty name as null
+        if key in changes and (current.get(key) or "") == (desired[key] or ""):
+            del changes[key]
     if "emailAddress" in changes and \
             (current.get("emailAddress") or "").lower() == desired["emailAddress"].lower():
         del changes["emailAddress"]
@@ -245,7 +261,9 @@ def provision_users(client, users, config, passwords, legacy_shared=()):
     return counts
 
 
-def reset_password(client, sf_id, passwords):
+def reset_password(client, sf_id, passwords, legacy_shared=()):
+    if sf_id in legacy_shared:
+        raise ProvisionError(f"sfId {sf_id} is a legacy shared identity; it never gets a password")
     found = _find_by_sf_id(client, sf_id)
     if found is None:
         raise ProvisionError(f"no user has sfId {sf_id}")
@@ -305,12 +323,14 @@ def main(argv=None, transport=None, environ=None):
             raise ProvisionError("--password-file is required with --input and --reset")
         access.check_new_private_path(args.password_file)
         config = access.load_config(args.config_dir)
+        sticky = load_legacy_shared(args.config_dir)
         passwords = PasswordFile(args.password_file)
         if args.reset:
             if not SF_ID.match(args.reset):
                 raise ProvisionError("--reset needs an sfId (15 or 18 letters and digits)")
             client = access.client_from_env(args.base_url, environ, transport)
-            counts = reset_password(client, args.reset, passwords)
+            counts = reset_password(client, args.reset, passwords,
+                                    sticky | set(args.legacy_shared))
         else:
             users = load_users(args.input)
             validate_users(users, config)
@@ -318,7 +338,8 @@ def main(argv=None, transport=None, environ=None):
             if unknown:
                 raise ProvisionError("--legacy-shared names an sfId that is not in the input")
             client = access.client_from_env(args.base_url, environ, transport)
-            counts = provision_users(client, users, config, passwords, set(args.legacy_shared))
+            counts = provision_users(client, users, config, passwords,
+                                     sticky | set(args.legacy_shared))
     except crm_api.ConfigError as err:
         print(f"{prog}: {err}", file=sys.stderr)
         return 2
