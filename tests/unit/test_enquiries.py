@@ -207,9 +207,11 @@ class TestRepository(unittest.TestCase):
                          {"options": ["", "Business User", "Decision Maker", "Economic Buyer",
                                       "Economic Decision Maker", "Evaluator", "Executive Sponsor",
                                       "Influencer", "Technical Buyer", "Other"]})
+        # CRM-008 raises Contact.title maxLength to 255 (that key only).
+        self.assertEqual(contact["fields"]["title"], {"maxLength": 255})
         self.assertEqual(set(contact["fields"]),
                          {"account", "emailAddress", "opportunityRole", "sfId", "sfOwnerId",
-                          "sfCreatedAt"})
+                          "sfCreatedAt", "title"})
 
     def test_every_new_json_file_names_only_opportunity_or_service_type(self):
         for kind in ("entityDefs", "clientDefs", "logicDefs", "selectDefs", "scopes"):

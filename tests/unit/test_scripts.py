@@ -1146,5 +1146,32 @@ class TestExport(unittest.TestCase):
             self.assertIn("CRM_ADMIN_PASSWORD", err.getvalue())
 
 
+
+class TestExecutableModes(unittest.TestCase):
+    """CRM-008 change 9: the documented direct invocations need the executable bit,
+    which Git records (mode 100755) from the working tree."""
+
+    FILES = ("scripts/load.sh", "scripts/provision_access.py", "scripts/provision_users.py",
+             "scripts/check_access.py", "scripts/crm_api.py", "load/bin/crm-load.py")
+
+    def test_files_are_executable(self):
+        for rel in self.FILES:
+            with self.subTest(file=rel):
+                mode = os.stat(os.path.join(REPO, rel)).st_mode
+                self.assertEqual(mode & 0o111, 0o111, f"{rel} is not executable")
+
+    def test_git_index_mode_when_committed(self):
+        """In a checkout whose index is in sync, Git must also say 100755."""
+        if not shutil.which("git"):
+            self.skipTest("git not installed")
+        res = subprocess.run(["git", "-C", REPO, "ls-files", "-s", "--", *self.FILES],
+                             capture_output=True, text=True)
+        dirty = subprocess.run(["git", "-C", REPO, "diff", "--quiet", "--", *self.FILES])
+        if res.returncode != 0 or dirty.returncode != 0:
+            self.skipTest("no Git metadata, or the mode change is not yet committed")
+        modes = {line.split("\t")[1]: line.split()[0] for line in res.stdout.splitlines()}
+        self.assertEqual(modes, {f: "100755" for f in self.FILES})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,8 @@
 | `load/contract/name_patterns.json` | The D8 enquiry-name patterns. The table ships **empty** (PL decision): until patterns are added, every enquiry gets `name_unparsed` and the name parts stay empty. The patterns are derived after the load from a counts-only analysis of the loaded names, then added by the PL; a re-run fills the parts. |
 | `load/examples/role-map.example.json` | An example Profile/Role → team/role table, with placeholders only. |
 
+**Usage note.** `load/bin/crm-load.py` and `scripts/crm_api.py` have the executable bit but no shebang, by design. Always run them through the interpreter as `python3 -I -B <file> …`, never as `./<file>`. `-I` keeps the environment and the current directory off the import path, and `-B` writes no `.pyc` files.
+
 ## Operator procedure
 
 Do these steps in order, as root, on DOCKER1.
@@ -23,7 +25,12 @@ Do these steps in order, as root, on DOCKER1.
 1. **Prerequisites.**
    - The target stack is running with the CRM-003 to CRM-006R customisation deployed. This includes `Contact.opportunityRole` options and the `Import` scope on `ER Import`. Run `scripts/deploy_custom.sh` and then `scripts/provision_access.py`.
    - The snapshot is sealed under `/srv/CRM/runtime/migrate/snapshots/`: owned by root, directories `0700`, files `0400`. `migrate.sh` does this. For `dev` that is the `<name>-selftest/` directory; for `beta` it is the `<name>-extract/` directory.
-   - **Phone setting (operator precondition).** The CRM setting `phoneNumberInternational` must be `false` on the target (CRM-007 sets it on beta). With the default `true`, EspoCRM refuses UK national formats such as `01632 960000` (`400 phoneNumber valid`) and rewrites `+44 …` as `+441632960000`. Those phones are then dropped with `phone_rejected`, and every re-run tries them again, so re-runs are not write-free. With `false`, numbers are stored verbatim and only junk such as `n/a` is refused.
+   - **Target Settings (operator precondition).** The target must have these four Settings values:
+     - `currencyList` `["GBP"]`, `defaultCurrency` `GBP` and `baseCurrency` `GBP`. The EspoCRM 10.0.12 install default is USD only. Without GBP in `currencyList`, **every Opportunity with an amount** is refused with `400 amount validCurrency` (`write_rejected`), because the loader sends `amountCurrency: GBP`.
+     - `phoneNumberInternational` `false` (see the phone setting below).
+
+     `scripts/provision_access.py <target>` applies all four from `config/settings.json`. It is idempotent: it reads `GET Settings`, sends only the keys that differ, and a second run reports `settings: unchanged`. `PUT Settings` needs the admin account, so run `provision_access.py` before the load.
+   - **Phone setting.** `phoneNumberInternational` must be `false` on the target. `scripts/provision_access.py <target>` sets it, with the currency settings above. With the default `true`, EspoCRM refuses UK national formats such as `01632 960000` (`400 phoneNumber valid`) and rewrites `+44 …` as `+441632960000`. Those phones are then dropped with `phone_rejected`, and every re-run tries them again, so re-runs are not write-free. With `false`, numbers are stored verbatim and only junk such as `n/a` is refused.
 2. **Write the env file.** Create `/srv/CRM/runtime/<target>/load.env`, owned by root and mode `0600`, with exactly these lines:
    ```
    CRM_LOAD_HOST=127.0.0.1
@@ -88,6 +95,7 @@ The snapshot is opened read-only.
    - Email and ListEmail become an archived Email.
 
    A Task-Email that has an EmailMessage is skipped (`represented_by_email_message`).
+   A Task-Email (Email or ListEmail) that **no** EmailMessage represents (no EmailMessage `ActivityId` is its Id) is imported as a **Task** (CRM-008), with the fields of a plain Task: Subject is the name, Description the description, status, priority and dates are kept, and so is its parent. It is recorded as `task_email_imported_as_task`. An Email needs a `from` address, which only an EmailMessage has. A row an earlier run already created as an Email stays an Email (it is never moved).
 8. **Event** becomes a Meeting.
 9. **EmailMessage**, with its EmailMessageRelation rows, becomes an archived Email.
 10. **Flag.** EspoCRM records whose `sfId` isn't current in the snapshot are flagged as exceptions, **never deleted**.
@@ -156,6 +164,19 @@ The full mapping is in `load/contract/mapping.json`. The decisions are in `MIGRA
 - `OwnerId` resolves through the index of provisioned users (`GET User?select=id,sfId`).
 - If the owner is a queue or group (`00G…`), or doesn't resolve (including non-human users), `assignedUser` stays **empty**, `sfOwnerId` is kept, and the exception `owner_queue_or_group` or `owner_unresolved` is recorded.
 - Ownership is never guessed.
+- **Required owner (CRM-008).** `assignedUser` is required on core Task, Call and Meeting. For these, an unresolved owner (including a queue or group) **refuses the record**: it is not sent, the code is `owner_required_unresolved` (with `owner_queue_or_group` for a queue), and it is counted in `skipped.owner_required_unresolved`. No placeholder owner is used. Account, Contact, Opportunity and Email keep `owner_unresolved` and are still created without an owner.
+
+### Length limits and email addresses (CRM-008)
+
+- **Length limits.** `mapping.json` `maxLength` holds the target limits: Account `name` 249; address city, state and country 100 and postal code 40; Contact `title` 255 (raised in the custom Contact entityDefs); `sfStageName`, `sfLeadSource`, `clientReference` and `caseNumber` 100; ServiceType `name` 150; phone numbers 36. Before sending, each such value (trimmed) is checked. A value that is too long is sent as **null** and recorded as `value_too_long` with the record id and the **attribute name** only. It is never truncated. A phone number longer than 36 is dropped with `phone_rejected`.
+  - **Attribute names are qualified** by the target entity, for example `Account.billingAddressCity`, `ServiceType.name` or `Opportunity.sfLeadSource`. A ServiceType is reported against the first Opportunity that names it, so `ServiceType.name` on an Opportunity line means the service-type name was too long, not the Opportunity's own name.
+  - **Required attributes refuse the record.** Account `name` and ServiceType `name` are required in EspoCRM (null is `400 required`). `mapping.json` `requiredAttributes` lists them. If one of them is too long, the record is **not sent** (on create or update). It gets `value_too_long` with its attribute name and is counted in `skipped.value_too_long`. An Account already in EspoCRM keeps its stored name. A refused ServiceType is counted under `objects.Opportunity.skipped.value_too_long`. Opportunities naming it are still written, with `serviceTypeId` empty, and each gets `service_type_refused`. A refused record (an over-length required attribute, or `enum_blank_unrepresentable`) gets **no write at all** in that run: no parent link (Account second pass) and no contact roles (Opportunity). It is counted once, in `skipped`, never also as `updated`.
+  - **Update clears the field.** A non-required over-length value is also sent as null on **update**, so it **clears** whatever that field held in EspoCRM (for example, a value stored by an earlier run before the source value grew).
+- **Email addresses.** Each address is validated against an approximation of EspoCRM's check (PHP `FILTER_VALIDATE_EMAIL`). The rule is deliberately **stricter** than PHP's, so a borderline address is refused here rather than sent and refused by the server. Some addresses PHP would accept are therefore dropped. On the real extract, the PL counted (counts only) **3** addresses dropped with `email_address_invalid` (2 To, 1 Cc) and **0** `from` addresses refused. An address is valid only if it is ASCII, at most 254 characters, has no whitespace, and is `local@domain` where:
+  - the local part is a dot-atom (letters, digits and ``!#$%&'*+/=?^_`{|}~-``, single dots not at either end), at most 64 characters, never quoted;
+  - the domain has at least two dot-separated labels of letters, digits and hyphens (1 to 63 characters, no leading or trailing hyphen), ending in an alphabetic top-level label of 2 to 63 letters; IP literals are refused.
+
+  An invalid To or Cc address is dropped from the list (`email_address_invalid`, record id only). An invalid or blank `from` refuses the EmailMessage (`email_from_invalid`, counted in `skipped.email_from_invalid`).
 
 ## `load-report.json` (counts only)
 
@@ -164,7 +185,7 @@ The full mapping is in `load/contract/mapping.json`. The decisions are in `MIGRA
 | `objects.<Object>.source_rows` / `source_current` | Rows in the snapshot, and how many are not soft-deleted. |
 | `objects.<Object>.targets.<Entity>` | `created`, `updated`, `unchanged`, `failed`. |
 | `objects.Account.second_pass` | Counts for the parent pass. |
-| `objects.<Object>.skipped` | `soft_deleted`, `absent_unexplained` (`"unknown"` without `--reconciliation`), `out_of_scope` (Note), `represented_by_email_message` (Task), `value_shape` (any object), `parent_soft_deleted` (EmailMessageRelation), `user_not_human` (User). |
+| `objects.<Object>.skipped` | `soft_deleted`, `absent_unexplained` (`"unknown"` without `--reconciliation`), `out_of_scope` (Note), `represented_by_email_message` (Task), `value_shape` (any object), `parent_soft_deleted` (EmailMessageRelation), `user_not_human` (User), `owner_required_unresolved` (Task, Event), `email_from_invalid` (EmailMessage), `value_too_long` (Account; Opportunity for a refused ServiceType). |
 | `objects.<Object>.exceptions` | Exception counts by reason. |
 | `existingNotCurrentInSnapshot` | Per entity: EspoCRM records flagged, never deleted. |
 | `exceptions` | `total` and `byReason`. |
@@ -177,12 +198,18 @@ It holds no names, values or free text.
 
 ## `exceptions.jsonl` (root `0600`)
 
-There is one line per `{object, sfId, reason}`. It holds ids and codes only.
+There is one line per `{object, sfId, reason}`. It holds ids and codes only; a `value_too_long` line also has `attributes`, the qualified attribute names (`Entity.attribute`).
 
 | Reason | Meaning |
 |---|---|
 | `owner_queue_or_group` | The owner is a queue or group. `assignedUser` is empty and `sfOwnerId` is kept. |
 | `owner_unresolved` | The owner is not a provisioned user: inactive and not provisioned, non-human, or missing. |
+| `owner_required_unresolved` | (Task, Call, Meeting) The owner is unresolved and `assignedUser` is required: the record is not written. |
+| `task_email_imported_as_task` | A Task-Email with no EmailMessage was imported as a Task. |
+| `value_too_long` | A value exceeds the target `maxLength`: sent as null (create and update), never truncated. For a required attribute (Account and ServiceType `name`), the record is refused instead and counted in `skipped.value_too_long`. The line carries `attributes` (qualified names only). |
+| `email_address_invalid` | An invalid To or Cc address was dropped from the list. |
+| `email_from_invalid` | The EmailMessage `from` is blank or invalid: the record is not written. |
+| `service_type_refused` | (Opportunity) The ServiceType this Opportunity names was refused (`value_too_long` on ServiceType `name`). The Opportunity is written with `serviceTypeId` null. The line carries the record id only. |
 | `account_unresolved` | `AccountId` doesn't resolve, for example because the account is soft-deleted. |
 | `parent_unresolved` | The Account `ParentId` doesn't resolve. |
 | `contact_unresolved` / `opportunity_unresolved` | The contact role or relation endpoint doesn't resolve. |
@@ -228,5 +255,5 @@ There is one line per `{object, sfId, reason}`. It holds ids and codes only.
 - **Phone precondition.** Before any write `crm-load load` reads `GET Settings`. With `--target beta` it refuses (exception code `phone_international_enabled`, exit 3) unless `phoneNumberInternational` is exactly `false`; a refused or incomplete read counts as "not confirmed false". The API user of the beta load must be allowed to read Settings. Dev logs the value (`event=settings`) and continues.
 - **Per-phone handling.** When EspoCRM refuses a write with `400` on `phoneNumber`, the record is written without its phones, then each number is tried once (one write per number on the record, so at most two for a Contact): accepted numbers are kept (the first kept one is primary), each refused number is reported as `phone_refused` with the record id only. The refusal is remembered in `phone-refusals.json` of the output directory (`0600`): a sorted JSON list of `sha256(["<sfId>","<field>","<number>"])` hex digests, no number in clear. The hashed number is the trimmed one (as EspoCRM stores it), so a number differing only in surrounding blanks is the same refusal. **Pass the previous run's file on every re-run**: `crm-load load … --phone-refusals <previous out>/phone-refusals.json` (`load.sh --phone-refusals FILE`); without it every refused number is probed again and the re-run is not write-free. `load.sh` requires the file to be a canonical, root-owned `0600` regular file (no symlink) under a root-owned `0700` parent (the `--resume` rule); `crm-load` opens it with `O_NOFOLLOW` and checks on the open descriptor (`fstat`) that it is a regular file owned by the running user (root under `load.sh`) with mode `0600` (`phone_refusals_not_sealed`, `phone_refusals_unreadable` otherwise). The load report's `phoneRefusals` states whether a file was supplied (`supplied`), how many hashes it held (`remembered`) and how many refusals this run holds (`refusedThisRun`). A number whose hash is listed is not sent and not retried while its source value is unchanged; the record still reports `phone_refused`, and the run makes no write for it. A changed number has a new hash and is tried again. Only a completed run writes the file, so an interrupted output stays resumable. Note: a phone number has little entropy; the hash keeps the file free of numbers in clear but is not a secret, so keep the file root-only like `exceptions.jsonl`.
 - **Synthetic users on dev.** In a synthetic selftest snapshot the user filter also accepts the synthetic `UserType` values `Value A`, `Value B`, `Value C` (what `crm-migrate selftest` writes into every picklist), so the dev owner path runs end to end. A real snapshot accepts `Standard` only. Selftest Usernames (`"<marker> User Username 0"`: a space, no `@`) are never valid EspoCRM user names, so for a selftest snapshot only the user name is derived from the sfId: `syn-` followed by the first 10 hex characters of `sha256(sfId)`, lowercase. A real snapshot keeps the Username local-part rule unchanged.
-- **Synthetic enum values on dev (`syntheticEnumMap`).** `crm-migrate selftest` fills every picklist with `Value A`/`B`/`C`, which no stage, status, priority or direction accepts. For a **selftest snapshot only**, `mapping.json` `syntheticEnumMap` maps those values of `StageName` (to stage), Task `Status` and `Priority`, `CallType` (to direction) and `TaskSubtype` (to Task/Call/Email) to valid target values, so dev exercises the Opportunity, Task, Call and contact-role paths end to end. Each mapped record gets `synthetic_enum_mapped` (counted). A real snapshot never consults the map: it gets `stage_unmapped`, `status_unmapped`, `enum_unmapped` and `enum_blank_unrepresentable` exactly as without it.
+- **Synthetic enum values on dev (`syntheticEnumMap`).** `crm-migrate selftest` fills every picklist with `Value A`/`B`/`C`, which no stage, status, priority or direction accepts. For a **selftest snapshot only**, `mapping.json` `syntheticEnumMap` maps those values of `StageName` (to stage), Task `Status` and `Priority`, `CallType` (to direction), `TaskSubtype` (to Task/Call/Email) and Event `Type` (to `meetingType`: Meeting, Call, Other; CRM-008) to valid target values, so dev exercises the Opportunity, Task, Call and contact-role paths end to end. Each mapped record gets `synthetic_enum_mapped` (counted). A real snapshot never consults the map: it gets `stage_unmapped`, `status_unmapped`, `enum_unmapped` and `enum_blank_unrepresentable` exactly as without it.
 - **Counting phone-only updates.** When an update writes nothing because its only change was phones and every phone probe was refused, the record counts as `unchanged`, not `updated`.

@@ -59,8 +59,16 @@ class FakeEspo:
     create and update for Team, Role and User. Passwords are kept apart from
     the records, as EspoCRM keeps only a hash."""
 
-    def __init__(self, drop_sf_id=False, fail=None):
+    # CRM-008: EspoCRM 10.0.12 Role attributes; anything else is silently dropped.
+    ROLE_FIELDS = {"id", "name", "data", "fieldData"} | set(provision_access.ROLE_PERMISSIONS)
+
+    def __init__(self, drop_sf_id=False, fail=None, drop_unknown=True, settings=None):
         self.records = {"Team": {}, "Role": {}, "User": {}, "DashboardTemplate": {}}
+        self.drop_unknown = drop_unknown
+        # crm-dev as found by the first operator load (CRM-008 fact 2).
+        self.settings = {"currencyList": ["USD"], "defaultCurrency": "USD",
+                         "baseCurrency": "USD", "phoneNumberInternational": True,
+                         "language": "en_US"} if settings is None else settings
         self.deployed = []  # CRM-005: (templateId, teamId, append) per deployToTeam call
         self.passwords = {}
         self.calls = []
@@ -99,6 +107,13 @@ class FakeEspo:
                            if c["method"] == method and c["path"].split("/")[0] == entity)
                 if seen == nth:
                     return 500, b'{"message":"fake failure"}'
+        if path == ["Settings"]:
+            if method == "GET":
+                return 200, json.dumps(self.settings).encode()
+            if method == "PUT":
+                self.settings.update(data)
+                return 200, json.dumps(self.settings).encode()
+            return 405, b""
         if path == ["DashboardTemplate", "action", "deployToTeam"] and method == "POST":
             if data.get("id") not in self.records["DashboardTemplate"] or \
                     data.get("teamId") not in self.records["Team"]:
@@ -129,6 +144,7 @@ class FakeEspo:
                                         for u in store.values()):
                 return 409, b'{"reason":"userNameExists"}'
             rec = dict(data, id=self._new_id())
+            self._drop_unknown(entity, rec)
             self._take_password(rec)
             if self.drop_sf_id:
                 rec.pop("sfId", None)
@@ -139,9 +155,15 @@ class FakeEspo:
         if method == "PUT":
             rec = store[path[1]]
             rec.update(data)
+            self._drop_unknown(entity, rec)
             self._take_password(rec)
             return 200, json.dumps(self._public(entity, rec)).encode()
         return 405, b""
+
+    def _drop_unknown(self, entity, rec):
+        if self.drop_unknown and entity == "Role":
+            for k in set(rec) - self.ROLE_FIELDS:
+                del rec[k]
 
     def _take_password(self, rec):
         if "password" in rec:
@@ -285,6 +307,58 @@ class TestProvisionAccess(TmpDir):
         self.assertEqual(counts["role"], {"created": 0, "updated": 0, "unchanged": 4})
         self.assertEqual(counts["apiUser"], {"created": 0, "updated": 0, "unchanged": 1})
         self.assertNotIn(API_KEY_SENTINEL, out + err)
+
+    def test_role_info_is_never_sent_and_a_rerun_is_unchanged(self):
+        # CRM-008 change 8: the fake drops unknown attributes, as EspoCRM does.
+        fake = FakeEspo(drop_unknown=True)
+        self.assertEqual(self.provision_access(fake)[0], 0)
+        role_writes = [c for c in fake.writes() if c["path"].startswith("Role")]
+        self.assertEqual(len(role_writes), 4)
+        self.assertFalse([c for c in role_writes if "info" in c["data"]])
+        fake.calls.clear()
+        code, out, err = self.provision_access(fake, "key2.env")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(fake.writes(), [])
+        self.assertNotIn("info", err)
+        self.assertEqual(json.loads(out)["role"], {"created": 0, "updated": 0, "unchanged": 4})
+
+    def test_settings_are_set_once_with_only_the_differing_keys(self):
+        # CRM-008 change 2.
+        fake = FakeEspo()
+        code, out, err = self.provision_access(fake)
+        self.assertEqual(code, 0, err)
+        puts = [c for c in fake.writes() if c["path"] == "Settings"]
+        self.assertEqual([c["method"] for c in puts], ["PUT"])
+        self.assertEqual(puts[0]["data"], {"currencyList": ["GBP"], "defaultCurrency": "GBP",
+                                           "baseCurrency": "GBP",
+                                           "phoneNumberInternational": False})
+        self.assertEqual(fake.settings["language"], "en_US")
+        self.assertEqual(json.loads(out)["settings"], {"created": 0, "updated": 1, "unchanged": 0})
+        fake.calls.clear()
+        code, out, err = self.provision_access(fake, "key2.env")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(fake.writes(), [])
+        self.assertEqual(json.loads(out)["settings"], {"created": 0, "updated": 0, "unchanged": 1})
+
+    def test_settings_partial_drift_sends_only_that_key(self):
+        fake = FakeEspo(settings={"currencyList": ["GBP"], "defaultCurrency": "GBP",
+                                  "baseCurrency": "GBP", "phoneNumberInternational": True})
+        code, _, err = self.provision_access(fake)
+        self.assertEqual(code, 0, err)
+        puts = [c["data"] for c in fake.writes() if c["path"] == "Settings"]
+        self.assertEqual(puts, [{"phoneNumberInternational": False}])
+
+    def test_unknown_or_missing_settings_file_is_refused_before_any_http(self):
+        bad = self.path("settings.json")
+        for content in ('{"settings": {"currencyList": ["GBP"], "siteUrl": "x"}}',
+                        '{"settings": {}}', 'not json'):
+            with self.subTest(content=content):
+                with open(bad, "w", encoding="utf-8") as fh:
+                    fh.write(content)
+                fake = FakeEspo()
+                code, _, _ = self.provision_access(fake, "k.env", "--settings-file", bad)
+                self.assertEqual(code, 1)
+                self.assertEqual(fake.calls, [])
 
     def test_drift_is_corrected_by_name_with_only_the_changed_attributes(self):
         fake = FakeEspo()

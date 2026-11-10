@@ -102,4 +102,8 @@ def write_outputs(outdir, report, exceptions):
         fh.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
     with _open_new(os.path.join(outdir, "exceptions.jsonl")) as fh:
         for (obj, sf_id, reason) in exceptions:
-            fh.write(json.dumps({"object": obj, "sfId": sf_id, "reason": reason}, sort_keys=True) + "\n")
+            line = {"object": obj, "sfId": sf_id, "reason": reason}
+            attributes = exceptions[(obj, sf_id, reason)] if isinstance(exceptions, dict) else None
+            if attributes:
+                line["attributes"] = sorted(attributes)   # value_too_long: attribute names only
+            fh.write(json.dumps(line, sort_keys=True) + "\n")

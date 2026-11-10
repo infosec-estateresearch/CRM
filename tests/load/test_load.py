@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from tests.load import fixtures as fx
-from tests.load.fixtures import FakeEspo, SENTINEL, write_snapshot
+from tests.load.fixtures import SENTINEL, write_snapshot
 
 from crm_load import cli, snapshot as snap_mod  # noqa: E402  (path set by fixtures)
 from crm_load.errors import GateError, LoadError, TransportError
@@ -36,6 +36,17 @@ class _NullCtx:
 
     def service_type_id(self, value):
         return value
+
+
+class FakeEspo(fx.FakeEspo):
+    """The fake as provisioned (config/settings.json): Settings currencyList GBP. The bare
+    fixture (``fx.FakeEspo``) keeps the 10.0.12 install default, USD only (CRM-008)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.currency_list = ["GBP"]
+        if isinstance(self.settings, dict):
+            self.settings["currencyList"] = ["GBP"]
 
 
 class Base(unittest.TestCase):
@@ -815,14 +826,14 @@ class TestServerBehaviour(Base):
                            "invalid": False}])
         self.assertEqual(f.send("POST", "Contact", body={"sfId": "x2", "phoneNumber": "n/a"})[0], 400)
         intl = FakeEspo(phone_international=True)
-        self.assertEqual(intl.send("POST", "Account", body={"sfId": "a", "phoneNumber": "01632 960000"}),
+        self.assertEqual(intl.send("POST", "Account", body={"sfId": "a", "name": "a", "phoneNumber": "01632 960000"}),
                          (400, {"field": "phoneNumber", "type": "valid"}))
-        _st, doc = intl.send("POST", "Account", body={"sfId": "b", "phoneNumber": "+44 1632 960000"})
+        _st, doc = intl.send("POST", "Account", body={"sfId": "b", "name": "b", "phoneNumber": "+44 1632 960000"})
         self.assertEqual(intl.db["Account"][doc["id"]]["phoneNumber"], "+441632960000")
         _st, doc = f.send("POST", "Email", body={"sfId": "e", "from": "N <a@example.test>", "messageId": "<m>"})
         self.assertIsNone(f.db["Email"][doc["id"]]["from"])
         self.assertEqual(f.db["Email"][doc["id"]]["messageId"], f"dummy:{doc['id']}")
-        _st, doc = f.send("POST", "Call", body={"sfId": "c", "dateStart": "2025-01-01 00:00:00"})
+        _st, doc = f.send("POST", "Call", body={"sfId": "c", "dateStart": "2025-01-01 00:00:00", "assignedUserId": "u"})
         self.assertEqual(f.db["Call"][doc["id"]]["direction"], "Outbound")
         self.assertEqual(f.send("POST", "Meeting", body={"sfId": "m"})[0], 400)
 
@@ -958,8 +969,12 @@ class TestManufacturedValues(Base):
         data["Task"].append(row)
         snap = write_snapshot(os.path.join(self.tmp, "em"), data=data)
         espo = FakeEspo()
+        # CRM-008: a Task-Email no EmailMessage represents is a Task; give it one here.
+        data["EmailMessage"].append(dict(data["EmailMessage"][0], Id=fx.sid("02s", 50),
+                                         ActivityId=row["Id"], MessageDate=None))
+        snap = write_snapshot(os.path.join(self.tmp, "em2"), data=data)
         self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
-        self.assertIsNone(espo.by_sf("Email")[row["Id"]]["dateSent"])
+        self.assertIsNone(espo.by_sf("Email")[fx.sid("02s", 50)]["dateSent"])
 
 
 class TestAdvisories(Base):
@@ -1263,19 +1278,20 @@ class TestFidelity(Base):
     def test_omitted_blank_would_store_the_default(self):
         """The fake models the server: an omitted enum is the default, an explicit null refused."""
         f = FakeEspo()
-        _st, doc = f.send("POST", "Account", body={"sfId": "a"})
+        _st, doc = f.send("POST", "Account", body={"sfId": "a", "name": "a"})
         self.assertEqual(f.db["Account"][doc["id"]]["learningPlatformAccess"], "No")
         self.assertEqual(f.send("POST", "Opportunity", body={"sfId": "o", "stage": None})[0], 400)
         self.assertEqual(f.send("POST", "Opportunity", body={"sfId": "o", "stage": ""})[0], 400)
-        _st, doc = f.send("POST", "Call", body={"sfId": "c", "dateStart": "2025-01-01 00:00:00"})
+        _st, doc = f.send("POST", "Call", body={"sfId": "c", "dateStart": "2025-01-01 00:00:00", "assignedUserId": "u"})
         self.assertEqual(f.db["Call"][doc["id"]]["duration"], 300)
-        _st, doc = f.send("POST", "Call", body={"sfId": "d", "dateStart": "2025-01-01 00:00:00", "duration": None})
+        _st, doc = f.send("POST", "Call", body={"sfId": "d", "dateStart": "2025-01-01 00:00:00", "duration": None,
+                                                "assignedUserId": "u"})
         self.assertEqual(f.db["Call"][doc["id"]]["duration"], 0)
         _st, doc = f.send("POST", "Account", body={"sfId": "b", "name": " n ", "description": " d "})
         self.assertEqual((f.db["Account"][doc["id"]]["name"], f.db["Account"][doc["id"]]["description"]),
                          ("n", " d "))
         _st, doc = f.send("POST", "Meeting", body={"sfId": "m", "dateStart": "2025-01-01 00:00:00",
-                                                   "meetingType": None})
+                                                   "meetingType": None, "assignedUserId": "u"})
         self.assertIsNone(f.db["Meeting"][doc["id"]]["meetingType"])
 
     def test_blank_enum_without_blank_option_is_refused(self):
@@ -1677,6 +1693,456 @@ class TestStatic(unittest.TestCase):
                 self.assertIn(f, fx.FIELDS_V4[src], f"{entity}.{f}")
             self.assertNotIn("Post_code__c", json.dumps(spec))
             self.assertNotIn("Key_Information__c", json.dumps(spec))
+
+
+class TestCrm008(Base):
+    """CRM-008 changes 3 to 7 (all data synthetic)."""
+
+    def load(self, data, name):
+        snap = write_snapshot(os.path.join(self.tmp, name), data=data)
+        espo = FakeEspo()
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        # The fake refuses what 10.0.12 refuses: nothing the loader sends is refused.
+        self.assertNotIn("write_rejected", self.report()["exceptions"]["byReason"])
+        return snap, espo
+
+    def codes(self, sf_id):
+        return {e["reason"] for e in self.exceptions() if e["sfId"] == sf_id}
+
+    def test_required_owner_refuses_task_call_and_meeting_only(self):
+        data = fx.org()
+        data["Task"][0]["OwnerId"] = fx.U_MISSING          # Task
+        data["Task"][1]["OwnerId"] = fx.QUEUE              # Call, owned by a queue
+        data["Event"][0]["OwnerId"] = None                 # Meeting
+        data["Account"][0]["OwnerId"] = fx.U_MISSING       # Account: still created
+        _, espo = self.load(data, "own")
+        self.assertNotIn(fx.T[0], espo.by_sf("Task"))
+        self.assertNotIn(fx.T[1], espo.by_sf("Call"))
+        self.assertNotIn(fx.E[0], espo.by_sf("Meeting"))
+        self.assertIn(fx.A[0], espo.by_sf("Account"))
+        self.assertIsNone(espo.by_sf("Account")[fx.A[0]]["assignedUserId"])
+        for sf_id in (fx.T[0], fx.T[1], fx.E[0]):
+            self.assertIn("owner_required_unresolved", self.codes(sf_id), sf_id)
+            self.assertNotIn("owner_unresolved", self.codes(sf_id), sf_id)
+        self.assertIn("owner_queue_or_group", self.codes(fx.T[1]))
+        self.assertEqual(self.codes(fx.A[0]) & {"owner_unresolved", "owner_required_unresolved"},
+                         {"owner_unresolved"})
+        rep = self.report()
+        self.assertEqual(rep["objects"]["Task"]["skipped"]["owner_required_unresolved"], 2)
+        self.assertEqual(rep["objects"]["Event"]["skipped"]["owner_required_unresolved"], 1)
+        self.assertNotIn("write_rejected", rep["exceptions"]["byReason"])
+
+    def test_task_email_without_email_message_is_a_task(self):
+        data = fx.org()
+        data["EmailMessage"][1]["ActivityId"] = None       # T[2] loses its EmailMessage
+        _, espo = self.load(data, "te")
+        task = espo.by_sf("Task")[fx.T[2]]
+        src = data["Task"][2]
+        self.assertEqual((task["name"], task["description"], task["status"], task["dateEndDate"]),
+                         (src["Subject"], src["Description"], "Completed", src["ActivityDate"]))
+        self.assertNotIn(fx.T[2], espo.by_sf("Email"))
+        self.assertIn("task_email_imported_as_task", self.codes(fx.T[2]))
+        # T[3] still has its EmailMessage: represented by it, not imported from the Task.
+        self.assertNotIn(fx.T[3], espo.by_sf("Task"))
+        self.assertNotIn(fx.T[3], espo.by_sf("Email"))
+        self.assertEqual(self.report()["objects"]["Task"]["skipped"]["represented_by_email_message"], 1)
+
+    def test_task_email_keeps_its_parent(self):
+        data = fx.org()
+        data["EmailMessage"][0]["ActivityId"] = None       # T[3] (parent O[0])
+        _, espo = self.load(data, "tp")
+        task = espo.by_sf("Task")[fx.T[3]]
+        self.assertEqual(task["parentType"], "Opportunity")
+        self.assertEqual(task["parentId"], espo.by_sf("Opportunity")[fx.O[0]]["id"])
+
+    def test_over_length_values_are_null_with_the_attribute_name_never_truncated(self):
+        data = fx.org()
+        data["Contact"][0]["MailingPostalCode"] = "P" * 41
+        data["Contact"][0]["Title"] = "T" * 255            # fits the raised limit
+        data["Contact"][1]["Title"] = "T" * 256
+        data["Contact"][0]["Phone"] = "0" * 37
+        data["Account"][2]["ShippingCity"] = "B" * 101
+        data["Account"][1]["Phone"] = "1" * 37
+        _, espo = self.load(data, "len")
+        c0 = espo.by_sf("Contact")[fx.C[0]]
+        self.assertIsNone(c0["addressPostalCode"])
+        self.assertEqual(c0["title"], "T" * 255)
+        self.assertIsNone(espo.by_sf("Contact")[fx.C[1]]["title"])
+        self.assertIsNone(espo.by_sf("Account")[fx.A[2]]["billingAddressCity"])
+        self.assertIsNone(espo.by_sf("Account")[fx.A[1]]["phoneNumber"])
+        self.assertFalse([p for p in c0.get("phoneNumberData") or [] if len(p["phoneNumber"]) > 36])
+        lines = [e for e in self.exceptions() if e["reason"] == "value_too_long"]
+        self.assertEqual({(e["sfId"], tuple(e["attributes"])) for e in lines},
+                         {(fx.C[0], ("Contact.addressPostalCode",)), (fx.C[1], ("Contact.title",)),
+                          (fx.A[2], ("Account.billingAddressCity",))})
+        # Not required: the record is still written, so nothing is skipped.
+        self.assertEqual({o: v["skipped"]["value_too_long"] for o, v in self.report()["objects"].items()
+                          if v["skipped"]["value_too_long"]}, {})
+        self.assertIn("phone_rejected", self.codes(fx.C[0]))
+        self.assertIn("phone_rejected", self.codes(fx.A[1]))
+        with open(os.path.join(self.last_dir, "exceptions.jsonl")) as fh:
+            raw = fh.read()
+        self.assertNotIn("P" * 41, raw)
+        self.assertNotIn("B" * 101, raw)
+
+    def test_over_length_required_name_refuses_the_record(self):
+        data = fx.org()
+        data["Account"][0]["Name"] = "N" * 250                       # Account.name 249, required
+        for r in data["Opportunity"]:
+            if r.get("Opportunity_Service__c") == "Service X":
+                r["Opportunity_Service__c"] = "S" * 151              # ServiceType.name 150, required
+        data["Opportunity"][0]["LeadSource"] = "L" * 101             # Opportunity.sfLeadSource: not required
+        _, espo = self.load(data, "req")
+        self.assertNotIn(fx.A[0], espo.by_sf("Account"))
+        self.assertFalse([w for w in espo.writes if w[1] == "Account" and w[2].get("sfId") == fx.A[0]])
+        self.assertEqual(sorted(r["name"] for r in espo.db["ServiceType"].values()), ["Service Y"])
+        self.assertFalse([w for w in espo.writes if w[1] == "ServiceType" and w[2].get("name") is None])
+        o0 = espo.by_sf("Opportunity")[fx.O[0]]                      # the Opportunity is still written
+        self.assertIsNone(o0["serviceTypeId"])
+        self.assertIsNone(o0["sfLeadSource"])
+        self.assertEqual(o0["name"], data["Opportunity"][0]["Name"])
+        lines = {(e["object"], e["sfId"]): e["attributes"] for e in self.exceptions()
+                 if e["reason"] == "value_too_long"}
+        # Qualified names: O[0] carries the ServiceType it first named, never a long Opportunity name.
+        self.assertEqual(lines, {("Account", fx.A[0]): ["Account.name"],
+                                 ("Opportunity", fx.O[0]): ["Opportunity.sfLeadSource", "ServiceType.name"]})
+        rep = self.report()
+        self.assertEqual(rep["objects"]["Account"]["skipped"]["value_too_long"], 1)
+        self.assertEqual(rep["objects"]["Opportunity"]["skipped"]["value_too_long"], 1)   # the ServiceType
+        self.assertNotIn("N" * 250, json.dumps(self.exceptions()))
+
+    def test_over_length_required_name_refuses_an_update_and_keeps_the_stored_name(self):
+        snap, espo = self.load(fx.org(), "u1")
+        before = espo.by_sf("Account")[fx.A[0]]["name"]
+        data = fx.org()
+        data["Account"][0]["Name"] = "N" * 250
+        data["Account"][0]["ShippingCity"] = "B" * 101
+        snap2 = write_snapshot(os.path.join(self.tmp, "u2"), data=data)
+        n = len(espo.writes)
+        self.assertEqual(self.run_load(snap=snap2, espo=espo), 0, self.last_err)
+        self.assertEqual(espo.by_sf("Account")[fx.A[0]]["name"], before)
+        self.assertFalse([w for w in espo.writes[n:] if w[1] == "Account"
+                          and w[2].get("name", before) != before])
+        self.assertEqual(self.report()["objects"]["Account"]["skipped"]["value_too_long"], 1)
+
+    def test_refused_existing_account_gets_no_write_in_any_pass(self):
+        # Auditor probe (round 4): an existing Account re-loaded with Name of 250 characters,
+        # a changed ParentId and a changed city.
+        snap, espo = self.load(fx.org(), "p1")
+        acc = espo.by_sf("Account")[fx.A[2]]
+        before = dict(acc)
+        data = fx.org()
+        data["Account"][2]["Name"] = "N" * 250
+        data["Account"][2]["ParentId"] = fx.A[0]                     # was A[1]
+        data["Account"][2]["BillingCity"] = "Elsewhere"
+        data["Account"][2]["ShippingCity"] = "Elsewhere"
+        n_req = len(espo.requests)
+        self.assertEqual(self.run_load(snap=write_snapshot(os.path.join(self.tmp, "p2"), data=data),
+                                       espo=espo), 0, self.last_err)
+        self.assertEqual([r for r in espo.requests[n_req:] if r[0] != "GET"], [])
+        self.assertEqual(espo.by_sf("Account")[fx.A[2]], before)
+        acc_rep = self.report()["objects"]["Account"]
+        self.assertEqual(acc_rep["skipped"]["value_too_long"], 1)
+        self.assertEqual(acc_rep["targets"]["Account"]["updated"], 0)
+        self.assertEqual(acc_rep.get("second_pass", {}).get("updated", 0), 0)
+        self.assertIn("value_too_long", self.codes(fx.A[2]))
+
+    def test_refused_existing_opportunity_gets_no_contact_role_write(self):
+        snap, espo = self.load(fx.org(), "r1")
+        before = dict(espo.by_sf("Opportunity")[fx.O[0]])
+        data = fx.org()
+        data["Opportunity"][0]["StageName"] = None                   # Opportunity.stage: refused
+        data["OpportunityContactRole"][1]["ContactId"] = fx.C[2]    # O[0] gains a role contact
+        n_req = len(espo.requests)
+        self.assertEqual(self.run_load(snap=write_snapshot(os.path.join(self.tmp, "r2"), data=data),
+                                       espo=espo), 0, self.last_err)
+        self.assertEqual([r for r in espo.requests[n_req:] if r[0] != "GET"], [])
+        self.assertEqual(espo.by_sf("Opportunity")[fx.O[0]], before)
+        rep = self.report()["objects"]
+        self.assertEqual(rep["Opportunity"]["skipped"]["enum_blank_unrepresentable"], 2)   # O[0], O[5]
+        self.assertEqual(rep["OpportunityContactRole"]["targets"].get("Opportunity", {}).get("updated", 0), 0)
+
+    def test_refused_service_type_marks_every_opportunity_naming_it(self):
+        data = fx.org()
+        named = []
+        for r in data["Opportunity"]:
+            if r.get("Opportunity_Service__c") == "Service X":
+                r["Opportunity_Service__c"] = "S" * 151
+                if r.get("IsDeleted") is not True:
+                    named.append(r["Id"])
+        data["Opportunity"][5]["Opportunity_Service__c"] = " " + "S" * 151      # padded: same value
+        named.append(data["Opportunity"][5]["Id"])
+        self.assertGreater(len(named), 2)
+        _, espo = self.load(data, "st")
+        lines = [e for e in self.exceptions() if e["reason"] == "service_type_refused"]
+        self.assertEqual(sorted(e["sfId"] for e in lines), sorted(named))
+        self.assertEqual({e["object"] for e in lines}, {"Opportunity"})
+        self.assertFalse([e for e in lines if set(e) - {"object", "sfId", "reason"}])     # id only
+        opps = espo.by_sf("Opportunity")
+        for sf_id in named:
+            if sf_id in opps:
+                self.assertIsNone(opps[sf_id]["serviceTypeId"], sf_id)
+        # An Opportunity naming an accepted ServiceType gets no such code.
+        y = [r["Id"] for r in data["Opportunity"] if r.get("Opportunity_Service__c") == "Service Y"]
+        self.assertTrue(y)
+        for sf_id in y:
+            self.assertNotIn("service_type_refused", self.codes(sf_id))
+            self.assertIsNotNone(opps[sf_id]["serviceTypeId"])
+        self.assertEqual(self.report()["objects"]["Opportunity"]["exceptions"]["service_type_refused"], len(named))
+        self.assertNotIn("S" * 151, json.dumps(self.exceptions()))
+
+    def test_over_length_optional_value_clears_the_field_on_update(self):
+        snap, espo = self.load(fx.org(), "c1")
+        self.assertIsNotNone(espo.by_sf("Account")[fx.A[0]]["billingAddressCity"])
+        data = fx.org()
+        data["Account"][0]["ShippingCity"] = "B" * 101
+        self.assertEqual(self.run_load(snap=write_snapshot(os.path.join(self.tmp, "c2"), data=data),
+                                       espo=espo), 0, self.last_err)
+        self.assertIsNone(espo.by_sf("Account")[fx.A[0]]["billingAddressCity"])
+        self.assertIn("value_too_long", self.codes(fx.A[0]))
+
+    def test_unresolved_owner_on_contact_opportunity_and_email_is_still_written(self):
+        data = fx.org()
+        data["Contact"][0]["OwnerId"] = fx.U_MISSING
+        data["Opportunity"][0]["OwnerId"] = fx.U_MISSING
+        # T[2] is a Task-Email an earlier run created as an Email; it is updated as an Email.
+        data["Task"][2]["OwnerId"] = fx.U_MISSING
+        data["EmailMessage"][1]["ActivityId"] = None
+        snap = write_snapshot(os.path.join(self.tmp, "ow"), data=data)
+        espo = FakeEspo()
+        espo._insert("Email", {"sfId": fx.T[2], "from": "a@example.test", "name": "old", "status": "Archived",
+                               "assignedUserId": None})
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        self.assertNotIn("write_rejected", self.report()["exceptions"]["byReason"])
+        c0 = espo.by_sf("Contact")[fx.C[0]]
+        o0 = espo.by_sf("Opportunity")[fx.O[0]]
+        e2 = espo.by_sf("Email")[fx.T[2]]
+        self.assertIsNone(c0["assignedUserId"])
+        self.assertIsNone(o0["assignedUserId"])
+        self.assertEqual(e2["name"], data["Task"][2]["Subject"])     # written, not refused
+        self.assertNotIn(fx.T[2], espo.by_sf("Task"))
+        for sf_id in (fx.C[0], fx.O[0], fx.T[2]):
+            self.assertIn("owner_unresolved", self.codes(sf_id), sf_id)
+            self.assertNotIn("owner_required_unresolved", self.codes(sf_id), sf_id)
+        rep = self.report()
+        for obj in ("Contact", "Opportunity", "Task"):
+            self.assertEqual(rep["objects"][obj]["skipped"]["owner_required_unresolved"], 0, obj)
+
+    def test_value_at_the_limit_is_sent(self):
+        data = fx.org()
+        data["Contact"][0]["MailingPostalCode"] = " " + "P" * 40 + " "   # trimmed: fits
+        _, espo = self.load(data, "lim")
+        self.assertEqual(espo.by_sf("Contact")[fx.C[0]]["addressPostalCode"].strip(), "P" * 40)
+        self.assertNotIn("value_too_long", self.codes(fx.C[0]))
+
+    def test_invalid_to_and_cc_are_dropped_and_invalid_from_refuses(self):
+        data = fx.org()
+        data["EmailMessage"][0]["ToAddress"] = "good@example.test; Value A"
+        data["EmailMessage"][0]["CcAddress"] = "bad@@example.test"
+        data["EmailMessage"][1]["FromAddress"] = "not an address"
+        _, espo = self.load(data, "em")
+        m0 = espo.by_sf("Email")[fx.M[0]]
+        self.assertEqual(m0["to"], "good@example.test")
+        self.assertIsNone(m0["cc"])
+        self.assertIn("email_address_invalid", self.codes(fx.M[0]))
+        self.assertNotIn(fx.M[1], espo.by_sf("Email"))
+        self.assertIn("email_from_invalid", self.codes(fx.M[1]))
+        self.assertEqual(self.report()["objects"]["EmailMessage"]["skipped"]["email_from_invalid"], 1)
+
+    def test_blank_from_refuses(self):
+        data = fx.org()
+        data["EmailMessage"][1]["FromAddress"] = "  "
+        _, espo = self.load(data, "bf")
+        self.assertNotIn(fx.M[1], espo.by_sf("Email"))
+        self.assertIn("email_from_invalid", self.codes(fx.M[1]))
+
+    def test_rerun_after_refusals_makes_no_writes(self):
+        data = fx.org()
+        data["Task"][0]["OwnerId"] = fx.U_MISSING
+        data["EmailMessage"][1]["ActivityId"] = None
+        data["EmailMessage"][0]["CcAddress"] = "bad@@example.test"
+        data["Contact"][1]["Title"] = "T" * 256
+        data["Account"][0]["Name"] = "N" * 250
+        data["Account"][1]["Phone"] = "1" * 37
+        data["EmailMessage"][0]["ToAddress"] = "good@example.test; Value A"
+        data["Event"][0]["OwnerId"] = fx.QUEUE
+        snap, espo = self.load(data, "rr")
+        self.assertEqual(self.report()["exceptions"]["byReason"].get("write_rejected", 0), 0)
+        n = len(espo.writes)
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        self.assertEqual(espo.writes[n:], [])
+
+
+class TestFaithfulFake(Base):
+    """CRM-008: FakeEspo refuses what EspoCRM 10.0.12 refuses (PL-verified)."""
+
+    def post(self, entity, body, espo=None):
+        self._n += 1
+        return (espo or FakeEspo()).send("POST", entity, body=dict(body, sfId=f"s{self._n}"))
+
+    def test_owner_required_on_task_call_meeting(self):
+        start = {"dateStart": "2025-01-01 00:00:00"}
+        for entity in ("Task", "Call", "Meeting"):
+            for body in ({}, {"assignedUserId": None}):
+                with self.subTest(entity=entity, body=body):
+                    self.assertEqual(self.post(entity, dict(start, **body)),
+                                     (400, {"field": "assignedUser", "type": "required"}))
+            self.assertEqual(self.post(entity, dict(start, assignedUserId="u"))[0], 200)
+        self.assertEqual(self.post("Account", {"name": "a"})[0], 200)       # owner not required there
+        f = FakeEspo()
+        _st, doc = self.post("Task", {"assignedUserId": "u"}, f)
+        self.assertEqual(f.send("PUT", f"Task/{doc['id']}", body={"assignedUserId": None})[0], 400)
+        self.assertEqual(f.send("PUT", f"Task/{doc['id']}", body={"name": "n"})[0], 200)
+
+    def test_name_required_on_account_and_service_type(self):
+        for entity in ("Account", "ServiceType"):
+            for body in ({}, {"name": None}, {"name": ""}, {"name": "  "}):
+                with self.subTest(entity=entity, body=body):
+                    self.assertEqual(self.post(entity, body), (400, {"field": "name", "type": "required"}))
+            f = FakeEspo()
+            _st, doc = self.post(entity, {"name": "n"}, f)
+            self.assertEqual(f.send("PUT", f"{entity}/{doc['id']}", body={"name": None}),
+                             (400, {"field": "name", "type": "required"}))
+            self.assertEqual(f.send("PUT", f"{entity}/{doc['id']}", body={"description": "d"})[0], 200)
+        self.assertEqual(self.post("Contact", {"lastName": "x"})[0], 200)   # name not checked there
+
+    def test_max_length(self):
+        self.assertEqual(self.post("Contact", {"title": "t" * 256}), (400, {"field": "title", "type": "maxLength"}))
+        self.assertEqual(self.post("Contact", {"title": " " + "t" * 255 + " "})[0], 200)   # trimmed
+        self.assertEqual(self.post("Account", {"name": "n" * 250})[0], 400)
+        self.assertEqual(self.post("Account", {"name": "n" * 249})[0], 200)
+        self.assertEqual(self.post("Account", {"name": "a", "phoneNumber": "1" * 37})[0], 400)
+        self.assertEqual(self.post("Account", {"name": "a", "phoneNumber": "1" * 36})[0], 200)
+        self.assertEqual(self.post("Contact", {"phoneNumberData": [{"phoneNumber": "1" * 37, "primary": True}]}),
+                         (400, {"field": "phoneNumber", "type": "maxLength"}))
+
+    def test_max_length_table_matches_mapping(self):
+        mapping = {e: {a: n for a, n in v.items() if a != "phoneNumberData" and a != "phoneNumber"}
+                   for e, v in load_json("mapping.json")["maxLength"].items() if e != "note"}
+        self.assertEqual(mapping, fx.FakeEspo.MAX_LENGTH)
+        phones = {n for v in load_json("mapping.json")["maxLength"].values() if isinstance(v, dict)
+                  for a, n in v.items() if a in ("phoneNumber", "phoneNumberData")}
+        self.assertEqual(phones, {fx.FakeEspo.PHONE_MAX_LENGTH})
+
+    def test_amount_currency_against_settings(self):
+        usd = fx.FakeEspo()                                  # 10.0.12 install default: USD only
+        self.assertEqual(usd.send("GET", "Settings")[1]["currencyList"], ["USD"])
+        body = {"name": "o", "stage": "Enquiry", "amount": 1.5, "amountCurrency": "GBP"}
+        self.assertEqual(self.post("Opportunity", body, usd), (400, {"field": "amount", "type": "validCurrency"}))
+        self.assertEqual(self.post("Opportunity", dict(body, amount=None, amountCurrency=None), usd)[0], 200)
+        self.assertEqual(usd.provision_settings(), {"settings": {"created": 0, "updated": 1, "unchanged": 0}})
+        self.assertEqual(usd.send("GET", "Settings")[1]["currencyList"], ["GBP"])
+        self.assertEqual(self.post("Opportunity", dict(body, name="p"), usd)[0], 200)
+        self.assertEqual(self.post("Opportunity", dict(body, name="q", amountCurrency="USD"), usd)[0], 400)
+        self.assertEqual(usd.provision_settings(), {"settings": {"created": 0, "updated": 0, "unchanged": 1}})
+
+    def test_email_addresses_and_from(self):
+        ok = {"from": "a@example.test", "to": "b@example.test;c@example.test", "cc": None}
+        self.assertEqual(self.post("Email", ok)[0], 200)
+        for attr, bad in (("to", "b@example.test;Value A"), ("cc", "x@@example.test"), ("from", "nope")):
+            with self.subTest(attr=attr):
+                self.assertEqual(self.post("Email", dict(ok, **{attr: bad})), (400, {"field": attr, "type": "valid"}))
+        for blank in (None, "", "  "):
+            self.assertEqual(self.post("Email", dict(ok, **{"from": blank})),
+                             (400, {"field": "from", "type": "required"}))
+        self.assertEqual(self.post("Email", {k: v for k, v in ok.items() if k != "from"})[0], 400)
+
+
+class TestCurrencySettings(Base):
+    """The loader against USD-only Settings is refused every amount; against GBP it passes."""
+
+    def test_usd_settings_refuse_every_amount_then_gbp_passes(self):
+        espo = fx.FakeEspo()
+        self.assertEqual(self.run_load(espo=espo), 5)
+        with_amount = {r["Id"] for r in fx.org()["Opportunity"] if r["Amount"] is not None and not r["IsDeleted"]}
+        rejected = {e["sfId"] for e in self.exceptions() if e["reason"] == "write_rejected"}
+        self.assertEqual(rejected, with_amount)
+        self.assertNotIn(fx.O[0], espo.by_sf("Opportunity"))
+        self.assertEqual(len(rejected), self.report()["exceptions"]["byReason"]["write_rejected"])
+        espo.provision_settings()
+        self.assertEqual(self.run_load(espo=espo), 0, self.last_err)
+        self.assertNotIn("write_rejected", self.report()["exceptions"]["byReason"])
+        self.assertEqual(espo.by_sf("Opportunity")[fx.O[0]]["amountCurrency"], "GBP")
+        n = len(espo.writes)
+        self.assertEqual(self.run_load(espo=espo), 0, self.last_err)
+        self.assertEqual(espo.writes[n:], [])
+
+
+class TestEmailValidation(unittest.TestCase):
+    def test_valid_and_invalid_addresses(self):
+        from crm_load.mapping import email_valid
+        for good in ("a@example.test", "first.last+tag@sub.example.co.uk", "o'neil@example.test",
+                     "x_y-z@a-b.example.test", "a" * 64 + "@example.test"):
+            self.assertTrue(email_valid(good), good)
+        for bad in (None, "", " ", "Value A", "a@b", "a@@example.test", "a@example.test ",
+                    ".a@example.test", "a.@example.test", "a..b@example.test", "a@-x.example.test",
+                    "a@x-.example.test", "a@example.123", "a b@example.test", '"q"@example.test',
+                    "a@[127.0.0.1]", "é@example.test", "a" * 65 + "@example.test",
+                    "a@" + "b" * 64 + ".test", "a@" + ("b" * 60 + ".") * 5 + "test",
+                    "a@example..test", "a@example.test;b@example.test"):
+            self.assertFalse(email_valid(bad), bad)
+
+
+class TestMaxLengthContract(unittest.TestCase):
+    """CRM-008 change 5: mapping.json maxLength agrees with the custom entityDefs."""
+
+    def test_entries_name_mapped_attributes_and_match_custom_entity_defs(self):
+        mapping = load_json("mapping.json")
+        repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        defs_dir = os.path.join(repo, "custom", "Espo", "Custom", "Resources", "metadata",
+                                "entityDefs")
+        for entity, limits in mapping["maxLength"].items():
+            if entity == "note":
+                continue
+            spec = mapping["entities"][entity]
+            mapped = set(spec.get("copy", {})) | set(spec.get("attributes", []))
+            path = os.path.join(defs_dir, f"{entity}.json")
+            fields = {}
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8") as fh:
+                    fields = json.load(fh).get("fields", {})
+            for attr, limit in limits.items():
+                with self.subTest(attr=f"{entity}.{attr}"):
+                    self.assertIn(attr, mapped)
+                    self.assertIsInstance(limit, int)
+                    if "maxLength" in fields.get(attr, {}):
+                        self.assertEqual(limit, fields[attr]["maxLength"])
+
+    def test_contact_title_is_255_in_both(self):
+        self.assertEqual(load_json("mapping.json")["maxLength"]["Contact"]["title"], 255)
+
+    def test_synthetic_event_type_maps_to_meeting_type_options(self):
+        mapping = load_json("mapping.json")
+        options = mapping["enums"]["Meeting.meetingType"]
+        table = mapping["syntheticEnumMap"]["Event.Type"]
+        self.assertEqual(set(table), {"Value A", "Value B", "Value C"})
+        self.assertTrue(set(table.values()) <= set(options) - {""})
+
+
+class TestSyntheticEventType(Base):
+    def test_synthetic_type_is_mapped_only_for_a_synthetic_snapshot(self):
+        row = dict(Id=fx.E[0], OwnerId=fx.U1, Subject="S", Type="Value B",
+                   StartDateTime="2025-06-01T09:00:00Z", EndDateTime=None, IsAllDayEvent=False)
+
+        class Ctx:
+            def user_id(self, _):
+                return "u1"
+
+            def soft_deleted(self, _):
+                return False
+
+            def record_id(self, *_):
+                return None
+        real = self.mapper()
+        attrs, exc = real.event(row, Ctx())
+        self.assertIsNone(attrs["meetingType"])
+        self.assertIn("enum_unmapped", exc)
+        synth = Mapper(load_json("mapping.json"), {}, NameParser([]), "2026-11-01",
+                       "2026-11-01 00:00:00", synthetic=True)
+        attrs, exc = synth.event(row, Ctx())
+        self.assertEqual(attrs["meetingType"], "Call")
+        self.assertIn("synthetic_enum_mapped", exc)
+        self.assertNotIn("enum_unmapped", exc)
 
 
 if __name__ == "__main__":

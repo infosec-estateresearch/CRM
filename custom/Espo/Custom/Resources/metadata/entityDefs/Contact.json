@@ -6,6 +6,9 @@
         "emailAddress": {
             "audited": true
         },
+        "title": {
+            "maxLength": 255
+        },
         "opportunityRole": {
             "options": ["", "Business User", "Decision Maker", "Economic Buyer", "Economic Decision Maker", "Evaluator", "Executive Sponsor", "Influencer", "Technical Buyer", "Other"]
         },

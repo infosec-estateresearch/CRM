@@ -367,7 +367,9 @@ class TestBrokenFixtures(unittest.TestCase):
 # Core fields: CRM-003 only switches field history on ({"audited": true}). The one
 # exception (CRM-006, PL-authorised): Contact.opportunityRole may also set its options, so
 # the enquiry contact-role column accepts the Salesforce roles. Any other key is refused.
-CORE_OVERRIDE_EXCEPTIONS = {("Contact", "opportunityRole"): {"audited", "options"}}
+CORE_OVERRIDE_EXCEPTIONS = {("Contact", "opportunityRole"): {"audited", "options"},
+                            # CRM-008: maxLength only, raised to 255 so the real Title fits.
+                            ("Contact", "title"): {"maxLength"}}
 
 
 def core_override_violations(entity, name, field):
@@ -478,8 +480,34 @@ class TestMetadataConsistency(unittest.TestCase):
     def test_role_documents_use_only_espocrm_role_attributes(self):
         config = provision_access.load_config()  # raises on unknown attributes
         for role in config["roles"]:
-            self.assertEqual(set(role) - {"name"}, set(provision_access.ROLE_ATTRIBUTES),
+            self.assertEqual(set(role) - {"name"} - set(provision_access.ROLE_DOC_KEYS),
+                             set(provision_access.ROLE_ATTRIBUTES),
                              role["name"])
+
+    def test_role_info_is_documentation_only_and_never_sent(self):
+        # CRM-008 change 8: EspoCRM has no Role.info attribute.
+        self.assertNotIn("info", provision_access.ROLE_ATTRIBUTES)
+        for role in provision_access.load_config()["roles"]:
+            self.assertNotIn("info", provision_access.role_desired(role), role["name"])
+
+
+class TestSettingsFile(unittest.TestCase):
+    """CRM-008 change 2: the Settings provision_access.py enforces on the target."""
+
+    def test_settings_are_gbp_and_national_phone_numbers(self):
+        settings = provision_access.load_settings()
+        self.assertEqual(settings, {"currencyList": ["GBP"], "defaultCurrency": "GBP",
+                                    "baseCurrency": "GBP", "phoneNumberInternational": False})
+
+    def test_settings_file_lives_in_config(self):
+        self.assertEqual(os.path.relpath(provision_access.SETTINGS_FILE, REPO),
+                         os.path.join("config", "settings.json"))
+
+    def test_importer_currency_is_in_the_currency_list(self):
+        mapping = load_json(os.path.join(REPO, "load", "contract", "mapping.json"))
+        settings = provision_access.load_settings()
+        self.assertEqual(mapping["currency"], settings["defaultCurrency"])
+        self.assertIn(mapping["currency"], settings["currencyList"])
 
 
 class TestHookFile(unittest.TestCase):

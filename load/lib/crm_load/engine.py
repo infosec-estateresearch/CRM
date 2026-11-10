@@ -18,7 +18,7 @@ import os
 
 from .api import WriteRejected
 from .errors import LoadError
-from .mapping import EXCEPTION_CODES, check_shape
+from .mapping import EXCEPTION_CODES, REFUSING_CODES, check_shape
 from .users import is_human
 
 ENTITIES = ("User", "ServiceType", "Account", "Contact", "Opportunity", "Task", "Call", "Meeting", "Email")
@@ -207,9 +207,19 @@ class Loader:
                             "skipped": {"soft_deleted": 0, "absent_unexplained": 0, "out_of_scope": 0,
                                         "represented_by_email_message": 0, "parent_soft_deleted": 0,
                                         "user_not_human": 0, "value_shape": 0,
-                                        "enum_blank_unrepresentable": 0},
+                                        "enum_blank_unrepresentable": 0,
+                                        "owner_required_unresolved": 0, "email_from_invalid": 0,
+                                        "value_too_long": 0},
                             "targets": {}, "exceptions": {}} for o in SOURCE_OBJECTS}
         self.flagged = {}
+        # CRM-008: target maxLength per entity and attribute (mapping.json maxLength).
+        self.max_length = {e: dict(v) for e, v in mapping.get("maxLength", {}).items() if e != "note"}
+        # CRM-008 round 3: required target attributes; an over-length one refuses the record.
+        self.required = {e: set(v) for e, v in mapping.get("requiredAttributes", {}).items() if e != "note"}
+        # CRM-008 round 4: records refused by upsert in this run, (object, sfId); every later
+        # write for them (second passes included) is skipped. ServiceType refusals by value.
+        self.refused_records = set()
+        self.refused_service_types = set()
 
     # ---------------------------------------------------------------- index
     def _attrs(self, entity):
@@ -233,7 +243,7 @@ class Loader:
             self.log.event("index", entity=entity, records=len(idx))
 
     # ---------------------------------------------------------------- bookkeeping
-    def exception(self, obj, sf_id, reason):
+    def exception(self, obj, sf_id, reason, attribute=None):
         if reason not in EXCEPTION_CODES:
             raise LoadError("exception_code_unknown")
         k = (obj, sf_id, reason)
@@ -241,6 +251,39 @@ class Loader:
             self.exceptions[k] = None
             ex = self.objects[obj]["exceptions"]
             ex[reason] = ex.get(reason, 0) + 1
+        if attribute is not None:
+            # The attribute name only (value_too_long, qualified Entity.attribute), never the value.
+            self.exceptions[k] = sorted(set(self.exceptions[k] or []) | {attribute})
+
+    def _limit_lengths(self, obj, sf_id, entity, attrs):
+        """CRM-008 change 5: a varchar, email or phone value longer than the target maxLength
+        (trimmed, as stored) is sent as null with value_too_long and its qualified attribute
+        name (Entity.attribute); a phone number is dropped with phone_rejected. Never truncated.
+        An over-length required attribute (requiredAttributes) refuses the record: None."""
+        limits = self.max_length.get(entity)
+        if not limits:
+            return attrs
+        out = dict(attrs)
+        required = self.required.get(entity, set())
+        refused = False
+        for a, limit in limits.items():
+            if a == "phoneNumber" and a in out and isinstance(out[a], str) and \
+                    len(out[a].strip()) > limit:
+                out[a] = None
+                self.exception(obj, sf_id, "phone_rejected")
+            elif a == "phoneNumberData" and isinstance(out.get(a), list):
+                kept = [p for p in out[a] if not (isinstance(p.get("phoneNumber"), str)
+                                                  and len(p["phoneNumber"].strip()) > limit)]
+                if len(kept) != len(out[a]):
+                    self.exception(obj, sf_id, "phone_rejected")
+                    if kept and not any(p.get("primary") for p in kept):
+                        kept[0] = dict(kept[0], primary=True)
+                    out[a] = kept or None
+            elif isinstance(out.get(a), str) and len(out[a].strip()) > limit:
+                out[a] = None
+                self.exception(obj, sf_id, "value_too_long", f"{entity}.{a}")
+                refused = refused or a in required
+        return None if refused else out
 
     def _count(self, obj, entity, action):
         t = self.objects[obj]["targets"].setdefault(entity, {"created": 0, "updated": 0, "unchanged": 0,
@@ -248,13 +291,25 @@ class Loader:
         t[action] += 1
 
     # ---------------------------------------------------------------- upsert
+    def _refuse(self, obj, sf_id, entity, key, reason):
+        """The record is not sent: counted once in skipped, remembered so no later write is made."""
+        self.objects[obj]["skipped"][reason] += 1
+        if entity == "ServiceType":
+            self.refused_service_types.add(key)
+        else:
+            self.refused_records.add((obj, sf_id))
+        return None
+
     def upsert(self, phase, obj, sf_id, entity, key, attrs, create=True):
+        attrs = self._limit_lengths(obj, sf_id, entity, attrs)
+        if attrs is None:
+            # A required attribute is over length: null would be refused (400 required). Never sent.
+            return self._refuse(obj, sf_id, entity, key, "value_too_long")
         blank_enum = [a for a in attrs if f"{entity}.{a}" in self.no_blank and _norm(attrs[a]) is None]
         if blank_enum:
             # No "" option: null and "" are refused (400 valid) and omitting stores the default.
             self.exception(obj, sf_id, "enum_blank_unrepresentable")
-            self.objects[obj]["skipped"]["enum_blank_unrepresentable"] += 1
-            return None
+            return self._refuse(obj, sf_id, entity, key, "enum_blank_unrepresentable")
         attrs = self._known_refusals(obj, sf_id, attrs)
         existing = self.index[entity].get(key)
         text = self.text_attrs.get(entity, set())
@@ -418,8 +473,13 @@ class Loader:
         return cur
 
     def _record_exc(self, obj, row, codes):
+        """Record the codes; True when one of them refuses the record (never sent)."""
         for c in codes:
             self.exception(obj, row["Id"], c)
+        refused = [c for c in codes if c in REFUSING_CODES]
+        for c in dict.fromkeys(refused):
+            self.objects[obj]["skipped"][c] += 1
+        return bool(refused)
 
     def run(self):
         m, ctx = self.mapper, EspoContext(self.index, soft_deleted_ids(self.s))
@@ -448,7 +508,8 @@ class Loader:
         for r in accounts:
             attrs, exc = m.account_parent(r, ctx)
             self._record_exc("Account", r, exc)
-            if r["Id"] in self.index["Account"]:
+            # A record refused in pass 1 gets no write at all, not even its parent link.
+            if r["Id"] in self.index["Account"] and ("Account", r["Id"]) not in self.refused_records:
                 self._upsert_quiet("account_parent", "Account", r, "Account", attrs)
         for r in self._source("Contact"):
             attrs, exc = m.contact(r, ctx)
@@ -457,6 +518,11 @@ class Loader:
         for r in opps:
             attrs, exc = m.opportunity(r, ctx)
             self._record_exc("Opportunity", r, exc)
+            service = r.get("Opportunity_Service__c")
+            if isinstance(service, str) and service.strip() in self.refused_service_types:
+                # Its ServiceType was refused: no link, and a code on this Opportunity (id only).
+                attrs["serviceTypeId"] = None
+                self.exception("Opportunity", r["Id"], "service_type_refused")
             self.upsert("opportunity", "Opportunity", r["Id"], "Opportunity", r["Id"], attrs)
         self._contact_roles(ctx)
         tasks = self._source("Task")
@@ -468,12 +534,17 @@ class Loader:
             if entity == "Email" and r["Id"] in emailed_tasks:
                 self.objects["Task"]["skipped"]["represented_by_email_message"] += 1
                 continue
-            entity, attrs, exc = m.task(r, ctx)
-            self._record_exc("Task", r, exc)
+            # CRM-008: a Task-Email no EmailMessage represents is a Task, unless an earlier
+            # run already created it as an Email (it is never moved).
+            routed = None if entity == "Email" and r["Id"] in self.index["Email"] else emailed_tasks
+            entity, attrs, exc = m.task(r, ctx, routed)
+            if self._record_exc("Task", r, exc):
+                continue
             self.upsert("task", "Task", r["Id"], entity, r["Id"], attrs)
         for r in self._source("Event"):
             attrs, exc = m.event(r, ctx)
-            self._record_exc("Event", r, exc)
+            if self._record_exc("Event", r, exc):
+                continue
             self.upsert("event", "Event", r["Id"], "Meeting", r["Id"], attrs)
         # Contract v4 visibleVia: a relation whose EmailMessage or Contact is soft-deleted is
         # hidden in Salesforce; it is skipped, never imported (deletion class parent_soft_deleted).
@@ -487,7 +558,8 @@ class Loader:
             relations.setdefault(rel.get("EmailMessageId"), []).append(rel)
         for r in emails:
             attrs, exc = m.email_message(r, relations.get(r["Id"], []), task_by_id, ctx)
-            self._record_exc("EmailMessage", r, exc)
+            if self._record_exc("EmailMessage", r, exc):
+                continue
             self.upsert("email_message", "EmailMessage", r["Id"], "Email", r["Id"], attrs)
         notes = self._source("Note")
         self.objects["Note"]["skipped"]["out_of_scope"] = len(notes)
@@ -529,6 +601,8 @@ class Loader:
                 role = ""
             by_opp.setdefault(opp, {})[cid] = role
         for opp, contacts in sorted(by_opp.items()):
+            if ("Opportunity", opp) in self.refused_records:
+                continue          # the Opportunity was refused in this run: its roles are not written
             attrs = {"contactsIds": sorted(contacts),
                      "contactsColumns": {c: {"role": role} for c, role in sorted(contacts.items())}}
             self.upsert("contact_roles", "OpportunityContactRole", opp, "Opportunity", opp, attrs, create=False)
