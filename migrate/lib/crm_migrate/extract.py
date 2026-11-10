@@ -6,7 +6,9 @@
 3. Catch-up passes 1..N: ``SystemModstamp >= W - overlap`` (W = start of the previous pass),
    merged by Id so the latest ``SystemModstamp`` wins. Stop early on a quiet pass.
 4. Verification: ``COUNT()`` through ``query`` and ``queryAll``, an id-only ``queryAll``, and
-   (for ``replicateable`` objects) the deleted-records log.
+   (for ``replicateable`` objects) the deleted-records log. For an object with ``visibleVia``
+   (contract v4), a row is query-visible only when no listed parent is soft-deleted in that
+   parent's final baseline of the same run.
 5. Status per object and overall: RECONCILED, RECONCILED_WITH_DRIFT or INCOMPLETE.
 
 Watermarks never come from the local clock. The overlap is an assumption, not a guarantee.
@@ -112,9 +114,32 @@ def _query_visible(row, spec, effective_fields):
     return True
 
 
+def via_key(field, parent):
+    return f"{parent}.{field}"
+
+
+def hidden_via(row, spec, parent_soft_deleted):
+    """``visibleVia`` keys through which a soft-deleted parent hides ``row`` from ``query``."""
+    return [via_key(f, o) for f, o in spec.visible_via if row.get(f) in parent_soft_deleted[o]]
+
+
+def soft_deleted_ids(final_rows):
+    """Ids of soft-deleted rows (``IsDeleted = true``) in a final baseline (id -> (stamp, row))."""
+    return frozenset(rid for rid, (_, row) in final_rows.items() if row.get("IsDeleted") is True)
+
+
 def assess_object(spec, effective_fields, baseline, verify_ids, count_query, count_all,
-                  deleted_ids, last_pass_start, overlap, last_pass_changed):
-    """Pure verification of one object. Returns (status, details, explained_deleted_ids)."""
+                  deleted_ids, last_pass_start, overlap, last_pass_changed, parent_soft_deleted=None):
+    """Pure verification of one object. Returns (status, details, explained_deleted_ids).
+
+    ``parent_soft_deleted`` maps each ``visibleVia`` parent object to the ids soft-deleted in its
+    final baseline of the same run; it is required when ``spec.visible_via`` is set.
+    """
+    if spec.visible_via:
+        parent_soft_deleted = parent_soft_deleted or {}
+        for _, parent in spec.visible_via:
+            if parent not in parent_soft_deleted:
+                raise ProtocolError("visible_via_parent_missing", detail=f"{spec.name} {parent}")
     b_ids = set(baseline)
     v_ids = set(verify_ids)
     missing = b_ids - v_ids
@@ -144,10 +169,17 @@ def assess_object(spec, effective_fields, baseline, verify_ids, count_query, cou
     count_all_matches = None
     count_query_matches = None
     archive_known = not (spec.field("IsArchived") is not None and "IsArchived" not in effective_fields)
+    via = {via_key(f, o): 0 for f, o in spec.visible_via}
+    hidden_ids = set()
+    for rid in final_ids:
+        for key in (hidden_via(baseline[rid][1], spec, parent_soft_deleted) if spec.visible_via else ()):
+            via[key] += 1
+            hidden_ids.add(rid)
     if residual == 0:
         count_all_matches = count_all == len(final_ids)
         if archive_known:
-            visible = sum(1 for rid in final_ids if _query_visible(baseline[rid][1], spec, effective_fields))
+            visible = sum(1 for rid in final_ids
+                          if rid not in hidden_ids and _query_visible(baseline[rid][1], spec, effective_fields))
             count_query_matches = count_query == visible
     reasons = []
     if unexplained_missing:
@@ -188,6 +220,9 @@ def assess_object(spec, effective_fields, baseline, verify_ids, count_query, cou
         "change_key_regressed": regressed,
         "state_mismatch": inconsistent,
     }
+    if spec.visible_via:
+        details["hidden_via"] = via
+        details["hidden_via_rows"] = len(hidden_ids)
     return status, details, explained
 
 
@@ -312,6 +347,7 @@ def _extract(client, contract, out, log, options, manifest):
     deletion_log = {}
     objects = {}
     statuses = []
+    parent_soft_deleted = {}   # softDelete object -> ids soft-deleted in its final baseline
     for spec in specs:
         fields = effective[spec.name].fields
         q_count = soql_count(spec)
@@ -346,9 +382,11 @@ def _extract(client, contract, out, log, options, manifest):
         last_changed = last["objects"][spec.name].get("changed", 0) if last["kind"] == "catch-up" else 0
         status, details, explained = assess_object(
             spec, fields, baselines[spec.name], verify_ids, count_query, count_all, deleted_ids,
-            last_start, options.overlap, last_changed)
+            last_start, options.overlap, last_changed, parent_soft_deleted)
         statuses.append(status)
         final = {rid: v for rid, v in baselines[spec.name].items() if rid not in explained}
+        if spec.soft_delete:
+            parent_soft_deleted[spec.name] = soft_deleted_ids(final)
         rows = [final[rid][1] for rid in sorted(final)]
         out.write_jsonl_gz(f"objects/{spec.name}.jsonl.gz", rows)
         if deletion_log[spec.name] != "unavailable":
@@ -357,7 +395,8 @@ def _extract(client, contract, out, log, options, manifest):
         drift = [p["objects"][spec.name]["changed"] for p in passes if p["kind"] == "catch-up"]
         details.update({
             "rows": len(rows),
-            "current": sum(1 for r in rows if not (spec.soft_delete and r.get("IsDeleted") is True)),
+            "current": sum(1 for r in rows if not (spec.soft_delete and r.get("IsDeleted") is True))
+            - details.get("hidden_via_rows", 0),
             "soft_deleted": sum(1 for r in rows if spec.soft_delete and r.get("IsDeleted") is True),
             "archived": (sum(1 for r in rows if r.get("IsArchived") is True) if "IsArchived" in fields
                          else ("unavailable" if spec.field("IsArchived") else "not_applicable")),

@@ -36,6 +36,9 @@ def run_selftest(contract, out, log, quick=True):
     client = fake_client(contract, fake)
     m1 = run_extract(client, contract, out.subdir("run-1"), log)
     checks["run_1_reconciled"] = m1["status"] == RECONCILED
+    # contract v4 visibleVia: the fixture's relations hidden by soft-deleted parents (L3-shaped)
+    checks["visible_via_hidden"] = (m1["objects"]["EmailMessageRelation"].get("hidden_via")
+                                    == {"EmailMessage.EmailMessageId": 4, "Contact.RelationId": 4})
     _between_runs(fake.org)
     m2 = run_extract(client, contract, out.subdir("run-2"), log)
     checks["run_2_reconciled"] = m2["status"] == RECONCILED

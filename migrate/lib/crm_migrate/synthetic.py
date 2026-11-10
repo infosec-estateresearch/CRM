@@ -189,11 +189,20 @@ class FakeOrg:
         self.deleted_log[obj].append((loser, self.clock))
 
     # visibility --------------------------------------------------------
+    def parent_hidden(self, obj, row):
+        """True when ``query`` hides ``row`` because a ``visibleVia`` parent is soft-deleted."""
+        for field, parent in self.contract.object(obj).visible_via:
+            target = self.rows[parent].get(row.get(field))
+            if target is not None and target.get("IsDeleted") is True:
+                return True
+        return False
+
     def visible(self, obj, all_rows):
         out = []
         for rid in sorted(self.rows[obj]):
             row = self.rows[obj][rid]
-            if not all_rows and (row.get("IsDeleted") is True or row.get("IsArchived") is True):
+            if not all_rows and (row.get("IsDeleted") is True or row.get("IsArchived") is True
+                                 or self.parent_hidden(obj, row)):
                 continue
             out.append(row)
         return out
@@ -260,7 +269,12 @@ PLANTED = {
     "Task.WhatId.not_extracted": 1, "EmailMessage.ActivityId.orphans": 1,
     "EmailMessageRelation.unmatched_address": 4, "EmailMessageRelation.RelationId.orphans": 1,
     "OpportunityContactRole.ContactId.orphans": 1, "Opportunity.AccountId.orphans": 1,
+    # CRM-002-V, shaped like the first L3: relations hidden from query by soft-deleted parents
+    "EmailMessage.soft_deleted": 1, "Contact.soft_deleted": 1,
+    "EmailMessageRelation.hidden_via.EmailMessage.EmailMessageId": 4,
+    "EmailMessageRelation.hidden_via.Contact.RelationId": 4,
 }
+SOFT_DELETED_PARENT_AGE = _dt.timedelta(days=40)   # outside the 29-day deletion-log window
 
 
 def build_org(contract, *, seed=7, size="quick", **org_kwargs):
@@ -327,6 +341,10 @@ def build_org(contract, *, seed=7, size="quick", **org_kwargs):
         contacts.append(_base_row(org, rng, "Contact", i, AccountId=acct, OwnerId=owner(i), **audit(i),
                                   LastName=f"{SENTINEL} Contact {i}"))
     con_ids = [c["Id"] for c in contacts[5:]]
+    # contacts[-1] is referenced only by the relations below; it is soft-deleted (visibleVia)
+    hidden_contact = contacts[-1]["Id"]
+    org.rows["Contact"][hidden_contact]["IsDeleted"] = True
+    org.deleted_log["Contact"].append((hidden_contact, CLOCK_START - SOFT_DELETED_PARENT_AGE))
 
     opps = []
     for i in range(30 + extra):
@@ -362,16 +380,23 @@ def build_org(contract, *, seed=7, size="quick", **org_kwargs):
                                 ActivityId=sf_id("00T", 9999) if i == 0 else task_ids[i % len(task_ids)],
                                 RelatedToId=opp_ids[i % len(opp_ids)], ParentId=None, **audit(i)))
     email_ids = [e["Id"] for e in emails]
+    hidden_email = email_ids[14]                            # soft-deleted parent (visibleVia)
+    org.rows["EmailMessage"][hidden_email]["IsDeleted"] = True
+    org.deleted_log["EmailMessage"].append((hidden_email, CLOCK_START - SOFT_DELETED_PARENT_AGE))
 
     for i in range(30):
         rel = con_ids[i % len(con_ids)] if i % 3 else active[i % len(active)]
+        msg = email_ids[i % len(email_ids)]
         addr = f"relation{i}.sentinel-7f3a@example.test"
         if i in (0, 1, 2, 3):
             rel = None                                      # unmatched address
         if i == 4:
             rel = sf_id("003", 9998)                        # orphan
-        _base_row(org, rng, "EmailMessageRelation", i, EmailMessageId=email_ids[i % len(email_ids)],
-                  RelationId=rel, RelationAddress=addr)
+        if i in (0, 1, 14, 29):
+            msg = hidden_email                              # hidden via EmailMessage.EmailMessageId
+        if i in (5, 7, 8, 10):
+            rel = hidden_contact                            # hidden via Contact.RelationId
+        _base_row(org, rng, "EmailMessageRelation", i, EmailMessageId=msg, RelationId=rel, RelationAddress=addr)
 
     for i in range(6):
         _base_row(org, rng, "Note", i, ParentId=acc_ids[i % len(acc_ids)], OwnerId=owner(i),
@@ -439,7 +464,7 @@ class FakeSalesforceTransport:
 
     def __init__(self, org, *, origin=FAKE_ORIGIN, api_version=FAKE_API_VERSION, instance_url=None,
                  page_size=7, hooks=(), redirect_paths=(), absolute_next=False, foreign_next=False,
-                 count_offset=None, hide_from_id_query=(), error_paths=(), drop_date=False,
+                 count_offset=None, hide_from_id_query=(), hide_from_query=(), error_paths=(), drop_date=False,
                  soap_server_url=None, soap_response=None, soap_status=200):
         self.org = org
         self.origin = origin
@@ -453,6 +478,7 @@ class FakeSalesforceTransport:
         self.foreign_next = foreign_next
         self.count_offset = dict(count_offset or {})
         self.hide_from_id_query = set(hide_from_id_query)
+        self.hide_from_query = set(hide_from_query)    # ids query hides for no reason the contract knows
         self.drop_date = drop_date
         self.soap_server_url = soap_server_url or f"{origin}/services/Soap/u/{api_version}/{FAKE_ORG_ID}"
         self.soap_response = soap_response
@@ -558,6 +584,8 @@ class FakeSalesforceTransport:
             return self._error(400, "MALFORMED_QUERY")
         obj = parsed.object
         rows = self.org.visible(obj, all_rows)
+        if not all_rows and self.hide_from_query:
+            rows = [r for r in rows if r["Id"] not in self.hide_from_query]
         if parsed.since is not None:
             rows = [r for r in rows if _parse_stamp(r["SystemModstamp"]) >= parsed.since]
         if parsed.is_count:
@@ -661,6 +689,13 @@ def scenario_hooks(name):
         return [], {"hide_from_id_query": "first_account"}
     if name == "injected_count_mismatch":
         return [], {"count_offset": {"Task": 1}}
+    if name == "parent_soft_delete":
+        def soft_delete_parent(o):
+            o.soft_delete("EmailMessage", _first(o, "EmailMessage", lambda r: any(
+                rel.get("EmailMessageId") == r["Id"] for rel in o.rows["EmailMessageRelation"].values())))
+        return [Hook("page", soft_delete_parent, obj="EmailMessage")], {}
+    if name == "unexplained_hidden_relation":
+        return [], {"hide_from_query": "first_visible_relation"}
     raise KeyError(name)
 
 
@@ -677,6 +712,8 @@ SCENARIO_EXPECTED = {
     "continuous": "RECONCILED_WITH_DRIFT",
     "injected_id_mismatch": "INCOMPLETE",
     "injected_count_mismatch": "INCOMPLETE",
+    "parent_soft_delete": "RECONCILED",
+    "unexplained_hidden_relation": "INCOMPLETE",
 }
 
 
@@ -685,5 +722,8 @@ def make_fake(contract, scenario="none", *, seed=7, size="quick", org_kwargs=Non
     hooks, extra = scenario_hooks(scenario)
     if extra.get("hide_from_id_query") == "first_account":
         extra["hide_from_id_query"] = {_first(org, "Account")}
+    if extra.get("hide_from_query") == "first_visible_relation":
+        rel = "EmailMessageRelation"
+        extra["hide_from_query"] = {_first(org, rel, lambda r: not org.parent_hidden(rel, r))}
     extra.update(kwargs)
     return FakeSalesforceTransport(org, hooks=hooks, **extra)

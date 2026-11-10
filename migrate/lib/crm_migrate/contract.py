@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from .errors import ContractError
 
-CONTRACT_VERSION = 3
+CONTRACT_VERSION = 4
 NAME_RE = re.compile(r"\A[A-Za-z][A-Za-z0-9_]*\Z")
 PURPOSE_RE = re.compile(r"\A[RM]\d+\b")
 FIELD_TYPES = frozenset({
@@ -52,6 +52,7 @@ class ObjectSpec:
     soft_delete: bool
     change_key: str
     fields: tuple
+    visible_via: tuple = ()   # ((field, parent object), ...): contract v4 ``visibleVia``
 
     def field(self, name):
         for fld in self.fields:
@@ -116,7 +117,7 @@ def parse_contract(raw_bytes):
             raise ContractError("invalid_name", detail="object name")
         _need(name not in seen, "duplicate_object", name)
         seen.add(name)
-        objects.append(_parse_object(name, raw))
+        objects.append(_parse_object(name, raw, {o.name: o for o in objects}))
     waivers = []
     raw_waivers = doc.get("waivers", [])
     _need(isinstance(raw_waivers, list), "contract_shape", "waivers")
@@ -136,7 +137,33 @@ def parse_contract(raw_bytes):
     )
 
 
-def _parse_object(name, raw):
+def _parse_visible_via(name, raw, spec, earlier):
+    """Contract v4 ``visibleVia``: only on non-softDelete objects; each entry names a required
+    reference field of this object and an earlier contract object with ``softDelete`` true."""
+    if "visibleVia" not in raw:
+        return ()
+    entries = raw["visibleVia"]
+    _need(isinstance(entries, list) and entries, "visible_via", f"{name}.visibleVia")
+    _need(not spec.soft_delete, "visible_via", f"{name}.visibleVia with softDelete")
+    out = []
+    for entry in entries:
+        _need(isinstance(entry, dict) and set(entry) == {"field", "object"}, "visible_via",
+              f"{name}.visibleVia entry")
+        fname, parent = entry["field"], entry["object"]
+        if not isinstance(fname, str) or not NAME_RE.fullmatch(fname):
+            raise ContractError("invalid_name", detail=f"{name}.visibleVia field")
+        if not isinstance(parent, str) or not NAME_RE.fullmatch(parent):
+            raise ContractError("invalid_name", detail=f"{name}.visibleVia object")
+        fld = spec.field(fname)
+        _need(fld is not None and fld.type == "reference" and fld.required, "visible_via", f"{name}.visibleVia {fname}")
+        _need(parent in earlier, "visible_via", f"{name}.visibleVia {parent} not an earlier object")
+        _need(earlier[parent].soft_delete, "visible_via", f"{name}.visibleVia {parent} without softDelete")
+        _need((fname, parent) not in out, "visible_via", f"{name}.visibleVia duplicate")
+        out.append((fname, parent))
+    return tuple(out)
+
+
+def _parse_object(name, raw, earlier=None):
     for key in ("ownerCheck", "softDelete"):
         _need(isinstance(raw.get(key), bool), "contract_shape", f"{name}.{key}")
     change_key = raw.get("changeKey")
@@ -188,6 +215,9 @@ def _parse_object(name, raw):
         owner = spec.field("OwnerId")
         _need(owner is not None and owner.type == "reference" and owner.required, "structural_field",
               f"{name}.OwnerId")
+    via = _parse_visible_via(name, raw, spec, earlier or {})
+    if via:
+        spec = ObjectSpec(name, spec.owner_check, spec.soft_delete, spec.change_key, spec.fields, via)
     return spec
 
 
@@ -227,6 +257,7 @@ def effective_to_json(effective):
             "changeKey": e.spec.change_key,
             "fields": list(e.fields),
             "unavailable": list(e.unavailable),
+            "visibleVia": [{"field": f, "object": o} for f, o in e.spec.visible_via],
         }
         for e in effective
     }
