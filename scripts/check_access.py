@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Fail-closed check of the crm-dev LAN access settings (CRM-D019), standard library only.
+"""Fail-closed check of the crm-dev LAN access settings (CRM-D019) and of the
+crm-beta edge settings (CRM-007), standard library only.
+
+    python3 scripts/check_access.py beta [--render]
+    python3 scripts/check_access.py restoretest
+
+beta validates CRM_BETA_* and CRM_SITE_URL in /srv/CRM/runtime/beta/env, the
+beta compose bind policy, the crm-app HTTPS policy (crm-proxy.conf) and the
+rendered edge configuration (see the beta section below); --render then writes
+it to <runtime>/edge/haproxy.cfg. restoretest checks only the isolation policy
+of deploy/beta/restoretest/compose.json (restore.sh beta --restoretest).
+The rest of this docstring describes dev.
 
 Run it before every `docker compose ... up`:
 
@@ -220,17 +231,421 @@ def check(text, environ, compose_path=COMPOSE_PATH):
     return errors
 
 
+# --- beta (CRM-007) -----------------------------------------------------------
+# crm-beta is reachable only through the edge proxy (crm-beta-edge, HAProxy on
+# the host network). crm-app publishes only 127.0.0.1:${CRM_BETA_APP_PORT}.
+# The edge configuration is rendered from the Git-controlled template
+# deploy/beta/edge/haproxy.cfg.tmpl and validated fail-closed, both the values
+# (validate_beta) and the rendered text (check_edge_config).
+
+BETA_DEFAULT_RUNTIME = "/srv/CRM/runtime/beta"
+BETA_COMPOSE_PATH = os.path.join(REPO, "deploy", "beta", "compose.json")
+BETA_ENV_EXAMPLE_PATH = os.path.join(REPO, "deploy", "beta", "env.example")
+EDGE_TEMPLATE_PATH = os.path.join(REPO, "deploy", "beta", "edge", "haproxy.cfg.tmpl")
+EDGE_CFG_REL = os.path.join("edge", "haproxy.cfg")
+EDGE_SERVICE = "crm-beta-edge"
+BETA_NAMES = ("CRM_BETA_BIND_IP", "CRM_BETA_PORT", "CRM_BETA_UPSTREAM_SOURCES",
+              "CRM_BETA_HOSTNAME", "CRM_BETA_APP_PORT", "CRM_SITE_URL")
+MAX_UPSTREAM_SOURCES = 4
+# A strict DNS name: at least two labels, letters/digits/hyphens, no leading or
+# trailing hyphen, each label 1-63 characters, 253 characters at most.
+HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+                         r"[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+APP_PORT_BIND = re.compile(r"^127\.0\.0\.1:\$\{CRM_BETA_APP_PORT:\?[^}]*\}:80$")
+
+
+def _private_unicast(addr):
+    return (not addr.is_unspecified and addr.packed[0] != 0 and not addr.is_loopback
+            and not addr.is_multicast and not addr.is_reserved and not addr.is_link_local
+            and any(addr in block for block in RFC1918))
+
+
+def validate_beta_bind_ip(value):
+    if not value:
+        return ["CRM_BETA_BIND_IP is empty"]
+    addr = _ipv4(value)
+    if addr is None:
+        return ["CRM_BETA_BIND_IP is not exactly one IPv4 address in dotted-quad form"]
+    if addr.is_unspecified:
+        return ["CRM_BETA_BIND_IP is the unspecified address (would bind all interfaces)"]
+    if not _private_unicast(addr):
+        return ["CRM_BETA_BIND_IP is not a unicast RFC 1918 address"]
+    return []
+
+
+def validate_port(name, value):
+    if not value or not re.fullmatch(r"[1-9][0-9]{3,4}", value) or not 1024 <= int(value) <= 65535:
+        return [f"{name} is not an integer port between 1024 and 65535"]
+    return []
+
+
+def validate_upstream_sources(value):
+    """1-4 space-separated RFC 1918 single hosts, as a.b.c.d or a.b.c.d/32."""
+    if value is None or value.strip() == "":
+        return ["CRM_BETA_UPSTREAM_SOURCES is empty"]
+    if not re.fullmatch(r"[0-9./ ]+", value):
+        return ["CRM_BETA_UPSTREAM_SOURCES may contain only IPv4 /32s separated by spaces"]
+    tokens = value.split()
+    out = []
+    if len(tokens) > MAX_UPSTREAM_SOURCES:
+        out.append(f"CRM_BETA_UPSTREAM_SOURCES has {len(tokens)} entries; at most "
+                   f"{MAX_UPSTREAM_SOURCES} are allowed")
+    for i, token in enumerate(tokens, start=1):
+        where = f"CRM_BETA_UPSTREAM_SOURCES entry {i}"
+        address, _, prefix = token.partition("/")
+        if prefix not in ("", "32"):
+            out.append(f"{where} is not a single host (/32)")
+            continue
+        addr = _ipv4(address)
+        if addr is None:
+            out.append(f"{where} is not an IPv4 address")
+            continue
+        if not _private_unicast(addr):
+            out.append(f"{where} is not a unicast RFC 1918 host")
+    return out
+
+
+def validate_hostname(value):
+    if not value or not HOSTNAME_RE.match(value):
+        return ["CRM_BETA_HOSTNAME is not a lower-case DNS name (letters, digits, hyphens, "
+                "at least two labels)"]
+    return []
+
+
+def validate_beta_site_url(value, hostname):
+    if value != f"https://{hostname}":
+        return ["CRM_SITE_URL must be exactly https://<CRM_BETA_HOSTNAME>"]
+    return []
+
+
+def validate_beta(values):
+    errors = []
+    errors += validate_beta_bind_ip(values.get("CRM_BETA_BIND_IP"))
+    errors += validate_port("CRM_BETA_PORT", values.get("CRM_BETA_PORT"))
+    errors += validate_port("CRM_BETA_APP_PORT", values.get("CRM_BETA_APP_PORT"))
+    errors += validate_upstream_sources(values.get("CRM_BETA_UPSTREAM_SOURCES"))
+    errors += validate_hostname(values.get("CRM_BETA_HOSTNAME"))
+    if not validate_hostname(values.get("CRM_BETA_HOSTNAME")) and "CRM_SITE_URL" in values:
+        errors += validate_beta_site_url(values["CRM_SITE_URL"], values["CRM_BETA_HOSTNAME"])
+    if not errors and values["CRM_BETA_PORT"] == values["CRM_BETA_APP_PORT"]:
+        errors.append("CRM_BETA_PORT and CRM_BETA_APP_PORT must differ")
+    for name in ("CRM_BETA_PORT", "CRM_BETA_APP_PORT"):
+        if values.get(name) == str(PORT):
+            errors.append(f"{name} must not be {PORT}, the crm-dev port (seeding refuses beta by it)")
+    return errors
+
+
+def check_beta_compose(doc):
+    """The beta bind policy, on deploy/beta/compose.json: crm-app publishes
+    exactly 127.0.0.1:${CRM_BETA_APP_PORT}:80, the edge runs hardened on the host
+    network and publishes nothing, and no other service publishes a port."""
+    out = []
+    services = doc.get("services") if isinstance(doc, dict) else None
+    if not isinstance(services, dict):
+        return ["beta compose has no services"]
+    if doc.get("name") != "crm-beta":
+        out.append("beta compose project name is not crm-beta")
+    for name, svc in services.items():
+        if not isinstance(svc, dict):
+            out.append(f"{name}: not a mapping")
+            continue
+        ports = svc.get("ports") or []
+        if name == "crm-app":
+            if (len(ports) != 1 or not isinstance(ports[0], str)
+                    or not APP_PORT_BIND.match(ports[0])):
+                out.append("crm-app must publish exactly 127.0.0.1:${CRM_BETA_APP_PORT}:80")
+        elif ports:
+            out.append(f"{name}: publishes ports; only crm-app may (on loopback)")
+        if svc.get("network_mode") == "host" and name != EDGE_SERVICE:
+            out.append(f"{name}: network_mode host is allowed for {EDGE_SERVICE} only")
+    edge = services.get(EDGE_SERVICE)
+    if not isinstance(edge, dict):
+        return out + [f"{EDGE_SERVICE} service missing"]
+    if edge.get("network_mode") != "host":
+        out.append(f"{EDGE_SERVICE} must use network_mode host (to see real source addresses)")
+    if edge.get("read_only") is not True:
+        out.append(f"{EDGE_SERVICE} must have a read-only root filesystem")
+    if edge.get("cap_drop") != ["ALL"]:
+        out.append(f"{EDGE_SERVICE} must drop all capabilities")
+    if edge.get("cap_add"):
+        out.append(f"{EDGE_SERVICE} adds capabilities; its port is unprivileged, so none are needed")
+    if "no-new-privileges:true" not in (edge.get("security_opt") or []):
+        out.append(f"{EDGE_SERVICE} must set no-new-privileges")
+    if edge.get("user") in ("root", "0", "0:0"):
+        out.append(f"{EDGE_SERVICE} must not run as root")
+    if edge.get("privileged"):
+        out.append(f"{EDGE_SERVICE} must not be privileged")
+    return out
+
+
+def _edge_lines(text):
+    out = []
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            out.append(line)
+    return out
+
+
+def check_edge_config(text):
+    """The edge policy, on rendered HAProxy configuration text. [] = acceptable."""
+    lines = _edge_lines(text)
+    out = []
+    binds = [l for l in lines if l.split()[0] == "bind"]
+    if len(binds) != 1:
+        out.append(f"edge must have exactly one bind line (found {len(binds)})")
+    for b in binds:
+        parts = b.split()
+        addr, _, port = (parts[1] if len(parts) > 1 else "").rpartition(":")
+        ip = _ipv4(addr)
+        if ip is None or not _private_unicast(ip):
+            out.append("edge bind address is not one RFC 1918 unicast address "
+                       "(all interfaces, a wildcard or a name are refused)")
+        if validate_port("edge bind port", port):
+            out.append("edge bind port is not between 1024 and 65535")
+        if len(parts) != 2:
+            out.append("edge bind line carries extra options")
+    if "mode http" not in lines:
+        out.append("edge must run in mode http")
+    for t in ("timeout connect", "timeout client", "timeout server", "timeout http-request"):
+        if not any(l.startswith(t + " ") for l in lines):
+            out.append(f"edge must set {t}")
+    acls = [l.split() for l in lines if l.startswith("acl trusted_upstream ")]
+    if len(acls) != 1 or len(acls[0]) < 4 or acls[0][2] != "src":
+        out.append("edge must define exactly one 'acl trusted_upstream src <hosts>' with a "
+                   "source list")
+    else:
+        out += [e.replace("CRM_BETA_UPSTREAM_SOURCES", "edge trusted_upstream")
+                for e in validate_upstream_sources(" ".join(acls[0][3:]))]
+    other_acl = [l for l in lines if l.startswith("acl ") and not l.startswith("acl trusted_upstream ")]
+    if other_acl:
+        out.append("edge defines other ACLs; only trusted_upstream is allowed")
+    deny = "http-request deny deny_status 403 if !trusted_upstream"
+    reqs = [l for l in lines if l.startswith("http-request ")]
+    if not reqs or reqs[0] != "http-request del-header X-Forwarded-For if !trusted_upstream" \
+            or len(reqs) < 2 or reqs[1] != deny:
+        out.append("edge must first delete X-Forwarded-For from untrusted sources and then "
+                   "deny them with 403, before any other http-request rule")
+    for l in reqs:
+        if re.search(r"(?i)x-forwarded|forwarded", l) and "set-header" in l \
+                and not l.endswith(" if trusted_upstream"):
+            out.append("a forwarded header is set without the trusted_upstream condition")
+    if "http-request set-header X-Forwarded-Proto https if trusted_upstream" not in lines:
+        out.append("edge must set X-Forwarded-Proto https for trusted sources")
+    if any(l.startswith("tcp-request") or l.startswith("http-request allow") for l in lines):
+        out.append("edge must not use tcp-request or http-request allow rules")
+    fwd = [l for l in lines if l.startswith("option forwardfor")]
+    if fwd != ["option forwardfor"]:
+        out.append("edge must have exactly one plain 'option forwardfor' (after the deny, so "
+                   "only trusted requests carry it)")
+    servers = [l.split() for l in lines if l.startswith("server ")]
+    if len(servers) != 1 or len(servers[0]) < 3 or not re.fullmatch(
+            r"127\.0\.0\.1:[0-9]{4,5}", servers[0][2]) \
+            or validate_port("edge server port", servers[0][2].rsplit(":", 1)[1]):
+        out.append("edge must forward to exactly one server on 127.0.0.1:<CRM_BETA_APP_PORT>")
+    if any("0.0.0.0" in l or re.search(r"(^|\s)\*:", l) or "::" in l for l in lines):
+        out.append("edge configuration names an unspecified address or a wildcard")
+    return out
+
+
+PROXY_CONF_PATH = os.path.join(REPO, "deploy", "beta", "apache", "crm-proxy.conf")
+PROXY_MODULES = {"env_module": "/usr/lib/apache2/modules/mod_env.so",
+                 "headers_module": "/usr/lib/apache2/modules/mod_headers.so"}
+
+
+def check_proxy_conf(text):
+    """The crm-app HTTPS policy (PL decision on CRM-007 r1), on
+    deploy/beta/apache/crm-proxy.conf text. [] = acceptable.
+
+    Exactly one unconditional `SetEnv HTTPS on` and one unconditional
+    `RequestHeader unset X-Forwarded-Proto` at top level. The only blocks allowed
+    are `<IfModule !env_module|!headers_module>` holding just the matching
+    LoadModule. Nothing may make the scheme depend on the request or the peer."""
+    out = []
+    lines = _edge_lines(text)  # comments and blank lines removed
+    depth, block = 0, None
+    top = []
+    for line in lines:
+        low = line.lower()
+        if low.startswith("</"):
+            if depth == 0:
+                out.append(f"unbalanced closing tag: {line}")
+                continue
+            depth, block = depth - 1, None
+            continue
+        if low.startswith("<"):
+            m = re.fullmatch(r"<IfModule\s+!(\w+)>", line)
+            if depth != 0 or not m or m.group(1) not in PROXY_MODULES:
+                out.append(f"block not allowed (only <IfModule !env_module|!headers_module>): {line}")
+            depth, block = depth + 1, (m.group(1) if m else None)
+            continue
+        if depth:
+            want = f"LoadModule {block} {PROXY_MODULES.get(block, '?')}"
+            if " ".join(line.split()) != want:
+                out.append(f"only '{want}' may appear inside <IfModule !{block}>")
+            continue
+        top.append(" ".join(line.split()))
+    if depth:
+        out.append("unclosed block")
+    if top.count("SetEnv HTTPS on") != 1:
+        out.append("crm-proxy.conf must set 'SetEnv HTTPS on' exactly once, unconditionally")
+    if top.count("RequestHeader unset X-Forwarded-Proto") != 1:
+        out.append("crm-proxy.conf must 'RequestHeader unset X-Forwarded-Proto' exactly once, "
+                   "unconditionally")
+    for line in top:
+        if line not in ("SetEnv HTTPS on", "RequestHeader unset X-Forwarded-Proto"):
+            out.append(f"directive not allowed in crm-proxy.conf: {line}")
+    return out
+
+
+RESTORETEST_PROJECT = "crm-beta-restoretest"
+RESTORETEST_COMPOSE_PATH = os.path.join(REPO, "deploy", "beta", "restoretest", "compose.json")
+RESTORETEST_NETWORK = "restoretest-net"
+
+
+def check_restoretest_compose(doc):
+    """The restore-test isolation policy, on deploy/beta/restoretest/compose.json.
+    [] = acceptable. The throwaway project shares nothing with crm-beta or
+    crm-dev: its own project name, one crm-db service on the registered MariaDB
+    image, no published or exposed port, no host network, no bind mount, only
+    its own project-scoped named volume and internal network (no `name:` or
+    `external`, which could alias another project's resources)."""
+    out = []
+    if not isinstance(doc, dict):
+        return ["restoretest compose is not a mapping"]
+    if doc.get("name") != RESTORETEST_PROJECT:
+        out.append(f"restoretest compose project name is not {RESTORETEST_PROJECT}")
+    services = doc.get("services")
+    if not isinstance(services, dict) or set(services) != {"crm-db"}:
+        return out + ["restoretest compose must define exactly one service, crm-db"]
+    db = services["crm-db"]
+    if not isinstance(db, dict):
+        return out + ["crm-db: not a mapping"]
+    if not str(db.get("image", "")).startswith("mariadb:") or "@sha256:" not in str(db.get("image")):
+        out.append("crm-db must use the digest-pinned mariadb image")
+    for key in ("ports", "expose", "network_mode", "extends", "env_file", "privileged",
+                "cap_add", "devices", "pid", "ipc", "volumes_from", "container_name"):
+        if key in db:
+            out.append(f"crm-db: '{key}' is not allowed in the restore test")
+    vols = db.get("volumes") or []
+    if not isinstance(vols, list) or len(vols) != 1 or not isinstance(vols[0], dict) \
+            or vols[0].get("type") != "volume" or vols[0].get("target") != "/var/lib/mysql":
+        out.append("crm-db must mount exactly one named volume at /var/lib/mysql (no bind mounts)")
+    vol_name = vols[0].get("source") if vols and isinstance(vols[0], dict) else None
+    top_vols = doc.get("volumes")
+    if not isinstance(top_vols, dict) or set(top_vols) != {vol_name}:
+        out.append("restoretest compose must declare exactly the one volume crm-db mounts")
+    else:
+        spec = top_vols[vol_name] or {}
+        if not isinstance(spec, dict) or "name" in spec or "external" in spec or "driver_opts" in spec:
+            out.append("the restoretest volume must be project-scoped (no name, external or driver_opts)")
+    nets = db.get("networks")
+    if not isinstance(nets, dict) or set(nets) != {RESTORETEST_NETWORK}:
+        out.append(f"crm-db must join only {RESTORETEST_NETWORK}")
+    top_nets = doc.get("networks")
+    if not isinstance(top_nets, dict) or set(top_nets) != {RESTORETEST_NETWORK}:
+        out.append(f"restoretest compose must declare only {RESTORETEST_NETWORK}")
+    else:
+        spec = top_nets[RESTORETEST_NETWORK] or {}
+        if not isinstance(spec, dict) or "name" in spec or "external" in spec \
+                or spec.get("internal") is not True:
+            out.append(f"{RESTORETEST_NETWORK} must be internal and project-scoped "
+                       "(no name or external)")
+    return out
+
+
+def render_edge(values, template_path=EDGE_TEMPLATE_PATH):
+    """The edge configuration for already validated values."""
+    with open(template_path, encoding="utf-8") as fh:
+        text = fh.read()
+    sources = " ".join(t if "/" in t else t + "/32"
+                       for t in values["CRM_BETA_UPSTREAM_SOURCES"].split())
+    subs = {"@CRM_BETA_BIND_IP@": values["CRM_BETA_BIND_IP"],
+            "@CRM_BETA_PORT@": values["CRM_BETA_PORT"],
+            "@CRM_BETA_UPSTREAM_SOURCES@": sources,
+            "@CRM_BETA_APP_PORT@": values["CRM_BETA_APP_PORT"]}
+    for key, val in subs.items():
+        if text.count(key) != 1:
+            raise ValueError(f"edge template must contain {key} exactly once")
+        text = text.replace(key, val)
+    if "@" in text:
+        raise ValueError("edge template has an unknown placeholder")
+    return text
+
+
+def check_beta(text, environ, compose_path=BETA_COMPOSE_PATH, template_path=EDGE_TEMPLATE_PATH,
+               proxy_conf_path=PROXY_CONF_PATH):
+    """([errors], rendered edge config or None) for beta env-file text."""
+    errors = [f"{n} is set in the process environment; Compose would prefer it to the "
+              "env file. Unset it." for n in BETA_NAMES if n in environ]
+    try:
+        with open(compose_path, encoding="utf-8") as fh:
+            errors += check_beta_compose(json.load(fh))
+    except (OSError, ValueError) as err:
+        errors.append(f"cannot read {compose_path}: {type(err).__name__}")
+    try:
+        with open(proxy_conf_path, encoding="utf-8") as fh:
+            errors += check_proxy_conf(fh.read())
+    except (OSError, UnicodeDecodeError) as err:
+        errors.append(f"cannot read {proxy_conf_path}: {type(err).__name__}")
+    values, env_errors = read_env_values(text, BETA_NAMES)
+    errors += env_errors
+    if env_errors:
+        return errors, None
+    errors += validate_beta(values)
+    if errors:
+        return errors, None
+    try:
+        rendered = render_edge(values, template_path)
+    except (OSError, ValueError) as err:
+        return errors + [f"edge template: {err}"], None
+    edge_errors = check_edge_config(rendered)
+    return errors + edge_errors, (None if edge_errors else rendered)
+
+
+def write_edge_config(runtime, rendered):
+    """Atomically write $runtime/edge/haproxy.cfg (dir 0755, file 0644: the edge
+    runs as user haproxy and must read it; it holds no secret)."""
+    edge_dir = os.path.join(runtime, "edge")
+    if os.path.islink(edge_dir):
+        raise OSError("edge directory is a symlink")
+    os.makedirs(edge_dir, mode=0o755, exist_ok=True)
+    os.chmod(edge_dir, 0o755)
+    target = os.path.join(runtime, EDGE_CFG_REL)
+    tmp = target + ".tmp"
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(rendered)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, target)
+    return target
+
+
 def main(argv=None, environ=None):
     argv = sys.argv[1:] if argv is None else argv
     environ = os.environ if environ is None else environ
     target = argv[0] if argv else ""
-    if target != "dev" or len(argv) != 1:
-        print(f"{prog()}: refusing to run: target environment must be 'dev' "
+    if argv == ["restoretest"]:
+        # The restore-test isolation policy only (restore.sh beta --restoretest).
+        try:
+            with open(RESTORETEST_COMPOSE_PATH, encoding="utf-8") as fh:
+                errors = check_restoretest_compose(json.load(fh))
+        except (OSError, ValueError) as err:
+            errors = [f"cannot read {RESTORETEST_COMPOSE_PATH}: {type(err).__name__}"]
+        for err in errors:
+            print(f"{prog()}: refused: {err}", file=sys.stderr)
+        return 1 if errors else 0
+    render = target == "beta" and argv[1:] == ["--render"]
+    if target not in ("dev", "beta") or (len(argv) != 1 and not render):
+        print(f"{prog()}: refusing to run: target environment must be 'dev' or 'beta' "
               f"(got '{target or '<none>'}')", file=sys.stderr)
         return 2
-    runtime = environ.get("CRM_RUNTIME_DIR") or DEFAULT_RUNTIME
-    if os.path.basename(runtime) != "dev":
-        print(f"{prog()}: refusing to run: runtime directory is not a dev runtime: {runtime}",
+    runtime = environ.get("CRM_RUNTIME_DIR") or (DEFAULT_RUNTIME if target == "dev"
+                                                 else BETA_DEFAULT_RUNTIME)
+    if os.path.basename(runtime) != target:
+        print(f"{prog()}: refusing to run: runtime directory is not a {target} runtime: {runtime}",
               file=sys.stderr)
         return 2
     env_file = os.path.join(runtime, "env")
@@ -244,6 +659,25 @@ def main(argv=None, environ=None):
     except (OSError, UnicodeDecodeError):
         print(f"{prog()}: env file not readable: {env_file}", file=sys.stderr)
         return 1
+    if target == "beta":
+        errors, rendered = check_beta(text, environ)
+        for err in errors:
+            print(f"{prog()}: refused: {err}", file=sys.stderr)
+        if errors:
+            return 1
+        if render:
+            try:
+                write_edge_config(runtime, rendered)
+            except OSError as err:
+                print(f"{prog()}: cannot write the edge configuration: {type(err).__name__}",
+                      file=sys.stderr)
+                return 1
+            print(f"{prog()}: edge configuration rendered to {os.path.join(runtime, EDGE_CFG_REL)}")
+        count = len(read_env_values(text, BETA_NAMES)[0]["CRM_BETA_UPSTREAM_SOURCES"].split())
+        print(f"{prog()}: beta access settings OK: CRM_BETA_BIND_IP, CRM_BETA_PORT, "
+              f"{count} upstream source(s), CRM_BETA_HOSTNAME, CRM_BETA_APP_PORT, CRM_SITE_URL, "
+              "beta compose bind policy, edge policy, crm-proxy HTTPS policy")
+        return 0
     errors = check(text, environ)
     for err in errors:
         print(f"{prog()}: refused: {err}", file=sys.stderr)

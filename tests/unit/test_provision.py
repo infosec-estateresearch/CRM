@@ -191,7 +191,8 @@ class TestEnvironmentGuard(TmpDir):
     def test_both_scripts_refuse_any_target_but_dev(self):
         for main in (provision_access.main, provision_users.main):
             x = self.path("x")
-            for argv in ([], ["prod"], ["beta", "--key-file", x], ["DEV"], ["--input", x],
+            # CRM-007: "beta" is now a valid target; "staging" stands in for it here.
+            for argv in ([], ["prod"], ["staging", "--key-file", x], ["DEV"], ["--input", x],
                          ["prod", "--input", x, "--password-file", x]):
                 with self.subTest(script=main.__module__, argv=argv):
                     fake = FakeEspo()
@@ -200,6 +201,33 @@ class TestEnvironmentGuard(TmpDir):
                     self.assertIn("refusing to run", err)
                     self.assertEqual(fake.calls, [])
                     self.assertFalse(os.path.lexists(x))
+
+    def test_both_scripts_accept_beta_and_provision_as_for_dev(self):
+        # CRM-007: crm-beta is provisioned exactly like crm-dev, by the same code.
+        results = {}
+        for target in ("dev", "beta"):
+            fake = FakeEspo()
+            code, _, err = run(provision_access.main,
+                               [target, "--key-file", self.path(f"{target}-key.env")], fake)
+            self.assertEqual(code, 0, err)
+            code, out, err = run(provision_users.main,
+                                 [target, "--input", self.write_users(synthetic_users(), f"{target}.json"),
+                                  "--password-file", self.path(f"{target}-pw.csv"),
+                                  "--legacy-shared", LEGACY], fake)
+            self.assertEqual(code, 0, err)
+            self.assertEqual(self.mode(f"{target}-pw.csv"), 0o600)
+            results[target] = (sorted(u["userName"] for u in fake.records["User"].values()),
+                               sorted(r["name"] for r in fake.records["Role"].values()),
+                               [(c["method"], c["path"].split("/")[0]) for c in fake.writes()], out)
+            # A second beta/dev run writes nothing.
+            fake.calls.clear()
+            code, _, err = run(provision_users.main,
+                               [target, "--input", self.path(f"{target}.json"),
+                                "--password-file", self.path(f"{target}-pw2.csv"),
+                                "--legacy-shared", LEGACY], fake)
+            self.assertEqual(code, 0, err)
+            self.assertEqual(fake.writes(), [])
+        self.assertEqual(results["beta"], results["dev"])
 
     def test_missing_credentials_fail_loudly_without_http(self):
         fake = FakeEspo()

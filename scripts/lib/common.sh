@@ -1,8 +1,11 @@
 # shellcheck shell=bash
-# Shared helpers for backup.sh, restore.sh, export.sh, deploy_custom.sh and up.sh. Source, do not run.
+# Shared helpers for backup.sh, restore.sh, export.sh, deploy_custom.sh, up.sh and
+# deploy_release.sh. Source, do not run. Targets: dev and beta (require_target).
 
 CRM_REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 CRM_PROJECT=crm-dev
+CRM_TARGET=dev
+CRM_COMPOSE_FILE=$CRM_REPO_DIR/deploy/compose.json
 
 # The runtime directories crm-app and crm-daemon bind-mount, relative to
 # $CRM_RUNTIME_DIR, and the backup archive that holds each one.
@@ -21,20 +24,68 @@ die() {
     exit 1
 }
 
-# The dev guard: the first argument names the target environment and must be
-# exactly "dev". It runs before anything else touches the host.
+# The target guard: the first argument names the target environment and must
+# be exactly "dev" or "beta". It runs before anything else touches the host.
+# Each target has a fixed Compose project and Compose file (constants, never
+# derived from input); the runtime directory must be named after the target.
+# beta additionally requires a runtime directory owned by root with mode 0700
+# (require_private_runtime).
+require_target() {
+    case "${1:-}" in
+        dev)
+            CRM_TARGET=dev
+            CRM_PROJECT=crm-dev
+            CRM_COMPOSE_FILE=$CRM_REPO_DIR/deploy/compose.json
+            ;;
+        beta)
+            CRM_TARGET=beta
+            CRM_PROJECT=crm-beta
+            CRM_COMPOSE_FILE=$CRM_REPO_DIR/deploy/beta/compose.json
+            load_env_names "$CRM_REPO_DIR/deploy/beta/env.example"
+            ;;
+        *)
+            echo "$(basename "$0"): refusing to run: target environment must be 'dev' or 'beta' (got '${1:-<none>}')" >&2
+            exit 2
+            ;;
+    esac
+    CRM_RUNTIME_DIR=${CRM_RUNTIME_DIR:-/srv/CRM/runtime/$CRM_TARGET}
+    if [ "$(basename "$CRM_RUNTIME_DIR")" != "$CRM_TARGET" ]; then
+        echo "$(basename "$0"): refusing to run: runtime directory is not a $CRM_TARGET runtime: $CRM_RUNTIME_DIR" >&2
+        exit 2
+    fi
+    CRM_BACKUP_DIR=${CRM_BACKUP_DIR:-$CRM_RUNTIME_DIR/backups}
+    CRM_ENV_FILE=${CRM_ENV_FILE:-$CRM_RUNTIME_DIR/env}
+    if [ "$CRM_TARGET" = beta ]; then
+        require_private_runtime
+    fi
+}
+
+# The CRM-001 dev-only guard, kept for callers that serve dev only.
 require_dev() {
     if [ "${1:-}" != "dev" ]; then
         echo "$(basename "$0"): refusing to run: target environment must be 'dev' (got '${1:-<none>}')" >&2
         exit 2
     fi
-    CRM_RUNTIME_DIR=${CRM_RUNTIME_DIR:-/srv/CRM/runtime/dev}
-    if [ "$(basename "$CRM_RUNTIME_DIR")" != "dev" ]; then
-        echo "$(basename "$0"): refusing to run: runtime directory is not a dev runtime: $CRM_RUNTIME_DIR" >&2
-        exit 2
-    fi
-    CRM_BACKUP_DIR=${CRM_BACKUP_DIR:-$CRM_RUNTIME_DIR/backups}
-    CRM_ENV_FILE=${CRM_ENV_FILE:-$CRM_RUNTIME_DIR/env}
+    require_target dev
+}
+
+# beta: the runtime directory (and its backups directory, if present) must be
+# a real directory owned by root (uid 0) with mode 0700, because it holds
+# customer data.
+require_private_runtime() {
+    local dir owner
+    for dir in "$CRM_RUNTIME_DIR" "$CRM_BACKUP_DIR"; do
+        [ "$dir" != "$CRM_BACKUP_DIR" ] || [ -e "$dir" ] || [ -L "$dir" ] || continue
+        if [ -L "$dir" ] || [ ! -d "$dir" ]; then
+            echo "$(basename "$0"): refusing to run: not a real directory: $dir" >&2
+            exit 2
+        fi
+        owner=$(stat -c '%u %a' -- "$dir")
+        if [ "$owner" != "0 700" ]; then
+            echo "$(basename "$0"): refusing to run: $dir must be owned by root with mode 0700 (is uid/mode $owner)" >&2
+            exit 2
+        fi
+    done
 }
 
 # The env file is always $CRM_RUNTIME_DIR/env: the one the access check and
@@ -53,10 +104,14 @@ CRM_PATH_VARS=(CRM_DB_DIR CRM_DATA_DIR CRM_CUSTOM_DIR CRM_CLIENT_CUSTOM_DIR)
 # the env file, so none of them may come from the environment: the scripts
 # refuse to run if one is set (require_runtime_paths), and compose() removes
 # all of them before calling docker.
-CRM_ENV_NAMES=()
-if [ -r "$CRM_REPO_DIR/deploy/env.example" ]; then
-    mapfile -t CRM_ENV_NAMES < <(sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*$/\1/p' -- "$CRM_REPO_DIR/deploy/env.example")
-fi
+# beta reads its own list, deploy/beta/env.example (require_target).
+load_env_names() {
+    CRM_ENV_NAMES=()
+    if [ -r "$1" ]; then
+        mapfile -t CRM_ENV_NAMES < <(sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*$/\1/p' -- "$1")
+    fi
+}
+load_env_names "$CRM_REPO_DIR/deploy/env.example"
 require_env_names() {
     [ "${#CRM_ENV_NAMES[@]}" -gt 0 ] \
         || die "refusing to run: no variable names could be read from $CRM_REPO_DIR/deploy/env.example"
@@ -67,7 +122,7 @@ require_env_names() {
 # a service runs this before anything touches the stack.
 require_access() {
     CRM_RUNTIME_DIR=$CRM_RUNTIME_DIR CRM_ENV_FILE=$CRM_ENV_FILE \
-        python3 -I "$CRM_REPO_DIR/scripts/check_access.py" dev \
+        python3 -I "$CRM_REPO_DIR/scripts/check_access.py" "$CRM_TARGET" \
         || die "refusing to run: the LAN access settings in $CRM_ENV_FILE failed scripts/check_access.py"
 }
 
@@ -168,7 +223,7 @@ compose() {
         unset+=(-u "$name")
     done
     env "${unset[@]}" \
-        docker compose -p "$CRM_PROJECT" -f "$CRM_REPO_DIR/deploy/compose.json" \
+        docker compose -p "$CRM_PROJECT" -f "$CRM_COMPOSE_FILE" \
         --env-file "$CRM_ENV_FILE" "$@"
 }
 

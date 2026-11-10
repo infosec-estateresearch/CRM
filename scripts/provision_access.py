@@ -39,6 +39,7 @@ import crm_api  # noqa: E402
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CONFIG_DIR = os.path.join(REPO, "config", "access")
 TARGET_ENV = "dev"
+TARGET_ENVS = ("dev", "beta")  # CRM-007: beta is provisioned the same way
 
 # Role attributes managed from config/access/roles.json (EspoCRM 10.0.12 Role fields).
 ROLE_PERMISSIONS = (
@@ -62,9 +63,9 @@ def log(msg):
 
 
 def require_target(argv_target, prog):
-    """The environment guard: exactly 'dev'. Returns an exit code or None."""
-    if argv_target != TARGET_ENV:
-        print(f"{prog}: refusing to run: target environment must be '{TARGET_ENV}' "
+    """The environment guard: exactly 'dev' or 'beta'. Returns an exit code or None."""
+    if argv_target not in TARGET_ENVS:
+        print(f"{prog}: refusing to run: target environment must be 'dev' or 'beta' "
               f"(got '{argv_target or '<none>'}')", file=sys.stderr)
         return 2
     return None

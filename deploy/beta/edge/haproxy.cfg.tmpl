@@ -1,0 +1,30 @@
+# CRM-007 crm-beta-edge: Git-controlled template. Rendered and validated
+# fail-closed by `scripts/check_access.py beta --render` into
+# /srv/CRM/runtime/beta/edge/haproxy.cfg. Never edit the rendered file.
+# The edge runs on the host network, so `src` is the real peer address.
+global
+    log stdout format raw local0 notice
+    maxconn 256
+
+defaults
+    mode http
+    log global
+    option httplog
+    timeout connect 5s
+    timeout client 60s
+    timeout server 120s
+    timeout http-request 10s
+    timeout http-keep-alive 10s
+
+frontend crm_beta_edge
+    bind @CRM_BETA_BIND_IP@:@CRM_BETA_PORT@
+    acl trusted_upstream src @CRM_BETA_UPSTREAM_SOURCES@
+    http-request del-header X-Forwarded-For if !trusted_upstream
+    http-request deny deny_status 403 if !trusted_upstream
+    http-request set-header X-Forwarded-Proto https if trusted_upstream
+    default_backend crm_beta_app
+
+backend crm_beta_app
+    # Appends the trusted upstream's address to the X-Forwarded-For it sent.
+    option forwardfor
+    server crm_app 127.0.0.1:@CRM_BETA_APP_PORT@
