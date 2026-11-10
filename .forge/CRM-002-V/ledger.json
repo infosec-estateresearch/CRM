@@ -1,0 +1,179 @@
+{
+  "base": "forge/CRM-002-U",
+  "base_sha": "123b1f0604352c216b48e5cceb0b090adc8b199b",
+  "branch": "forge/CRM-002-V",
+  "candidate": "4a2ee7b57cc01d4de419d9523060de0fcfbd3839",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-10T19:40:03Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T19:40:03Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T19:46:49Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r1: contract v4 visibleVia, verification via soft-deleted parents (hidden_via), reconcile parent_soft_deleted, synthetic scenarios; 315 OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T19:48:31Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "4a2ee7b57cc01d4de419d9523060de0fcfbd3839",
+      "t": "2026-11-10T19:48:31Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "4a2ee7b57cc01d4de419d9523060de0fcfbd3839",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-10T19:48:40Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "4a2ee7b57cc01d4de419d9523060de0fcfbd3839",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-10T19:48:40Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "4a2ee7b57cc01d4de419d9523060de0fcfbd3839",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-10T19:48:40Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-10T19:53:45Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-10T19:53:45Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "findings",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-10T19:53:45Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "4a2ee7b57cc01d4de419d9523060de0fcfbd3839",
+      "findings": [
+        {
+          "key": "count-compensation",
+          "severity": "advisory"
+        },
+        {
+          "key": "via-referenceTo",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-10T19:53:58Z",
+      "type": "result"
+    },
+    {
+      "candidate": "4a2ee7b57cc01d4de419d9523060de0fcfbd3839",
+      "findings": [
+        {
+          "key": "count-compensation",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-10T19:53:58Z",
+      "type": "result"
+    },
+    {
+      "candidate": "4a2ee7b57cc01d4de419d9523060de0fcfbd3839",
+      "findings": [
+        {
+          "key": "count-only-compensation",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-10T19:53:58Z",
+      "type": "result"
+    },
+    {
+      "note": "Candidate 4a2ee7b: Auditor and Tester PASS, DevSecOps advisory only. Count-only compensation accepted as a documented limit (shared with the IsDeleted rule; exact count equality per WO). Hardening option: id-set comparison through an id-only query.",
+      "outcome": "DELIVERED",
+      "t": "2026-11-10T19:53:58Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-002-V",
+  "host": "docker1",
+  "known_commit": "123b1f0604352c216b48e5cceb0b090adc8b199b",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-002-V",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-002-V",
+  "wo": "CRM-002-V",
+  "worktree": "/srv/CRM/worktrees/CRM-002-V"
+}
