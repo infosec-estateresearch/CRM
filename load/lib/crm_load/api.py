@@ -9,9 +9,16 @@ SKIP_DUPLICATE_CHECK = {"X-Skip-Duplicate-Check": "true"}
 
 
 class WriteRejected(Exception):
-    def __init__(self, status):
+    def __init__(self, status, field=None):
         super().__init__(status)
         self.status = status
+        self.field = field          # the validation failure's field on a 400, else None
+
+
+def _field(status, doc):
+    if status == 400 and isinstance(doc, dict) and isinstance(doc.get("field"), str):
+        return doc["field"]
+    return None
 
 
 class EspoClient:
@@ -57,11 +64,11 @@ class EspoClient:
         # (core CreateParamsFetcher). Uniqueness is on sfId, enforced by the index.
         status, doc = self._send("POST", entity, None, attrs, SKIP_DUPLICATE_CHECK)
         if status not in (200, 201) or not isinstance(doc, dict) or not doc.get("id"):
-            raise WriteRejected(status)
+            raise WriteRejected(status, _field(status, doc))
         return doc["id"]
 
     def update(self, entity, record_id, attrs):
         self.writes += 1
-        status, _doc = self._send("PUT", f"{entity}/{record_id}", None, attrs)
+        status, doc = self._send("PUT", f"{entity}/{record_id}", None, attrs)
         if status != 200:
-            raise WriteRejected(status)
+            raise WriteRejected(status, _field(status, doc))

@@ -1,9 +1,11 @@
-"""Transports. Tests inject a fake; the real run uses ``HttpsTransport``.
+"""Transports. Tests inject a fake; the real run uses ``LoopbackHttpTransport``.
 
-``HttpsTransport`` (named for the brief; it speaks plain HTTP) talks only to
+``LoopbackHttpTransport`` speaks plain HTTP and talks only to
 ``http://127.0.0.1:<port>/api/v1/``: any other scheme or host is refused at construction,
 and redirects are never followed (``http.client`` does not follow them; a 3xx is an error).
-Response bodies of errors are never logged or returned to the caller.
+Response bodies of errors are never logged or returned to the caller. For a 400 only the
+validation failure's field and type are kept (``validation_failure``), when both are short
+identifiers; nothing else of the body survives.
 """
 
 import http.client
@@ -24,7 +26,23 @@ class Transport:
         raise NotImplementedError
 
 
-class HttpsTransport(Transport):
+_IDENT = re.compile(r"\A[A-Za-z][A-Za-z0-9_]{0,60}\Z")
+
+
+def validation_failure(raw):
+    """``{"field": ..., "type": ...}`` from an EspoCRM 400 body, or None. Nothing else is kept."""
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+        data = doc["messageTranslation"]["data"]
+        field, kind = data["field"], data["type"]
+    except (ValueError, UnicodeDecodeError, KeyError, TypeError, AttributeError):
+        return None
+    if isinstance(field, str) and isinstance(kind, str) and _IDENT.fullmatch(field) and _IDENT.fullmatch(kind):
+        return {"field": field, "type": kind}
+    return None
+
+
+class LoopbackHttpTransport(Transport):
     def __init__(self, host, port, api_key, timeout=60):
         if host != "127.0.0.1":
             raise TransportError("host_refused")
@@ -60,6 +78,8 @@ class HttpsTransport(Transport):
             conn.close()
         if 300 <= status < 400:
             raise TransportError("redirect_refused", status)
+        if status == 400:
+            return status, validation_failure(raw)
         if status >= 400:
             return status, None
         try:

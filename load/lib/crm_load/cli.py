@@ -14,8 +14,11 @@ the earlier directory is only read.
 
 ``load`` reads CRM_LOAD_HOST (must be 127.0.0.1), CRM_LOAD_PORT and CRM_LOAD_API_KEY from
 the environment (root-only runtime env); it fails loudly when any is missing.
-``--target dev`` accepts only a synthetic snapshot (manifest ``mode`` ``selftest``);
-``--target beta`` refuses one. Output is
+``--target dev`` accepts only a synthetic snapshot: ``<name>-selftest/run-1`` or ``run-2``
+under a sealed, verified ``mode`` ``selftest`` parent (``snapshot.synthetic_origin``).
+``--target beta`` accepts only a ``<name>-extract`` directory outside any ``*-selftest``
+directory, and refuses (``synthetic_content_in_beta``) a snapshot in which any Account
+``Name`` contains the synthetic marker ``SENTINEL-7f3a``. Output is
 counts and codes only; record content never reaches stdout, stderr or the report.
 
 Exit codes: 0 ok, 2 usage/config, 3 gate refused, 4 transport, 5 load finished with
@@ -38,11 +41,25 @@ from .mapping import Mapper, load_json
 from .names import NameParser
 from .report import build_report, write_outputs
 from .snapshot import SUPPORTED_CONTRACT_VERSION, open_snapshot
-from .transport import HttpsTransport
+from .transport import LoopbackHttpTransport
 from .users import build_users, load_role_map
 
 
 TARGETS = ("dev", "beta")
+SYNTHETIC_MARKER = "SENTINEL-7f3a"
+
+
+def _check_target(snapshot, target):
+    if target == "dev":
+        if not snapshot.synthetic:
+            raise LoadError("target_dev_requires_synthetic")
+        return
+    if snapshot.synthetic or not snapshot.production:
+        raise LoadError("target_beta_requires_extract")
+    for row in snapshot.rows("Account"):
+        name = row.get("Name")
+        if isinstance(name, str) and SYNTHETIC_MARKER in name:
+            raise LoadError("synthetic_content_in_beta")
 
 
 class _Parser(argparse.ArgumentParser):
@@ -130,15 +147,12 @@ def _env_transport(environ):
         raise LoadError("config_missing")
     if not port.isdigit():
         raise LoadError("config_invalid")
-    return HttpsTransport(host, int(port), key)
+    return LoopbackHttpTransport(host, int(port), key)
 
 
 def run_load(args, transport, log, contract_dir=None, sleep=time.sleep, fail_after=None):
     snapshot = open_snapshot(args.snapshot, args.accept_drift, args.reconciliation)
-    if args.target == "dev" and not snapshot.synthetic:
-        raise LoadError("target_dev_requires_synthetic")
-    if args.target == "beta" and snapshot.synthetic:
-        raise LoadError("target_beta_refuses_synthetic")
+    _check_target(snapshot, args.target)
     log.event("gate", status=snapshot.manifest["status"], synthetic=snapshot.synthetic)
     mapping = load_json("mapping.json", contract_dir)
     if mapping.get("contractVersion") != SUPPORTED_CONTRACT_VERSION:

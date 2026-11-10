@@ -15,7 +15,7 @@ from crm_load import cli, snapshot as snap_mod  # noqa: E402  (path set by fixtu
 from crm_load.errors import GateError, LoadError, TransportError
 from crm_load.mapping import EXCEPTION_CODES, Mapper, load_json
 from crm_load.names import NameParser
-from crm_load.transport import HttpsTransport
+from crm_load.transport import LoopbackHttpTransport
 from crm_load.api import EspoClient
 
 ROOT = fx.ROOT
@@ -64,12 +64,14 @@ class TestGate(Base):
         self.assertEqual(snap_mod.open_snapshot(self.snap).manifest["status"], "RECONCILED")
 
     def test_checksum_mismatch_refused(self):
+        fx.unseal(os.path.dirname(self.snap))
         path = os.path.join(self.snap, "objects", "Account.jsonl.gz")
         with open(path, "ab") as fh:
             fh.write(b"x")
         self._refuse(self.snap, "checksum_mismatch")
 
     def test_unlisted_and_missing_file_refused(self):
+        fx.unseal(os.path.dirname(self.snap))
         with open(os.path.join(self.snap, "objects", "Extra.jsonl.gz"), "wb") as fh:
             fh.write(b"")
         self._refuse(self.snap, "unlisted_file")
@@ -116,12 +118,121 @@ class TestGate(Base):
         self.assertEqual(self.run_load(snap=real, target="dev"), 2)
         self.assertIn("code=target_dev_requires_synthetic", self.last_err)
         self.assertEqual(self.run_load(target="beta"), 2)
-        self.assertIn("code=target_beta_refuses_synthetic", self.last_err)
+        self.assertIn("code=target_beta_requires_extract", self.last_err)
         self.assertEqual(self.espo.requests, [])
         self.assertFalse(os.path.exists(self.last_dir))
         self.assertEqual(self.run_load(snap=real, target="beta"), 0)
         self.assertEqual(self.run_load(target="qa"), 2)
         self.assertIn("code=usage", self.last_err)
+
+
+class TestSyntheticRule(Base):
+    """Synthetic: <name>-selftest/run-1|run-2 under a sealed, verified mode-selftest parent."""
+
+    def _dev_refused(self, snap):
+        n = len(self.espo.requests)
+        self.assertEqual(self.run_load(snap=snap), 2, self.last_err)
+        self.assertIn("code=target_dev_requires_synthetic", self.last_err)
+        self.assertEqual(len(self.espo.requests), n)
+
+    def _beta_refused(self, snap, code):
+        n = len(self.espo.requests)
+        self.assertEqual(self.run_load(snap=snap, target="beta"), 2, self.last_err)
+        self.assertIn(f"code={code}", self.last_err)
+        self.assertEqual(len(self.espo.requests), n)
+
+    def _parent_manifest(self, parent, **change):
+        path = os.path.join(parent, "manifest.json")
+        fx.unseal(parent)
+        with open(path) as fh:
+            doc = json.load(fh)
+        doc.update(change)
+        with open(path, "w") as fh:
+            json.dump(doc, fh)
+        fx.seal(parent)
+
+    def test_real_selftest_shape_is_synthetic(self):
+        parent = os.path.dirname(self.snap)
+        self.assertTrue(parent.endswith("-selftest"))
+        with open(os.path.join(self.snap, "manifest.json")) as fh:
+            run = json.load(fh)
+        self.assertEqual((run["mode"], run["origin_kind"]), ("extract", "production"))
+        with open(os.path.join(parent, "manifest.json")) as fh:
+            self.assertNotIn("contract", json.load(fh))
+        for name in ("run-1", "run-2"):
+            self.assertTrue(snap_mod.open_snapshot(os.path.join(parent, name)).synthetic)
+            self.assertEqual(self.run_load(snap=os.path.join(parent, name), espo=FakeEspo()), 0, self.last_err)
+        rc = cli.main(["verify", self.snap], stdout=io.StringIO(), stderr=io.StringIO())
+        self.assertEqual(rc, 0)
+
+    def test_run_manifest_mode_selftest_is_not_a_snapshot(self):
+        root = write_snapshot(os.path.join(self.tmp, "m"), extra={"mode": "selftest"})
+        with self.assertRaises(GateError) as cm:
+            snap_mod.open_snapshot(root)
+        self.assertEqual(cm.exception.code, "not_a_snapshot")
+
+    def test_parent_mode_must_be_selftest(self):
+        parent = os.path.dirname(self.snap)
+        self._parent_manifest(parent, mode="extract")
+        self.assertFalse(snap_mod.synthetic_origin(self.snap))
+        self._dev_refused(self.snap)
+
+    def test_parent_must_verify(self):
+        parent = os.path.dirname(self.snap)
+        fx.unseal(parent)
+        with open(os.path.join(parent, "planted.txt"), "w") as fh:
+            fh.write("x")
+        fx.seal(parent)
+        self._dev_refused(self.snap)                         # unlisted file in the parent
+        os.remove(os.path.join(parent, "planted.txt"))
+        fx.unseal(parent)
+        os.remove(os.path.join(parent, "manifest.json"))
+        fx.seal(parent)
+        self._dev_refused(self.snap)                         # no parent manifest
+
+    def test_parent_must_be_sealed(self):
+        parent = os.path.dirname(self.snap)
+        for rel, mode in (("run-1/objects/Account.jsonl.gz", 0o600), ("manifest.json", 0o440),
+                          ("run-2", 0o750), ("", 0o755)):
+            path = os.path.join(parent, rel)
+            os.chmod(path, mode)
+            self.assertFalse(snap_mod.synthetic_origin(self.snap), rel)
+            self._dev_refused(self.snap)
+            fx.seal(parent)
+        self.assertTrue(snap_mod.synthetic_origin(self.snap))
+
+    def test_path_shape(self):
+        unsealed = write_snapshot(os.path.join(self.tmp, "u"), sealed=False)
+        self.assertFalse(snap_mod.synthetic_origin(unsealed))
+        # a run-3, or a parent without the -selftest suffix, is not synthetic
+        parent = os.path.dirname(self.snap)
+        fx.unseal(parent)
+        shutil.copytree(self.snap, os.path.join(parent, "run-3"))
+        fx.write_selftest_manifest(parent)
+        fx.seal(parent)
+        self.assertTrue(snap_mod.synthetic_origin(self.snap))
+        self._dev_refused(os.path.join(parent, "run-3"))
+        other = os.path.join(self.tmp, "plain")
+        shutil.copytree(parent, other)
+        self._dev_refused(os.path.join(other, "run-1"))
+        # an <id>-extract production snapshot is never synthetic
+        self._dev_refused(write_snapshot(os.path.join(self.tmp, "p"), synthetic=False))
+
+    def test_beta_takes_only_extract(self):
+        self._beta_refused(self.snap, "target_beta_requires_extract")              # run-1 of a selftest
+        parent = os.path.dirname(self.snap)
+        nested = write_snapshot(os.path.join(parent + "-x", "inner-selftest", "z"), synthetic=False)
+        self.assertTrue(nested.endswith("z-extract"))
+        self._beta_refused(nested, "target_beta_requires_extract")                 # under a *-selftest dir
+        odd = write_snapshot(os.path.join(self.tmp, "odd"), synthetic=False)
+        renamed = os.path.join(self.tmp, "odd-snapshot")
+        os.rename(odd, renamed)
+        self._beta_refused(renamed, "target_beta_requires_extract")                # not <name>-extract
+        marked = write_snapshot(os.path.join(self.tmp, "marked"), data=fx.org(), synthetic=False)
+        self._beta_refused(marked, "synthetic_content_in_beta")                    # SENTINEL in Account Name
+        self.assertFalse(os.path.exists(self.last_dir))
+        good = write_snapshot(os.path.join(self.tmp, "good"), synthetic=False)
+        self.assertEqual(self.run_load(snap=good, target="beta"), 0, self.last_err)
 
 
 class TestLayout(Base):
@@ -141,13 +252,27 @@ class TestLayout(Base):
         self.assertEqual(rc, 0)
 
     def test_waiver_is_never_read(self):
+        import builtins
+        from unittest import mock
         legacy = write_snapshot(os.path.join(self.tmp, "legacy"), layout="legacy")
         waiver = os.path.join(legacy, "input", "waiver.json")
-        os.chmod(waiver, 0o000)                  # unreadable: any open would fail
-        try:
+        real_open, opened = builtins.open, []
+
+        def spy(file, mode="r", *a, **kw):
+            if isinstance(file, str):
+                opened.append((os.path.abspath(file), mode))
+            return real_open(file, mode, *a, **kw)
+        with mock.patch("builtins.open", spy):
             self.assertEqual(self.run_load(snap=legacy), 0, self.last_err)
-        finally:
-            os.chmod(waiver, 0o600)
+        self.assertTrue(any(f.startswith(legacy) for f, _m in opened))
+        # dev: the selftest parent's checksums cover the waiver, so it is hashed (rb), never parsed
+        self.assertEqual({m for f, m in opened if f == waiver}, {"rb"})
+        # beta: a production <id>-extract waiver is never opened at all
+        prod = write_snapshot(os.path.join(self.tmp, "prodlegacy"), layout="legacy", synthetic=False)
+        opened.clear()
+        with mock.patch("builtins.open", spy):
+            self.assertEqual(self.run_load(snap=prod, target="beta", espo=FakeEspo()), 0, self.last_err)
+        self.assertNotIn(os.path.join(prod, "input", "waiver.json"), {f for f, _m in opened})
 
     def _refuse_layout(self, root, code):
         with self.assertRaises(GateError) as cm:
@@ -389,8 +514,8 @@ class TestMapping(Base):
     def test_second_pass_parents(self):
         self.assertEqual(self.acc[fx.A[1]]["parentId"], self.acc[fx.A[0]]["id"])
         self.assertEqual(self.acc[fx.A[2]]["parentId"], self.acc[fx.A[1]]["id"])
-        self.assertNotIn("parentId", self.acc[fx.A[3]])      # parent soft-deleted: never invented
-        self.assertIn({"object": "Account", "sfId": fx.A[3], "reason": "parent_unresolved"}, self.exc)
+        self.assertNotIn("parentId", self.acc[fx.A[3]])      # parent soft-deleted: never linked
+        self.assertIn({"object": "Account", "sfId": fx.A[3], "reason": "parent_soft_deleted_in_sf"}, self.exc)
         # pass 1 creates carry no parent; parents arrive by PUT after every Account exists
         posts = [b for m, e, b in self.espo.writes if m == "POST" and e == "Account"]
         self.assertTrue(all("parentId" not in b for b in posts))
@@ -477,14 +602,18 @@ class TestMapping(Base):
         self.assertEqual(e["status"], "Archived")
         self.assertIs(e["isHtml"], False)
         self.assertEqual(e["to"], f"a.{SENTINEL}@example.test;b@example.test")
-        self.assertEqual(e["messageId"], f"<m1.{SENTINEL}@example.test>")
+        self.assertEqual(e["from"], f"from.{SENTINEL}@example.test")          # bare address
+        self.assertEqual(e["fromString"], f"N {SENTINEL} <from.{SENTINEL}@example.test>")
+        self.assertEqual(em[fx.M[1]]["fromString"], "x@example.test")         # no name: the address
+        self.assertTrue(e["messageId"].startswith("dummy:"))                 # server-set, never sent
+        posts = [b for m, ent, b in self.espo.writes if ent == "Email"]
+        self.assertTrue(posts and all("messageId" not in b for b in posts))
         self.assertEqual(e["sfActivityId"], fx.T[3])
         self.assertEqual((e["parentType"], e["parentId"]), ("Opportunity", self.opp[fx.O[0]]["id"]))
         self.assertEqual(e["usersIds"], [self.users[fx.U1]["id"]])
         self.assertEqual(e["bodyPlain"], e["body"])
         for rec in em.values():
             self.assertFalse({"bcc", "attachmentsIds", "hasAttachment"} & set(rec))
-        self.assertNotIn("messageId", em[fx.M[1]])
         self.assertNotIn(fx.T[2], em)            # the Task-Email represented by its EmailMessage
 
     def test_contact_phones_currency_description(self):
@@ -492,7 +621,8 @@ class TestMapping(Base):
         self.assertEqual([(p["type"], p["primary"]) for p in con[fx.C[0]]["phoneNumberData"]],
                          [("Office", True), ("Mobile", False)])
         self.assertEqual(con[fx.C[1]]["phoneNumberData"],
-                         [{"phoneNumber": f"+44 7 {SENTINEL}", "type": "Mobile", "primary": True}])
+                         [{"phoneNumber": "+44 7700 900001", "type": "Mobile", "primary": True,
+                           "optOut": False, "invalid": False}])                 # read back with extra keys
         self.assertEqual([p["type"] for p in con[fx.C[2]]["phoneNumberData"]], ["Office"])
         self.assertNotIn("phoneNumber", con[fx.C[0]])
         self.assertEqual((self.opp[fx.O[0]]["amount"], self.opp[fx.O[0]]["amountCurrency"]), (100.5, "GBP"))
@@ -649,6 +779,190 @@ class TestIdempotency(Base):
         self.assertIn("code=output_dir_exists", self.last_err)
 
 
+class TestServerBehaviour(Base):
+    """The fake reproduces crm-dev: phone read-back keys and refusal, from, messageId, defaults."""
+
+    def test_fake_reproduces_server(self):
+        f = FakeEspo()
+        _st, doc = f.send("POST", "Contact", body={"sfId": "x1", "phoneNumberData": [
+            {"phoneNumber": "01632 960000", "type": "Office", "primary": True}]})
+        self.assertEqual(f.db["Contact"][doc["id"]]["phoneNumberData"],
+                         [{"phoneNumber": "01632 960000", "type": "Office", "primary": True, "optOut": False,
+                           "invalid": False}])
+        self.assertEqual(f.send("POST", "Contact", body={"sfId": "x2", "phoneNumber": "n/a"})[0], 400)
+        intl = FakeEspo(phone_international=True)
+        self.assertEqual(intl.send("POST", "Account", body={"sfId": "a", "phoneNumber": "01632 960000"}),
+                         (400, {"field": "phoneNumber", "type": "valid"}))
+        _st, doc = intl.send("POST", "Account", body={"sfId": "b", "phoneNumber": "+44 1632 960000"})
+        self.assertEqual(intl.db["Account"][doc["id"]]["phoneNumber"], "+441632960000")
+        _st, doc = f.send("POST", "Email", body={"sfId": "e", "from": "N <a@example.test>", "messageId": "<m>"})
+        self.assertIsNone(f.db["Email"][doc["id"]]["from"])
+        self.assertEqual(f.db["Email"][doc["id"]]["messageId"], f"dummy:{doc['id']}")
+        _st, doc = f.send("POST", "Call", body={"sfId": "c", "dateStart": "2025-01-01 00:00:00"})
+        self.assertEqual(f.db["Call"][doc["id"]]["direction"], "Outbound")
+        self.assertEqual(f.send("POST", "Meeting", body={"sfId": "m"})[0], 400)
+
+    def test_second_run_zero_writes_against_the_faithful_fake(self):
+        self.assertEqual(self.run_load(), 0)
+        con = self.espo.by_sf("Contact")[fx.C[0]]
+        self.assertTrue(all({"optOut", "invalid"} <= set(p) for p in con["phoneNumberData"]))
+        self.assertTrue(all(r["messageId"].startswith("dummy:") for r in self.espo.by_sf("Email").values()))
+        # the phone order as read back differs from the order sent: still equal as a set
+        con["phoneNumberData"].reverse()
+        self.espo.by_sf("Opportunity")[fx.O[0]]["amount"] = 100.50    # numerically equal
+        self.espo.by_sf("Opportunity")[fx.O[2]]["amount"] = "100.5"
+        n = len(self.espo.writes)
+        self.assertEqual(self.run_load(), 0)
+        self.assertEqual(self.espo.writes[n:], [])
+        self.assertEqual(self.report()["requests"]["writes"], 0)
+
+    def test_phone_changes_are_still_written(self):
+        self.run_load()
+        con = self.espo.by_sf("Contact")[fx.C[0]]
+        con["phoneNumberData"][0]["primary"] = False
+        con["phoneNumberData"][1]["primary"] = True
+        self.espo.by_sf("Opportunity")[fx.O[0]]["amount"] = 99
+        n = len(self.espo.writes)
+        self.run_load()
+        ents = sorted(e for _m, e, _b in self.espo.writes[n:])
+        self.assertEqual(ents, ["Contact", "Opportunity"])
+
+    def test_junk_phone_never_sent(self):
+        self.run_load()
+        self.assertNotIn("phoneNumber", self.espo.by_sf("Account")[fx.A[2]])            # 'n/a'
+        self.assertIn({"object": "Account", "sfId": fx.A[2], "reason": "phone_rejected"}, self.exceptions())
+        self.assertFalse([b for _m, _e, b in self.espo.writes if b.get("phoneNumber") == "n/a"])
+
+    def test_phone_refused_by_server_retried_once_without_it(self):
+        espo = FakeEspo(phone_international=True)
+        self.assertEqual(self.run_load(espo=espo), 0, self.last_err)
+        exc = self.exceptions()
+        con = espo.by_sf("Contact")
+        for c in (fx.C[0], fx.C[2]):                 # Phone in national format: refused
+            self.assertIn(c, con)                    # the record is kept
+            self.assertNotIn("phoneNumberData", con[c])
+            self.assertIn({"object": "Contact", "sfId": c, "reason": "phone_rejected"}, exc)
+        self.assertEqual(con[fx.C[1]]["phoneNumberData"][0]["phoneNumber"], "+447700900001")   # normalised
+        posts = [b for m, e, b in espo.writes if m == "POST" and e == "Contact" and b.get("sfId") == fx.C[0]]
+        self.assertEqual(len(posts), 2)              # once with, once without the phone
+        self.assertNotIn("phoneNumberData", posts[1])
+        # an update refused on the phone: retried once without it
+        espo.by_sf("Contact")[fx.C[0]]["lastName"] = "changed"
+        n = len(espo.writes)
+        self.run_load(espo=espo)
+        puts = [b for m, e, b in espo.writes[n:] if e == "Contact" and m == "PUT"]
+        self.assertIn({"lastName": "L" + SENTINEL}, puts)            # the retry, without the phone
+        self.assertEqual(sum(1 for p in puts if "lastName" in p), 2)     # attempted once with, once without
+
+    def test_other_400_not_retried(self):
+        class Refuse(FakeEspo):
+            def send(self, method, path, query=None, body=None, headers=None):
+                if method == "POST" and path == "Contact":
+                    self.requests.append((method, path))
+                    self.headers.append(dict(headers or {}))
+                    return 400, {"field": "lastName", "type": "required"}
+                return super().send(method, path, query, body, headers)
+        espo = Refuse()
+        self.assertEqual(self.run_load(espo=espo), 5)
+        self.assertEqual(sum(1 for r in espo.requests if r == ("POST", "Contact")), 3)   # one per contact
+        self.assertIn({"object": "Contact", "sfId": fx.C[0], "reason": "write_rejected"}, self.exceptions())
+
+
+class TestManufacturedValues(Base):
+    def setUp(self):
+        super().setUp()
+        self.assertEqual(self.run_load(), 0)
+        self.exc = self.exceptions()
+
+    def test_blank_call_type_sends_no_direction(self):
+        self.assertNotIn("callDirectionDefault", load_json("mapping.json"))
+        posts = {b["sfId"]: b for m, e, b in self.espo.writes if m == "POST" and e == "Call"}
+        self.assertNotIn("direction", posts[fx.T[6]])
+        self.assertEqual(posts[fx.T[1]]["direction"], "Outbound")
+        self.assertIn({"object": "Task", "sfId": fx.T[6], "reason": "call_direction_unknown"}, self.exc)
+        self.assertNotIn({"object": "Task", "sfId": fx.T[1], "reason": "call_direction_unknown"}, self.exc)
+        self.assertEqual(self.report()["exceptions"]["byReason"]["call_direction_unknown"], 1)
+
+    def test_call_type_maps_exactly(self):
+        data = fx.org()
+        for t in data["Task"]:
+            if t["Id"] == fx.T[1]:
+                t["CallType"] = "Internal"
+            if t["Id"] == fx.T[6]:
+                t["CallType"] = "Inbound"
+        snap = write_snapshot(os.path.join(self.tmp, "ct"), data=data)
+        espo = FakeEspo()
+        self.run_load(snap=snap, espo=espo)
+        posts = {b["sfId"]: b for m, e, b in espo.writes if m == "POST" and e == "Call"}
+        self.assertEqual(posts[fx.T[6]]["direction"], "Inbound")
+        self.assertNotIn("direction", posts[fx.T[1]])
+        self.assertIn({"object": "Task", "sfId": fx.T[1], "reason": "enum_unmapped"}, self.exceptions())
+
+    def test_required_date_start_fallbacks_are_coded(self):
+        call = self.espo.by_sf("Call")[fx.T[6]]
+        self.assertEqual(call["dateStart"], "2025-05-05 00:00:00")          # from ActivityDate
+        self.assertIn({"object": "Task", "sfId": fx.T[6], "reason": "date_start_from_activity_date"}, self.exc)
+        meet = self.espo.by_sf("Meeting")[fx.E[1]]
+        self.assertEqual(meet["dateStart"], "2020-01-02 03:04:05")          # from CreatedDate
+        self.assertIn({"object": "Event", "sfId": fx.E[1], "reason": "date_start_from_created"}, self.exc)
+        coded = {e["sfId"] for e in self.exc if e["reason"].startswith("date_start_from_")}
+        self.assertEqual(coded, {fx.T[6], fx.E[1]})                        # no others
+
+    def test_email_date_sent_never_from_created(self):
+        data = fx.org()
+        row = dict(next(t for t in data["Task"] if t["Id"] == fx.T[0]), Id=fx.sid("00T", 50), TaskSubtype="Email",
+                   CompletedDateTime=None)
+        data["Task"].append(row)
+        snap = write_snapshot(os.path.join(self.tmp, "em"), data=data)
+        espo = FakeEspo()
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        self.assertNotIn("dateSent", espo.by_sf("Email")[row["Id"]])
+
+
+class TestAdvisories(Base):
+    def test_value_shape_is_a_coded_exception(self):
+        data = fx.org()
+        data["Account"][0]["Name"] = {"nested": SENTINEL}
+        data["Contact"][1]["Phone"] = ["x"]
+        data["Opportunity"][2]["Opportunity_Service__c"] = {"v": 1}
+        data["EmailMessageRelation"][0]["RelationId"] = [fx.U1]
+        snap = write_snapshot(os.path.join(self.tmp, "shape"), data=data)
+        espo = FakeEspo()
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        self.assertNotIn("Traceback", self.last_err)
+        exc = self.exceptions()
+        for obj, sf in (("Account", fx.A[0]), ("Contact", fx.C[1]), ("Opportunity", fx.O[2]),
+                        ("EmailMessageRelation", fx.sid("0EM", 1))):
+            self.assertIn({"object": obj, "sfId": sf, "reason": "value_shape"}, exc)
+        self.assertNotIn(fx.A[0], espo.by_sf("Account"))
+        self.assertIn(fx.A[1], espo.by_sf("Account"))
+        self.assertEqual(self.report()["objects"]["Account"]["skipped"]["value_shape"], 1)
+
+    def test_soft_deleted_parent_not_linked_even_if_in_espocrm(self):
+        self.espo._insert("Account", {"sfId": fx.A[4], "name": "kept"})      # imported before its deletion
+        self.espo._insert("Contact", {"sfId": fx.C[3], "lastName": "kept"})
+        self.assertEqual(self.run_load(), 0)
+        exc = self.exceptions()
+        self.assertNotIn("parentId", self.espo.by_sf("Account")[fx.A[3]])
+        self.assertNotIn("accountId", self.espo.by_sf("Contact")[fx.C[2]])
+        self.assertIn({"object": "Account", "sfId": fx.A[3], "reason": "parent_soft_deleted_in_sf"}, exc)
+        self.assertIn({"object": "Contact", "sfId": fx.C[2], "reason": "parent_soft_deleted_in_sf"}, exc)
+        self.assertIn({"object": "OpportunityContactRole", "sfId": fx.sid("00K", 3),
+                       "reason": "parent_soft_deleted_in_sf"}, exc)
+        kept = self.espo.by_sf("Contact")[fx.C[3]]["id"]
+        self.assertNotIn(kept, self.espo.by_sf("Opportunity")[fx.O[1]].get("contactsIds") or [])
+
+    def test_loopback_transport_keeps_only_validation_field(self):
+        from crm_load.transport import validation_failure
+        body = json.dumps({"messageTranslation": {"label": "validationFailure", "scope": "Contact",
+                                                  "data": {"field": "phoneNumber", "type": "valid"}},
+                           "extra": SENTINEL}).encode()
+        self.assertEqual(validation_failure(body), {"field": "phoneNumber", "type": "valid"})
+        for bad in (b"", b"[]", b"{}", json.dumps({"messageTranslation": {"data": {"field": SENTINEL + " x",
+                                                                                  "type": "valid"}}}).encode()):
+            self.assertIsNone(validation_failure(bad))
+
+
 class TestTransportAndErrors(Base):
     def test_retry_on_429_and_5xx(self):
         self.espo.fail_next = [429, 503, 502]
@@ -690,19 +1004,19 @@ class TestTransportAndErrors(Base):
         self.assertEqual(self.run_load(espo=espo2), 0)
         self.assertIn(fx.A[0], espo2.by_sf("Account"))
 
-    def test_https_transport_header_allowlist(self):
-        t = HttpsTransport("127.0.0.1", 9, "k")
+    def test_loopback_transport_header_allowlist(self):
+        t = LoopbackHttpTransport("127.0.0.1", 9, "k")
         for headers in ({"X-Skip-Duplicate-Check": "false"}, {"X-Api-Key": "other"}, {"Host": "example.test"}):
             with self.assertRaises(TransportError):
                 t.send("POST", "Account", None, {}, headers)
 
-    def test_https_transport_refuses_other_hosts(self):
+    def test_loopback_transport_refuses_other_hosts(self):
         for host in ("localhost", "::1", "127.0.0.2", "example.test"):
             with self.assertRaises(TransportError):
-                HttpsTransport(host, 8080, "k")
+                LoopbackHttpTransport(host, 8080, "k")
         with self.assertRaises(TransportError):
-            HttpsTransport("127.0.0.1", 8080, "")
-        t = HttpsTransport("127.0.0.1", 8080, "k")
+            LoopbackHttpTransport("127.0.0.1", 8080, "")
+        t = LoopbackHttpTransport("127.0.0.1", 8080, "k")
         with self.assertRaises(TransportError):
             t.send("DELETE", "Account/abc")
         with self.assertRaises(TransportError):
@@ -830,6 +1144,27 @@ class TestUsers(Base):
         with open(os.path.join(out, "exceptions.jsonl")) as fh:
             self.assertNotIn(fx.U_AUTOMATED, fh.read())
 
+    def test_user_name_collision_exports_neither(self):
+        data = fx.org()
+        u1 = next(u for u in data["User"] if u["Id"] == fx.U1)
+        u2 = next(u for u in data["User"] if u["Id"] == fx.U2)
+        u2["Username"] = "U1@other.example.test"               # same local part, other domain/case
+        snap = write_snapshot(os.path.join(self.tmp, "coll"), data=data)
+        rm = os.path.join(self.tmp, "rm.json")
+        with open(rm, "w") as fh:
+            json.dump({"profiles": {}, "userRoles": {}}, fh)
+        out = os.path.join(self.tmp, "uc")
+        self.assertEqual(cli.main(["users", snap, "--role-map", rm, "--out", out], stderr=io.StringIO(),
+                                  stdout=io.StringIO()), 0)
+        with open(os.path.join(out, "users.json")) as fh:
+            ids = {u["sfId"] for u in json.load(fh)}
+        self.assertFalse({u1["Id"], u2["Id"]} & ids)
+        self.assertIn(fx.U_INACTIVE, ids)
+        with open(os.path.join(out, "exceptions.jsonl")) as fh:
+            exc = [json.loads(line) for line in fh]
+        for sf in (fx.U1, fx.U2):
+            self.assertIn({"object": "User", "sfId": sf, "reason": "user_not_exportable"}, exc)
+
     def test_example_role_map_has_placeholders_only(self):
         with open(os.path.join(ROOT, "load", "examples", "role-map.example.json")) as fh:
             doc = json.load(fh)
@@ -850,7 +1185,7 @@ class TestStatic(unittest.TestCase):
         "Opportunity": {"name", "description", "amount", "closeDate", "account", "assignedUser", "contacts", "stage"},
         "ServiceType": set(),
         "Email": {"name", "status", "from", "to", "cc", "body", "bodyPlain", "isHtml", "dateSent", "parent",
-                  "users", "messageId", "assignedUser"},
+                  "users", "fromString", "assignedUser"},
     }
 
     def _fields(self, entity):

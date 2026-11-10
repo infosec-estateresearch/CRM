@@ -17,7 +17,7 @@ import os
 
 from .api import WriteRejected
 from .errors import LoadError
-from .mapping import EXCEPTION_CODES
+from .mapping import EXCEPTION_CODES, check_shape
 
 ENTITIES = ("User", "ServiceType", "Account", "Contact", "Opportunity", "Task", "Call", "Meeting", "Email")
 SF_TO_ENTITY = {"Account": "Account", "Contact": "Contact", "Opportunity": "Opportunity"}
@@ -37,11 +37,53 @@ def _is_multi(attr):
     return attr.endswith("Ids") or attr.endswith("Columns")
 
 
+PHONE_ATTRS = ("phoneNumberData", "phoneNumber")
+NUMERIC_ATTRS = ("amount",)
+
+
+def _phone_set(value):
+    """phoneNumberData compared on (phoneNumber, type, primary) only, order-insensitive.
+
+    EspoCRM reads it back with extra keys (optOut, invalid) that the importer never sends."""
+    if not isinstance(value, list):
+        return None
+    out = set()
+    for p in value:
+        if isinstance(p, dict):
+            out.add((p.get("phoneNumber"), p.get("type"), p.get("primary") is True))
+    return frozenset(out) or None
+
+
+def _number(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    return _norm(value)
+
+
+def same_value(attr, new, old):
+    if attr == "phoneNumberData":
+        return _phone_set(new) == _phone_set(old)
+    if attr in NUMERIC_ATTRS:
+        return _number(_norm(new)) == _number(_norm(old))
+    return _norm(new) == _norm(old)
+
+
 class EspoContext:
     """Resolves Salesforce ids to EspoCRM ids through the live index."""
 
-    def __init__(self, index):
+    def __init__(self, index, deleted=frozenset()):
         self.index = index
+        self.deleted = deleted
+
+    def soft_deleted(self, sf_id):
+        return isinstance(sf_id, str) and sf_id in self.deleted
 
     def user_id(self, sf_id):
         rec = self.index["User"].get(sf_id)
@@ -62,7 +104,11 @@ class SnapshotContext:
 
     def __init__(self, snapshot, user_ids):
         self.current = {o: {r["Id"] for r in snapshot.current(o)} for o in SF_TO_ENTITY}
+        self.deleted = soft_deleted_ids(snapshot)
         self.users = user_ids
+
+    def soft_deleted(self, sf_id):
+        return isinstance(sf_id, str) and sf_id in self.deleted
 
     def user_id(self, sf_id):
         return sf_id if sf_id in self.users else None
@@ -72,6 +118,12 @@ class SnapshotContext:
 
     def service_type_id(self, value):
         return value
+
+
+def soft_deleted_ids(snapshot):
+    """Ids of rows soft-deleted in the snapshot that a record may reference."""
+    return frozenset(r["Id"] for o in ("Account", "Contact", "Opportunity", "Task", "Event", "EmailMessage")
+                     for r in snapshot.soft_deleted(o))
 
 
 class Progress:
@@ -121,7 +173,7 @@ class Loader:
         self.objects = {o: {"source_rows": 0, "source_current": 0,
                             "skipped": {"soft_deleted": 0, "absent_unexplained": 0, "out_of_scope": 0,
                                         "represented_by_email_message": 0, "parent_soft_deleted": 0,
-                                        "user_not_human": 0},
+                                        "user_not_human": 0, "value_shape": 0},
                             "targets": {}, "exceptions": {}} for o in SOURCE_OBJECTS}
         self.flagged = {}
 
@@ -171,7 +223,11 @@ class Loader:
                     self.exception(obj, sf_id, "opportunity_unresolved")
                     return None
                 body = {a: v for a, v in attrs.items() if _norm(v) is not None}
-                new_id = self.client.create(entity, body)
+                try:
+                    new_id = self.client.create(entity, body)
+                except WriteRejected as exc:
+                    body = self._without_phones(obj, sf_id, exc, body)
+                    new_id = self.client.create(entity, body)
                 self.index[entity][key] = dict(body, id=new_id)
                 action = "created"
             else:
@@ -188,16 +244,22 @@ class Loader:
                             merged.update(v or {})
                             if merged != (old or {}):
                                 diff[a] = merged
-                    elif _norm(v) != _norm(old):
+                    elif not same_value(a, v, old):
                         diff[a] = v
                 if diff:
                     for a in [a for a in diff if a.endswith("Columns")]:
                         ids = a[:-len("Columns")] + "Ids"
                         if ids not in diff:
                             diff[ids] = list(existing.get(ids) or [])
-                    self.client.update(entity, existing["id"], diff)
-                    existing.update(diff)
-                    action = "updated"
+                    try:
+                        self.client.update(entity, existing["id"], diff)
+                    except WriteRejected as exc:
+                        diff = self._without_phones(obj, sf_id, exc, diff)
+                        if diff:
+                            self.client.update(entity, existing["id"], diff)
+                    if diff:
+                        existing.update(diff)
+                        action = "updated"
         except WriteRejected as exc:
             if exc.status == 409:
                 # EspoCRM's duplicate-name check; every POST skips it, so this should not occur.
@@ -215,6 +277,13 @@ class Loader:
         self._count(obj, entity, action)
         return self.index[entity].get(key)
 
+    def _without_phones(self, obj, sf_id, exc, attrs):
+        """A 400 on the field phoneNumber: retry once without the phone (never invented)."""
+        if exc.status != 400 or exc.field != "phoneNumber" or not any(a in attrs for a in PHONE_ATTRS):
+            raise exc
+        self.exception(obj, sf_id, "phone_rejected")
+        return {a: v for a, v in attrs.items() if a not in PHONE_ATTRS}
+
     # ---------------------------------------------------------------- phases
     def _source(self, obj):
         rows = self.s.rows(obj)
@@ -223,6 +292,17 @@ class Loader:
         o["source_rows"] = len(rows)
         o["source_current"] = len(cur)
         o["skipped"]["soft_deleted"] = len(rows) - len(cur)
+        # A dict or list in a mapped field: that record is an exception, never a traceback.
+        ok = []
+        for r in cur:
+            try:
+                check_shape(obj, r, self.mapping)
+            except LoadError as exc:
+                self.exception(obj, r["Id"], exc.code)
+                o["skipped"]["value_shape"] += 1
+                continue
+            ok.append(r)
+        cur = ok
         unexplained = self.s.absent_unexplained(obj)
         if unexplained is not None:
             o["skipped"]["absent_unexplained"] = unexplained
@@ -233,7 +313,7 @@ class Loader:
             self.exception(obj, row["Id"], c)
 
     def run(self):
-        m, ctx = self.mapper, EspoContext(self.index)
+        m, ctx = self.mapper, EspoContext(self.index, soft_deleted_ids(self.s))
         self.build_index()
         users = self._source("User")
         self.objects["User"]["skipped"]["user_not_human"] = sum(
@@ -321,12 +401,13 @@ class Loader:
         by_opp = {}
         for r in self._source("OpportunityContactRole"):
             opp = r.get("OpportunityId")
-            if ctx.record_id("Opportunity", opp) is None:
-                self.exception("OpportunityContactRole", r["Id"], "opportunity_unresolved")
+            codes = []
+            if self.mapper.ref("Opportunity", opp, ctx, codes, "opportunity_unresolved") is None:
+                self.exception("OpportunityContactRole", r["Id"], (codes or ["opportunity_unresolved"])[0])
                 continue
-            cid = ctx.record_id("Contact", r.get("ContactId"))
+            cid = self.mapper.ref("Contact", r.get("ContactId"), ctx, codes, "contact_unresolved")
             if cid is None:
-                self.exception("OpportunityContactRole", r["Id"], "contact_unresolved")
+                self.exception("OpportunityContactRole", r["Id"], (codes or ["contact_unresolved"])[0])
                 continue
             role = r.get("Role")
             if role is None:

@@ -4,7 +4,21 @@ import json
 import os
 
 from . import TOOL_VERSION
-from .engine import EspoContext, SnapshotContext
+from .engine import SnapshotContext
+from .errors import LoadError
+from .mapping import check_shape
+
+
+def _shaped(loader, obj):
+    """Current rows the load could map (``value_shape`` rows are exceptions, not counted)."""
+    out = []
+    for r in loader.s.current(obj):
+        try:
+            check_shape(obj, r, loader.mapping)
+        except LoadError:
+            continue
+        out.append(r)
+    return out
 
 
 def _open_new(path):
@@ -17,7 +31,7 @@ def relationships(loader):
     """Relationship totals: the snapshot's own resolvable references against EspoCRM now."""
     s, m = loader.s, loader.mapper
     snap = SnapshotContext(s, set(loader.index["User"]))
-    cur = {o: [r for r in s.current(o)] for o in ("Account", "Contact", "OpportunityContactRole", "Task",
+    cur = {o: _shaped(loader, o) for o in ("Account", "Contact", "OpportunityContactRole", "Task",
                                                  "Event", "EmailMessage")}
     acc_ids = {r["Id"] for r in cur["Account"]}
     expected = {

@@ -57,6 +57,13 @@ def build_users(snapshot, role_map):
     shared = role_map.get("legacyShared", {})
     shared_ids = set(shared.get("sfIds", []))
     users, problems, skipped = [], [], 0
+    # Two exported users with the same Username local part would collide on userName:
+    # neither is exported (user_not_exportable), neither is guessed.
+    counts = {}
+    for row in snapshot.rows("User"):
+        if row.get("UserType") == "Standard" and _user_name(row) is not None:
+            key = _user_name(row).lower()
+            counts[key] = counts.get(key, 0) + 1
     for row in snapshot.rows("User"):
         if row.get("UserType") != "Standard":
             skipped += 1
@@ -78,7 +85,7 @@ def build_users(snapshot, role_map):
         if sf_id in shared_ids:
             user.update(isActive=False, firstName=shared.get("firstName"), lastName=shared.get("lastName"),
                         teams=sorted(set(shared.get("teams", []))), roles=sorted(set(shared.get("roles", []))))
-        if user["userName"] is None or not user["lastName"]:
+        if user["userName"] is None or not user["lastName"] or counts.get(user["userName"].lower(), 0) > 1:
             problems.append((sf_id, "user_not_exportable"))
             continue
         users.append(user)

@@ -4,8 +4,13 @@
 #   scripts/load.sh [--accept-drift URL] [--resume PREVIOUS-OUT-DIR] [--reconciliation RECONCILE-RUN-DIR]
 #                   <dev|beta> <snapshot-dir> <new-output-dir>
 #
-#   dev   accepts only a synthetic snapshot (manifest mode "selftest");
-#   beta  refuses a synthetic snapshot.
+#   dev   accepts only a synthetic snapshot: <snapshot-dir> is
+#         $SNAPSHOT_BASE/<name>-selftest/run-1 or /run-2, and the sealed and canonical
+#         checks below apply to the parent <name>-selftest directory, whose own
+#         manifest.json (mode "selftest") crm-load verifies;
+#   beta  accepts only $SNAPSHOT_BASE/<name>-extract (either layout); anything under a
+#         *-selftest directory is refused, and crm-load refuses a snapshot whose Account
+#         names carry the synthetic marker.
 #
 #   --accept-drift URL   passed to crm-load; must be
 #                        https://github.com/infosec-estateresearch/CRM/issues/9#issuecomment-<digits>.
@@ -20,7 +25,10 @@
 #
 # Guards, all checked before anything runs:
 #   * the caller is root; each option is given at most once;
-#   * the snapshot is a canonical path directly under $SNAPSHOT_BASE, and sealed:
+#   * beta: the snapshot is a canonical <name>-extract path directly under $SNAPSHOT_BASE,
+#     not under any *-selftest directory; dev: it is <name>-selftest/run-1 or run-2 and the
+#     canonical <name>-selftest parent is directly under $SNAPSHOT_BASE with a manifest.json;
+#     the directory that is checked (the snapshot for beta, the parent for dev) is sealed:
 #     owned by root, directories 0700, files 0400, no symlinks or special files;
 #   * manifest.json is in exactly one layout (the CRM-002-W rule):
 #       <id>/manifest.json, with no <id>/run and no <id>/input; or
@@ -29,13 +37,14 @@
 #     way directly under $SNAPSHOT_BASE;
 #   * the resume directory, when given, is a canonical root-owned 0700 directory holding only
 #     root-owned 0600 regular files, under a root-owned 0700 parent;
-#   * the output directory does not exist and its parent is a root-owned 0700
-#     directory; crm-load creates it 0700 and its files 0600;
+#   * the output directory does not exist, is not under $SNAPSHOT_BASE, and its parent is
+#     a root-owned 0700 directory; crm-load creates it 0700 and its files 0600;
 #   * $RUNTIME_BASE/<target>/load.env is a root-owned 0600 regular file holding exactly
 #     CRM_LOAD_HOST, CRM_LOAD_PORT and CRM_LOAD_API_KEY (NAME=value lines; it is
 #     parsed, never sourced).
-# crm-load runs as python3 -I -B with a clean environment holding only those three
-# variables. The key is never printed.
+# crm-load runs as python3 -I -B with a clean environment holding only PATH, LANG and those
+# three variables (and bash's own SHLVL). They are passed as exported variables, never on a command line, so the
+# key is never in any process's argv; it is never printed.
 set -euo pipefail
 umask 077
 
@@ -120,7 +129,41 @@ sealed_dir() {
 }
 
 # --- snapshot -------------------------------------------------------------------
-canonical=$(sealed_dir snapshot "$snapshot") || exit 2
+case "$snapshot" in
+    /*) ;;
+    *) die "snapshot path must be absolute" ;;
+esac
+snapshot=${snapshot%/}
+if [ "$target" = "dev" ]; then
+    # <SNAPSHOT_BASE>/<name>-selftest/run-1|run-2; the parent is what is sealed.
+    run_name=$(basename -- "$snapshot")
+    selftest=$(dirname -- "$snapshot")
+    case "$run_name" in
+        run-1|run-2) ;;
+        *) die "dev takes only <name>-selftest/run-1 or run-2" ;;
+    esac
+    case "$(basename -- "$selftest")" in
+        ?*-selftest) ;;
+        *) die "dev takes only <name>-selftest/run-1 or run-2" ;;
+    esac
+    parent_canonical=$(sealed_dir "selftest directory" "$selftest") || exit 2
+    [ -f "$parent_canonical/manifest.json" ] && [ ! -L "$parent_canonical/manifest.json" ] \
+        || die "selftest directory has no manifest.json"
+    [ -d "$snapshot" ] && [ ! -L "$snapshot" ] || die "snapshot is not a directory: $snapshot"
+    canonical=$parent_canonical/$run_name
+    [ "$(realpath -e -- "$snapshot")" = "$canonical" ] || die "snapshot path is not canonical"
+    seal_root=$parent_canonical
+else
+    case "$snapshot" in
+        */*-selftest/*|*/*-selftest) die "beta refuses anything under a *-selftest directory" ;;
+    esac
+    case "$(basename -- "$snapshot")" in
+        ?*-extract) ;;
+        *) die "beta takes only <name>-extract directly under $SNAPSHOT_BASE" ;;
+    esac
+    canonical=$(sealed_dir snapshot "$snapshot") || exit 2
+    seal_root=$canonical
+fi
 # Exactly one layout (CRM-002-W). The waiver under input/ is never read.
 if [ -e "$canonical/manifest.json" ] || [ -L "$canonical/manifest.json" ]; then
     [ ! -e "$canonical/run" ] && [ ! -L "$canonical/run" ] && [ ! -e "$canonical/input" ] \
@@ -141,7 +184,7 @@ if [ "$target" = "beta" ] && [ "$have_rec" -eq 0 ]; then
 fi
 if [ "$have_rec" -eq 1 ]; then
     rec_canonical=$(sealed_dir "reconciliation run" "$reconciliation") || exit 2
-    [ "$rec_canonical" != "$canonical" ] || die "reconciliation run must not be the snapshot"
+    [ "$rec_canonical" != "$seal_root" ] || die "reconciliation run must not be the snapshot"
     extra+=(--reconciliation "$rec_canonical")
 fi
 if [ "$have_drift" -eq 1 ]; then
@@ -160,7 +203,7 @@ parent=$(dirname -- "$outdir")
 [ "$(realpath -e -- "$parent")" = "$parent" ] || die "output parent path is not canonical"
 [ "$(owner_mode "$parent")" = "$REQUIRED_UID 700" ] || die "output parent must be root-owned 0700"
 case "$outdir/" in
-    "$canonical"/*) die "output directory must not be inside the snapshot" ;;
+    "$SNAPSHOT_BASE"/*) die "output directory must not be under $SNAPSHOT_BASE" ;;
 esac
 
 # --- resume directory (optional) ----------------------------------------------------
@@ -179,7 +222,7 @@ if [ "$have_resume" -eq 1 ]; then
     bad=$(find "$resume" -mindepth 1 \( ! -type f -o ! -uid "$REQUIRED_UID" -o ! -perm 0600 \) -print -quit)
     [ -z "$bad" ] || die "resume directory is not sealed (root-owned 0600 regular files only)"
     case "$resume/" in
-        "$canonical"/*) die "resume directory must not be inside the snapshot" ;;
+        "$SNAPSHOT_BASE"/*) die "resume directory must not be under $SNAPSHOT_BASE" ;;
     esac
     extra+=(--resume "$resume")
 fi
@@ -219,7 +262,17 @@ esac
 
 # --- run ------------------------------------------------------------------------------
 cd /
-exec env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8 \
-    CRM_LOAD_HOST="$CRM_LOAD_HOST" CRM_LOAD_PORT="$CRM_LOAD_PORT" CRM_LOAD_API_KEY="$CRM_LOAD_API_KEY" \
-    python3 -I -B "$REPO_DIR/load/bin/crm-load.py" load "$canonical" --target "$target" --out "$outdir" \
+# A clean environment without env -i NAME=value arguments (which would put the key in
+# argv): every exported variable is unexported, then exactly five are exported by name
+# (bash itself adds SHLVL).
+while IFS= read -r name; do
+    case "$name" in
+        PATH|LANG|CRM_LOAD_HOST|CRM_LOAD_PORT|CRM_LOAD_API_KEY) ;;
+        *) export -n -- "$name" 2>/dev/null || die "cannot clear the environment" ;;
+    esac
+done < <(compgen -e)
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+LANG=C.UTF-8
+export PATH LANG CRM_LOAD_HOST CRM_LOAD_PORT CRM_LOAD_API_KEY
+exec python3 -I -B "$REPO_DIR/load/bin/crm-load.py" load "$canonical" --target "$target" --out "$outdir" \
     ${extra[@]+"${extra[@]}"}

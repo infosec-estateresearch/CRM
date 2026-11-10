@@ -20,12 +20,21 @@ Its ``snapshot`` object must name the snapshot being loaded: ``t_start``, ``stat
 The importer refuses a snapshot unless:
 * ``manifest.json`` parses and every file below the snapshot root is listed with a
   matching sha256, and nothing unlisted is present;
-* ``mode`` is ``extract`` (a real extraction) or ``selftest`` (synthetic, written by
-  ``crm-migrate selftest``), and the status is ``RECONCILED``, or
+* ``mode`` is ``extract``, and the status is ``RECONCILED``, or
   ``RECONCILED_WITH_DRIFT`` with an accepted-drift Issue #9 comment URL;
 * the contract version is exactly the int 4.
 
-A snapshot is synthetic if and only if its manifest ``mode`` is ``selftest``.
+Synthetic (``synthetic_origin``) means exactly: the snapshot directory is ``run-1`` or
+``run-2`` directly inside a ``<name>-selftest`` directory whose own ``manifest.json``
+exists, verifies (every file below it listed with a matching sha256) and has ``mode``
+``selftest``, and that parent is sealed: owned by the running user (root under
+``scripts/load.sh``), directories 0700, files 0400, no links or special files.
+``crm-migrate selftest`` writes the runs themselves with ``mode`` ``extract``; the mode of
+a run manifest never marks it synthetic. ``load.sh`` additionally requires the parent to
+be directly under ``$SNAPSHOT_BASE``.
+
+A production snapshot (``production_origin``) is a ``<name>-extract`` directory with no
+``*-selftest`` component anywhere in its path.
 
 Files are only ever opened for reading.
 """
@@ -46,7 +55,11 @@ RECONCILE_SUFFIX = "-reconcile"
 RECONCILE_TOP = "report"
 RECONCILIATION_REPORT = "reconciliation.json"
 SUPPORTED_CONTRACT_VERSION = 4
-MODES = ("extract", "selftest")
+MODES = ("extract",)
+SELFTEST_MODE = "selftest"
+SELFTEST_SUFFIX = "-selftest"
+EXTRACT_SUFFIX = "-extract"
+SELFTEST_RUNS = ("run-1", "run-2")
 UNKNOWN = "unknown"
 RECONCILED = "RECONCILED"
 DRIFT = "RECONCILED_WITH_DRIFT"
@@ -195,8 +208,10 @@ def gate(manifest, accept_drift=None):
 class Snapshot:
     """A verified, gated snapshot. Rows are read lazily, read-only."""
 
-    def __init__(self, root, manifest, manifest_sha256=None, reconciliation=None):
+    def __init__(self, root, manifest, manifest_sha256=None, reconciliation=None, id_dir=None):
         self.root = root
+        self.id_dir = id_dir if id_dir is not None else root
+        self._synthetic = None
         self.manifest = manifest
         self.manifest_sha256 = manifest_sha256
         self._reconciliation = reconciliation
@@ -205,7 +220,13 @@ class Snapshot:
 
     @property
     def synthetic(self):
-        return manifest_is_synthetic(self.manifest)
+        if self._synthetic is None:
+            self._synthetic = synthetic_origin(self.id_dir)
+        return self._synthetic
+
+    @property
+    def production(self):
+        return production_origin(self.id_dir)
 
     @property
     def as_of(self):
@@ -243,7 +264,7 @@ class Snapshot:
                 for line in fh:
                     if line.strip():
                         row = json.loads(line)
-                        if not isinstance(row, dict):
+                        if not isinstance(row, dict) or not isinstance(row.get("Id"), str):
                             raise ValueError
                         rows.append(row)
         except (OSError, ValueError, EOFError):
@@ -288,8 +309,52 @@ class Snapshot:
         return value if type(value) is int else None
 
 
-def manifest_is_synthetic(manifest):
-    return manifest.get("mode") == "selftest"
+def _sealed(root):
+    """Owned by the running user, directories 0700, files 0400, no links or special files."""
+    uid = os.geteuid()
+    try:
+        st = os.lstat(root)
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != uid or stat.S_IMODE(st.st_mode) != 0o700:
+            return False
+        for dirpath, dirnames, filenames in os.walk(root):
+            for name in dirnames + filenames:
+                fst = os.lstat(os.path.join(dirpath, name))
+                if fst.st_uid != uid:
+                    return False
+                if stat.S_ISDIR(fst.st_mode):
+                    if stat.S_IMODE(fst.st_mode) != 0o700:
+                        return False
+                elif not stat.S_ISREG(fst.st_mode) or stat.S_IMODE(fst.st_mode) != 0o400:
+                    return False
+    except OSError:
+        return False
+    return True
+
+
+def synthetic_origin(id_dir):
+    """True only for ``<name>-selftest/run-1`` or ``/run-2`` under a sealed, verified selftest."""
+    path = os.path.abspath(id_dir)
+    parent = os.path.dirname(path)
+    if os.path.basename(path) not in SELFTEST_RUNS or not os.path.basename(parent).endswith(SELFTEST_SUFFIX):
+        return False
+    if len(os.path.basename(parent)) <= len(SELFTEST_SUFFIX) or os.path.islink(path):
+        return False
+    if not _sealed(parent):
+        return False
+    try:
+        manifest = verify(parent)
+    except GateError:
+        return False
+    return manifest.get("mode") == SELFTEST_MODE
+
+
+def production_origin(id_dir):
+    """True only for a ``<name>-extract`` directory with no ``*-selftest`` path component."""
+    path = os.path.abspath(id_dir)
+    name = os.path.basename(path)
+    if not name.endswith(EXTRACT_SUFFIX) or len(name) <= len(EXTRACT_SUFFIX):
+        return False
+    return not any(part.endswith(SELFTEST_SUFFIX) for part in path.split(os.sep))
 
 
 def locate_reconcile(id_dir):
@@ -351,8 +416,9 @@ def open_reconciliation(path, manifest):
 
 
 def open_snapshot(id_dir, accept_drift=None, reconciliation=None):
-    root = locate(os.path.abspath(id_dir))
+    id_dir = os.path.abspath(id_dir)
+    root = locate(id_dir)
     manifest, sha = _verify(root)
     gate(manifest, accept_drift)
     doc = open_reconciliation(reconciliation, manifest) if reconciliation is not None else None
-    return Snapshot(root, manifest, sha, doc)
+    return Snapshot(root, manifest, sha, doc, id_dir)

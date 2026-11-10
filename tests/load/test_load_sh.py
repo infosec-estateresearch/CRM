@@ -76,13 +76,17 @@ class LoadShBase(unittest.TestCase):
         shutil.rmtree(self.tmp, True)
 
     def snapshot(self, name, synthetic, **kw):
+        """``<base>/<name>-selftest/run-1`` (sealed parent) or ``<base>/<name>-extract``."""
         root = write_snapshot(os.path.join(self.base, name), synthetic=synthetic, **kw)
-        seal(root)
+        seal(os.path.dirname(root) if synthetic else root)
         return root
 
     def rec_for(self, snapshot, **override):
         """A sealed reconcile run bound to ``snapshot``, directly under the snapshots base."""
-        name = os.path.basename(snapshot) + "-reconcile"
+        tag = os.path.basename(snapshot)
+        if tag in ("run-1", "run-2"):
+            tag = os.path.basename(os.path.dirname(snapshot)) + "-" + tag
+        name = tag + "-reconcile"
         root = os.path.join(self.base, name)
         if override:
             name = name[:-len("-reconcile")] + f"-{len(os.listdir(self.base))}-reconcile"
@@ -134,7 +138,9 @@ class TestShippedScript(unittest.TestCase):
         self.assertRegex(text, r"(?m)^SNAPSHOT_BASE=/srv/CRM/runtime/migrate/snapshots$")
         self.assertRegex(text, r"(?m)^RUNTIME_BASE=/srv/CRM/runtime$")
         self.assertIn('python3 -I -B "$REPO_DIR/load/bin/crm-load.py"', text)
-        self.assertIn("exec env -i", text)
+        self.assertNotRegex(text, r"(?m)^[^#]*env -i")            # env -i NAME=value puts the key in argv
+        self.assertNotRegex(text, r'CRM_LOAD_API_KEY="\$')       # never expanded onto a command line
+        self.assertIn("export PATH LANG CRM_LOAD_HOST CRM_LOAD_PORT CRM_LOAD_API_KEY", text)
         self.assertNotRegex(text, r"(?m)^\s*(\.|source)\s")       # the env file is parsed, never sourced
 
     def test_bash_n(self):
@@ -165,14 +171,59 @@ class TestLoadShGuards(LoadShBase):
         self.assertIn("code=connection_failed", res.stderr)
 
     def test_dev_refuses_real_and_beta_refuses_synthetic(self):
-        res = self.run_sh("dev", self.real, self.out("a"))
-        self.assertEqual(res.returncode, 2)
+        self.assertRefused(self.run_sh("dev", self.real, self.out("a")), "dev takes only", self.out("a"))
+        self.assertRefused(self.run_sh("--reconciliation", self.rec_for(self.synthetic), "beta", self.synthetic,
+                                       self.out("b")), "beta refuses anything under a *-selftest", self.out("b"))
+        parent = os.path.dirname(self.synthetic)
+        self.assertRefused(self.run_sh("--reconciliation", self.rec_for(self.real), "beta", parent, self.out("c")),
+                           "beta refuses", self.out("c"))
+        self.assertRefused(self.run_sh("dev", parent, self.out("d")), "dev takes only", self.out("d"))
+
+    def test_dev_parent_mode_checked_by_crm_load(self):
+        # the shell guards pass; crm-load refuses because the parent manifest is not mode selftest
+        parent = os.path.dirname(self.synthetic)
+        unseal(parent)
+        fx.write_selftest_manifest(parent)
+        path = os.path.join(parent, "manifest.json")
+        with open(path) as fh:
+            doc = fh.read().replace('"mode": "selftest"', '"mode": "extract"')
+        with open(path, "w") as fh:
+            fh.write(doc)
+        seal(parent)
+        res = self.run_sh("dev", self.synthetic, self.out())
+        self.assertEqual(res.returncode, 2, res.stderr)
         self.assertIn("code=target_dev_requires_synthetic", res.stderr)
-        self.assertFalse(os.path.exists(self.out("a")))
-        res = self.run_sh("--reconciliation", self.rec_for(self.synthetic), "beta", self.synthetic, self.out("b"))
-        self.assertEqual(res.returncode, 2)
-        self.assertIn("code=target_beta_refuses_synthetic", res.stderr)
-        self.assertFalse(os.path.exists(self.out("b")))
+        self.assertFalse(os.path.exists(self.out()))
+
+    def test_beta_marker_refused_by_crm_load(self):
+        marked = write_snapshot(os.path.join(self.base, "marked"), data=fx.org(), synthetic=False)
+        seal(marked)
+        res = self.run_sh("--reconciliation", self.rec_for(marked), "beta", marked, self.out())
+        self.assertEqual(res.returncode, 2, res.stderr)
+        self.assertIn("code=synthetic_content_in_beta", res.stderr)
+
+    def test_api_key_only_in_the_environment(self):
+        stub_repo = os.path.join(self.tmp, "stubrepo")
+        os.makedirs(os.path.join(stub_repo, "load", "bin"))
+        with open(os.path.join(stub_repo, "load", "bin", "crm-load.py"), "w") as fh:
+            fh.write("import os, sys\n"
+                     f"key = {KEY!r}\n"
+                     "sys.stderr.write('ENV=' + ','.join(sorted(os.environ)) + '\\n')\n"
+                     "sys.stderr.write('KEY_OK=' + str(os.environ.get('CRM_LOAD_API_KEY') == key) + '\\n')\n"
+                     "args = open('/proc/%d/cmdline' % os.getppid() if False else '/proc/self/cmdline', 'rb').read()\n"
+                     "sys.stderr.write('ARGV_HAS_KEY=' + str(key.encode() in args) + '\\n')\n")
+        with open(self.script) as fh:
+            text = fh.read()
+        text = re.sub(r"(?m)^REPO_DIR=.*$", f"REPO_DIR={stub_repo}", text, count=1)
+        script = os.path.join(self.tmp, "load-stub.sh")
+        with open(script, "w") as fh:
+            fh.write(text)
+        res = self.run_sh("dev", self.synthetic, self.out(), script=script)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("KEY_OK=True", res.stderr)
+        self.assertIn("ARGV_HAS_KEY=False", res.stderr)
+        env = res.stderr.split("ENV=", 1)[1].splitlines()[0].split(",")
+        self.assertEqual(set(env) - {"SHLVL"}, {"CRM_LOAD_API_KEY", "CRM_LOAD_HOST", "CRM_LOAD_PORT", "LANG", "PATH"})
 
     def test_target_and_arguments(self):
         for args in ((), ("dev",), ("dev", self.synthetic), ("prod", self.synthetic, self.out()),
@@ -181,19 +232,43 @@ class TestLoadShGuards(LoadShBase):
                 self.assertRefused(self.run_sh(*args), "", self.out())
 
     def test_snapshot_location(self):
-        other = os.path.join(self.tmp, "elsewhere")
+        parent = os.path.dirname(self.synthetic)
+        other = os.path.join(self.tmp, "elsewhere-selftest", "run-1")
         os.makedirs(other, mode=0o700)
-        nested = os.path.join(self.base, "synth", "objects")
-        link = os.path.join(self.base, "link")
-        os.symlink(self.synthetic, link)
-        for snap, frag in ((other, "directly under"), (nested, "directly under"), (link, "not a directory"),
-                           (os.path.join(self.base, "synth", "..", "synth"), "not canonical"),
-                           ("relative/path", "absolute"), (os.path.join(self.base, "missing"), "not a directory")):
+        os.chmod(os.path.dirname(other), 0o700)
+        deeper = os.path.join(self.base, "deeper")
+        os.makedirs(os.path.join(deeper, "x-selftest", "run-1"), mode=0o700)
+        os.chmod(deeper, 0o700)
+        os.chmod(os.path.join(deeper, "x-selftest"), 0o700)
+        link = os.path.join(self.base, "link-selftest")
+        os.symlink(parent, link)
+        for snap, frag in ((other, "directly under"), (os.path.join(deeper, "x-selftest", "run-1"), "directly under"),
+                           (os.path.join(self.synthetic, "objects"), "dev takes only"),
+                           (os.path.join(parent, "run-3"), "dev takes only"),
+                           (os.path.join(link, "run-1"), "not a directory"),
+                           (os.path.join(self.base, "synth-selftest", "..", "synth-selftest", "run-1"), "not canonical"),
+                           ("relative/path", "absolute"),
+                           (os.path.join(self.base, "missing-selftest", "run-1"), "not a directory")):
             with self.subTest(snap=snap):
                 self.assertRefused(self.run_sh("dev", snap, self.out()), frag, self.out())
+        unseal(parent)
+        os.rename(self.synthetic, os.path.join(parent, "real-run"))
+        os.symlink(os.path.join(parent, "real-run"), self.synthetic)
+        self.assertRefused(self.run_sh("dev", self.synthetic, self.out()), "sealed", self.out())
+        rec = self.rec_for(self.real)
+        for snap, frag in ((os.path.join(self.base, "plain"), "beta takes only"),
+                           (os.path.join(self.base, "a", "b-extract"), "directly under")):
+            os.makedirs(snap, mode=0o700, exist_ok=True)
+            os.chmod(os.path.dirname(snap), 0o700)
+            with self.subTest(snap=snap):
+                self.assertRefused(self.run_sh("--reconciliation", rec, "beta", snap, self.out()), frag, self.out())
 
     def test_snapshot_must_be_sealed(self):
+        parent = os.path.dirname(self.synthetic)
         cases = (
+            ("../manifest.json", 0o600),
+            ("../run-2", 0o750),
+            ("..", 0o755),
             ("objects/Account.jsonl.gz", 0o600),
             ("objects/Account.jsonl.gz", 0o440),
             ("manifest.json", 0o644),
@@ -231,7 +306,9 @@ class TestLoadShGuards(LoadShBase):
         os.mkdir(open_parent, 0o755)
         os.chmod(open_parent, 0o755)
         self.assertRefused(self.run_sh("dev", self.synthetic, os.path.join(open_parent, "o")), "0700")
-        unseal(self.synthetic)
+        under_base = os.path.join(self.base, "o")
+        self.assertRefused(self.run_sh("dev", self.synthetic, under_base), "must not be under", under_base)
+        unseal(os.path.dirname(self.synthetic))
         inside = os.path.join(self.synthetic, "out")
         res = self.run_sh("dev", self.synthetic, inside)
         self.assertRefused(res, "sealed")                    # an unsealed snapshot is refused first
@@ -421,8 +498,10 @@ class TestLoadShOptions(LoadShBase):
         seal(elsewhere)
         self.assertRefused(self.run_sh("--reconciliation", elsewhere, "dev", self.synthetic, self.out()),
                            "directly under", self.out())
+        self.assertRefused(self.run_sh("--reconciliation", os.path.dirname(self.synthetic), "dev", self.synthetic,
+                                       self.out()), "must not be the snapshot", self.out())
         self.assertRefused(self.run_sh("--reconciliation", self.synthetic, "dev", self.synthetic, self.out()),
-                           "must not be the snapshot", self.out())
+                           "directly under", self.out())
         res = self.run_sh("--reconciliation", self.real, "dev", self.synthetic, self.out())
         self.assertEqual(res.returncode, 3, res.stderr)              # crm-load: not a reconcile layout
         self.assertIn("code=reconciliation_layout_unknown", res.stderr)
