@@ -19,6 +19,7 @@ import re
 from urllib.parse import parse_qsl, urlsplit
 
 from .contract import parse_soql
+from .errors import MigrateError
 from .messages import Response
 
 SENTINEL = "SENTINEL-7f3a"
@@ -408,6 +409,28 @@ class FakeWriteAttempt(AssertionError):
     pass
 
 
+def soap_body_operation(body):
+    """Local name of the single operation element in a SOAP Body, or None.
+
+    The fake classifies a SOAP request by this as well as by ``SOAPAction``: anything whose
+    body operation is not ``login`` or ``logout`` counts as a write attempt."""
+    from . import auth_soap                      # local import: auth_soap is not needed otherwise
+    try:
+        root = auth_soap.parse_xml(body)
+    except MigrateError:
+        return None
+    if root.tag != "{" + _NS_ENV + "}Envelope":
+        return None
+    bodies = [c for c in root if c.tag == "{" + _NS_ENV + "}Body"]
+    if len(bodies) != 1 or len(bodies[0]) != 1:
+        return None
+    op = bodies[0][0].tag
+    if not op.startswith("{" + auth_soap.NS_PARTNER + "}"):
+        return None
+    name = op.split("}", 1)[1]
+    return name if name in ("login", "logout") else None
+
+
 class FakeSalesforceTransport:
     """``Transport`` implementation answering from a ``FakeOrg``. Records every request."""
 
@@ -463,7 +486,7 @@ class FakeSalesforceTransport:
         is_token = request.method == "POST" and parts.path == "/services/oauth2/token"
         action = dict((k.lower(), v) for k, v in request.headers).get("soapaction")
         is_soap = (request.method == "POST" and parts.path.startswith("/services/Soap/u/")
-                   and action in ("login", "logout"))
+                   and action in ("login", "logout") and soap_body_operation(request.body) == action)
         if request.method != "GET" and not is_token and not is_soap:
             self.write_requests += 1
             FakeSalesforceTransport.total_write_requests += 1

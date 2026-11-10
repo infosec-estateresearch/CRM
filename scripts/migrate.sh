@@ -88,7 +88,7 @@ require runtime-dirs
 require uid-free "$(getent passwd "$RUN_UID" || true)" "$(getent group "$RUN_GID" || true)"
 if [[ "$auth" == soap-legacy ]]; then
     [[ -f "$ENV_EXAMPLE_LEGACY" ]] || die "repository files missing"
-    for name in NIF_SRC_SALESFORCE_USER NIF_SRC_SALESFORCE_PASS; do
+    for name in NIF_SRC_SALESFORCE_USER NIF_SRC_SALESFORCE_PASS CRM_LEGACY_ENV_FILE; do
         [[ ! -v "$name" ]] || die "$name is set in the calling shell; unset it first"
     done
 fi
@@ -161,7 +161,10 @@ require_env_file() {
 run_legacy() {
     # TEMPORARY (CRM-002-S): the legacy username/password go from the ELT env file (read-only,
     # parsed by hostcheck.parse_legacy_env) straight into the container's stdin. They are never
-    # written to /srv/CRM/runtime/migrate, an argument list or the environment.
+    # written to /srv/CRM/runtime/migrate, an argument list or the environment. The ELT env
+    # file's path is CRM_LEGACY_ENV_FILE in $ENV_FILE (never committed); hostcheck refuses
+    # while it is empty, and checks it is absolute, symlink-free, a root-owned regular file
+    # and not group- or world-writable.
     local mode="$1"
     shift
     command -v docker >/dev/null || die "docker is required"

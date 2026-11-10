@@ -446,23 +446,29 @@ class LegacyEnvParserTest(unittest.TestCase):
 
     def test_legacy_main_on_synthetic_file(self):
         import tempfile
+        me = os.getuid()                              # tests run unprivileged: "root" is the test user
         with tempfile.TemporaryDirectory() as d:
+            d = os.path.realpath(d)
             path = os.path.join(d, "elt.env")
             with open(path, "w") as fh:
                 fh.write(self.FIXTURE)
+            os.chmod(path, 0o600)
             before = os.stat(path)
             out, err = io.StringIO(), io.StringIO()
-            self.assertEqual(hc.legacy_main("legacy-credentials", path, out, err), 0)
+            self.assertEqual(hc.legacy_main("legacy-credentials", path, out, err, owner_uid=me), 0)
             self.assertEqual(json.loads(out.getvalue())["password"], FAKE_PASSWORD)
             fp1, fp2 = io.StringIO(), io.StringIO()
-            hc.legacy_main("legacy-fingerprint", path, fp1, err)
-            hc.legacy_main("legacy-fingerprint", path, fp2, err)
+            hc.legacy_main("legacy-fingerprint", path, fp1, err, owner_uid=me)
+            hc.legacy_main("legacy-fingerprint", path, fp2, err, owner_uid=me)
             self.assertEqual(fp1.getvalue(), fp2.getvalue())
             self.assertNotIn(FAKE_PASSWORD, fp1.getvalue())
             self.assertEqual(os.stat(path).st_mtime_ns, before.st_mtime_ns)
             link = os.path.join(d, "link.env")
             os.symlink(path, link)
-            self.assertEqual(hc.legacy_main("legacy-credentials", link, io.StringIO(), err), 1)
+            self.assertEqual(hc.legacy_main("legacy-credentials", link, io.StringIO(), err, owner_uid=me), 1)
+            # the real default owner (root) refuses a file the test user owns
+            if me != 0:
+                self.assertEqual(hc.legacy_main("legacy-credentials", path, io.StringIO(), io.StringIO()), 1)
 
     def test_waiver_file_stat(self):
         import stat as S

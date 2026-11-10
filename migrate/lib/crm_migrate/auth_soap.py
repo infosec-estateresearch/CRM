@@ -8,8 +8,9 @@ the latest, when Salesforce retires SOAP ``login()``.
   ``login`` to the constant login host (``test.salesforce.com`` only with ``--sandbox``) and
   ``logout`` to the origin ``serverUrl`` names. ``RequestPolicy`` re-checks every body
   against these templates byte for byte, so no other SOAP operation can be expressed.
-* Responses are parsed with ``xml.etree.ElementTree`` after refusing any ``<!DOCTYPE`` or
-  ``<!ENTITY`` and enforcing a size limit. A fault is reduced to its ``faultcode`` and the
+* Responses must be strict UTF-8 (no UTF-16/32, no other declared encoding) and are refused
+  on any ``<!DOCTYPE`` or ``<!ENTITY`` in the decoded text, then parsed by an expat parser
+  whose DTD and entity handlers raise, under a size limit. A fault is reduced to its ``faultcode`` and the
   first token of ``exceptionCode``; the fault string is never kept.
 * The origin of ``serverUrl`` must be ``https://<label>.my.salesforce.com`` and must equal
   the configured ``CRM_SF_ORIGIN`` exactly, otherwise the run aborts before any REST call.
@@ -18,6 +19,7 @@ the latest, when Salesforce retires SOAP ``login()``.
 
 import re
 import xml.etree.ElementTree as ET
+from xml.parsers import expat as pyexpat
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
@@ -123,17 +125,99 @@ def soap_headers(action):
 
 # ---------------------------------------------------------------- safe XML
 
+_UTF8_BOM = b"\xef\xbb\xbf"
+# BOMs and BOM-less first bytes of "<?" / "<" in UTF-16 and UTF-32 (any byte order).
+_WIDE_PREFIXES = (
+    b"\x00\x00\xfe\xff", b"\xff\xfe\x00\x00", b"\xfe\xff", b"\xff\xfe",
+    b"\x00\x00\x00\x3c", b"\x3c\x00\x00\x00", b"\x00\x3c", b"\x3c\x00",
+)
+_XML_DECL_RE = re.compile(r"\A<\?xml(?P<attrs>[^>]*?)\?>")
+_ENCODING_RE = re.compile(r"""\bencoding\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+_DTD_TEXT_RE = re.compile(r"<!\s*(?:DOCTYPE|ENTITY)", re.IGNORECASE)
+
+
+def _decode_strict_utf8(body):
+    """Layer 1: the document must be strict UTF-8 (optional UTF-8 BOM, ``encoding`` utf-8)."""
+    if body.startswith(_UTF8_BOM):
+        body = body[len(_UTF8_BOM):]
+    elif body.startswith(_WIDE_PREFIXES):
+        raise ProtocolError("soap_encoding_refused", detail="SOAP document is not UTF-8")
+    try:
+        text = body.decode("utf-8", "strict")
+    except UnicodeDecodeError:
+        raise ProtocolError("soap_encoding_refused", detail="SOAP document is not UTF-8") from None
+    if "\x00" in text or text.startswith("﻿"):
+        raise ProtocolError("soap_encoding_refused", detail="SOAP document is not UTF-8")
+    decl = _XML_DECL_RE.match(text)
+    if decl:
+        enc = _ENCODING_RE.search(decl.group("attrs"))
+        if enc and (enc.group(1) if enc.group(1) is not None else enc.group(2)).lower() != "utf-8":
+            raise ProtocolError("soap_encoding_refused", detail="SOAP document declares a non-UTF-8 encoding")
+    elif text.lstrip().lower().startswith("<?xml"):
+        raise ProtocolError("soap_response", detail="SOAP XML declaration is malformed")
+    return text
+
+
+def _refuse(*_args):
+    raise ProtocolError("soap_dtd_refused", detail="DOCTYPE or ENTITY in SOAP document")
+
+
+def _qname(name):
+    # expat reports "uri}local" with namespace_separator "}"; ElementTree uses "{uri}local".
+    return "{" + name if "}" in name else name
+
+
+class _HardenedXMLParser:
+    """Layer 3: an expat parser (building an ``ElementTree`` tree) whose DTD, entity and
+    external-entity handlers raise. CPython's ``ET.XMLParser`` is the C accelerator, which
+    does not expose its expat object, so expat is driven directly here."""
+
+    def __init__(self):
+        self._builder = ET.TreeBuilder()
+        p = pyexpat.ParserCreate("utf-8", "}")
+        p.buffer_text = True
+        p.ordered_attributes = False
+        p.StartElementHandler = self._start
+        p.EndElementHandler = self._end
+        p.CharacterDataHandler = self._builder.data
+        p.StartDoctypeDeclHandler = _refuse
+        p.EntityDeclHandler = _refuse
+        p.UnparsedEntityDeclHandler = _refuse
+        p.ExternalEntityRefHandler = _refuse
+        p.SetParamEntityParsing(pyexpat.XML_PARAM_ENTITY_PARSING_NEVER)
+        self.parser = p
+
+    def _start(self, tag, attrs):
+        self._builder.start(_qname(tag), {_qname(k): v for k, v in attrs.items()})
+
+    def _end(self, tag):
+        self._builder.end(_qname(tag))
+
+    def parse(self, data):
+        try:
+            self.parser.Parse(data, True)
+        except pyexpat.ExpatError:
+            raise ET.ParseError("not well-formed") from None
+        return self._builder.close()
+
+
+def _hardened_parser():
+    return _HardenedXMLParser()
+
+
 def parse_xml(body, max_bytes=MAX_SOAP_RESPONSE):
-    """Parse a SOAP document. Refuses DTDs and entity declarations before parsing."""
+    """Parse a SOAP document, refusing DTDs and entities in three independent layers:
+    strict UTF-8 decoding, a text search of the decoded document, and an expat parser whose
+    DTD / entity handlers raise. No element value is read before all three have passed."""
     if not isinstance(body, bytes):
         raise ProtocolError("soap_response", detail="no body")
     if len(body) > max_bytes:
         raise ProtocolError("soap_response_too_large", detail="SOAP response exceeds the size limit")
-    upper = body.upper()
-    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+    text = _decode_strict_utf8(body)
+    if _DTD_TEXT_RE.search(text):                     # layer 2
         raise ProtocolError("soap_dtd_refused", detail="DOCTYPE or ENTITY in SOAP document")
     try:
-        return ET.fromstring(body)
+        return _hardened_parser().parse(text.encode("utf-8"))
     except ET.ParseError:
         raise ProtocolError("soap_response", detail="SOAP document is not well-formed") from None
 

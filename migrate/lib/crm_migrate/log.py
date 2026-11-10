@@ -15,10 +15,10 @@ LOGGER_NAME = "crm_migrate"
 STATUSES = ("RECONCILED", "RECONCILED_WITH_DRIFT", "INCOMPLETE", "FAILED", "PASS", "FAIL")
 MODES = ("contract-check", "count", "extract", "reconcile", "selftest", "hostcheck")
 _BASE_VOCAB = set(STATUSES) | set(MODES) | {"query", "queryAll", "true", "false", "unavailable"}
-_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
-_EVENT_RE = re.compile(r"^[a-z][a-z0-9_.]{0,60}$")
-_SF_ERROR_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
-_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_KEY_RE = re.compile(r"\A[a-z][a-z0-9_]{0,40}\Z")
+_EVENT_RE = re.compile(r"\A[a-z][a-z0-9_.]{0,60}\Z")
+_SF_ERROR_RE = re.compile(r"\A[A-Z][A-Z0-9_]{0,63}\Z")
+_CODE_RE = re.compile(r"\A[a-z][a-z0-9_]{0,63}\Z")
 
 
 def get_logger():
@@ -34,7 +34,7 @@ class CountsLog:
 
     def allow(self, *words):
         for word in words:
-            if isinstance(word, str) and re.match(r"^[A-Za-z][A-Za-z0-9_]{0,80}$", word):
+            if isinstance(word, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,80}", word):
                 self._vocab.add(word)
 
     def allow_contract(self, contract):
@@ -51,18 +51,18 @@ class CountsLog:
         if isinstance(value, str):
             if value in self._vocab:
                 return value
-            if key in ("code", "error") and _CODE_RE.match(value):
+            if key in ("code", "error") and _CODE_RE.fullmatch(value):
                 return value
-            if key == "sf_error" and _SF_ERROR_RE.match(value):
+            if key == "sf_error" and _SF_ERROR_RE.fullmatch(value):
                 return value
         return "<redacted>"
 
     def event(self, event_name, /, **fields):
-        if not isinstance(event_name, str) or not _EVENT_RE.match(event_name):
+        if not isinstance(event_name, str) or not _EVENT_RE.fullmatch(event_name):
             event_name = "invalid_event"
         parts = [f"crm-migrate event={event_name}"]
         for key in sorted(fields):
-            if not _KEY_RE.match(key):
+            if not _KEY_RE.fullmatch(key):
                 continue
             parts.append(f"{key}={self._render(key, fields[key])}")
         self._logger.info(" ".join(parts))

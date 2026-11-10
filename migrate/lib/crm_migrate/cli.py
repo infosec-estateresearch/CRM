@@ -228,13 +228,24 @@ def _client_for(args, environ, contract, transport, stdin, today):
 
 
 def _logout(client, log):
-    if client is None or client.auth_mode != "soap-legacy":
+    """Best effort; never changes the run's exit code and never lets an exception escape.
+    A failure is logged as ``soap_logout ok=false code=<exception class name>`` only."""
+    try:
+        if client is None or client.auth_mode != "soap-legacy":
+            return
+        client.logout_soap()
+    except Exception as exc:  # noqa: BLE001 - class name only, never the message
+        try:
+            name = type(exc).__name__
+            log.allow(name)                       # an identifier only; never the message
+            log.event("soap_logout", ok=False, code=name)
+        except Exception:  # noqa: BLE001 - logging must not change the exit code either
+            pass
         return
     try:
-        client.logout_soap()
         log.event("soap_logout", ok=True)
-    except MigrateError as exc:
-        log.event("soap_logout", ok=False, code=exc.code, status=exc.status, sf_error=exc.sf_error)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def main(argv=None, *, environ=None, transport=None, stdout=None, stderr=None, contract_path=None,

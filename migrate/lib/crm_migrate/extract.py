@@ -26,9 +26,9 @@ from .metadata import run_gate
 RECONCILED = "RECONCILED"
 DRIFT = "RECONCILED_WITH_DRIFT"
 INCOMPLETE = "INCOMPLETE"
-_ID_RE = re.compile(r"^[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?$")
+_ID_RE = re.compile(r"\A[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?\Z")
 _SF_DT_RE = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}:?\d{2})$")
+    r"\A(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}:?\d{2})\Z")
 
 
 @dataclass
@@ -49,7 +49,7 @@ class ExtractOptions:
 def parse_sf_datetime(value):
     if not isinstance(value, str):
         return None
-    m = _SF_DT_RE.match(value)
+    m = _SF_DT_RE.fullmatch(value)
     if not m:
         return None
     y, mo, d, h, mi, s, frac, tz = m.groups()
@@ -73,7 +73,7 @@ def iso(value):
 
 def _row_key(row, change_key):
     rid = row.get("Id")
-    if not isinstance(rid, str) or not _ID_RE.match(rid):
+    if not isinstance(rid, str) or not _ID_RE.fullmatch(rid):
         raise ProtocolError("record_shape", detail="invalid Id")
     stamp = parse_sf_datetime(row.get(change_key))
     if stamp is None:
@@ -333,7 +333,7 @@ def _extract(client, contract, out, log, options, manifest):
             doc = client.deleted(spec.name, soql_datetime(start), soql_datetime(pv))
             for item in doc["deletedRecords"]:
                 rid = item.get("id") if isinstance(item, dict) else None
-                if not isinstance(rid, str) or not _ID_RE.match(rid):
+                if not isinstance(rid, str) or not _ID_RE.fullmatch(rid):
                     raise ProtocolError("deleted_shape", detail=spec.name)
                 deleted_ids[rid] = item.get("deletedDate") if isinstance(item.get("deletedDate"), str) else None
             deletion_log[spec.name] = {

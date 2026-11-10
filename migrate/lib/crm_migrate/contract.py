@@ -21,8 +21,8 @@ from dataclasses import dataclass
 from .errors import ContractError
 
 CONTRACT_VERSION = 2
-NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
-PURPOSE_RE = re.compile(r"^[RM]\d+\b")
+NAME_RE = re.compile(r"\A[A-Za-z][A-Za-z0-9_]*\Z")
+PURPOSE_RE = re.compile(r"\A[RM]\d+\b")
 FIELD_TYPES = frozenset({
     "id", "string", "textarea", "email", "phone", "url", "picklist", "multipicklist",
     "combobox", "reference", "boolean", "int", "double", "currency", "percent", "date",
@@ -86,7 +86,7 @@ class Contract:
 
 
 def check_name(name, what="name"):
-    if not isinstance(name, str) or not NAME_RE.match(name):
+    if not isinstance(name, str) or not NAME_RE.fullmatch(name):
         raise ContractError("invalid_name", detail=what)
     return name
 
@@ -111,7 +111,7 @@ def parse_contract(raw_bytes):
     for raw in raw_objects:
         _need(isinstance(raw, dict), "contract_shape", "object entry")
         name = raw.get("name")
-        if not isinstance(name, str) or not NAME_RE.match(name):
+        if not isinstance(name, str) or not NAME_RE.fullmatch(name):
             raise ContractError("invalid_name", detail="object name")
         _need(name not in seen, "duplicate_object", name)
         seen.add(name)
@@ -147,7 +147,7 @@ def _parse_object(name, raw):
     for rf in raw_fields:
         _need(isinstance(rf, dict), "contract_shape", f"{name} field entry")
         fname = rf.get("name")
-        if not isinstance(fname, str) or not NAME_RE.match(fname):
+        if not isinstance(fname, str) or not NAME_RE.fullmatch(fname):
             raise ContractError("invalid_name", detail=f"{name} field name")
         _need(fname not in seen, "duplicate_field", f"{name}.{fname}")
         seen.add(fname)
@@ -164,7 +164,7 @@ def _parse_object(name, raw):
         if ftype == "reference":
             _need(isinstance(ref, list) and ref, "reference_to", f"{name}.{fname}")
             for target in ref:
-                if not isinstance(target, str) or not NAME_RE.match(target):
+                if not isinstance(target, str) or not NAME_RE.fullmatch(target):
                     raise ContractError("invalid_name", detail=f"{name}.{fname} referenceTo")
             _need(match in ("exact", "superset"), "reference_match", f"{name}.{fname}")
             ref_t = tuple(ref)
@@ -246,7 +246,7 @@ def _check_select_fields(spec, fields):
         raise ContractError("soql_fields", detail=f"{spec.name} no fields")
     seen = set()
     for name in fields:
-        if not isinstance(name, str) or "*" in name or "(" in name or not NAME_RE.match(name):
+        if not isinstance(name, str) or "*" in name or "(" in name or not NAME_RE.fullmatch(name):
             raise ContractError("soql_fields", detail="invalid field name")
         if name in COMPOUND_FIELDS or name in EXCLUDED_FIELDS:
             raise ContractError("soql_fields", detail=f"{spec.name}.{name} refused")

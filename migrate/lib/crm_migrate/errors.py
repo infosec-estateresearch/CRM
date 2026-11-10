@@ -8,13 +8,13 @@ secret. It is built only from a fixed code, an HTTP status, a validated Salesfor
 
 import re
 
-_DETAIL_RE = re.compile(r"^[A-Za-z0-9_.,:=/ ()<>\[\]-]{0,400}$")
-_SF_ERROR_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+_DETAIL_RE = re.compile(r"\A[A-Za-z0-9_.,:=/ ()<>\[\]-]{0,400}\Z")
+_SF_ERROR_RE = re.compile(r"\A[A-Z][A-Z0-9_]{0,63}\Z")
 
 
 def safe_sf_error_code(value):
     """Return a Salesforce errorCode if it has the documented shape, else ``UNKNOWN``."""
-    if isinstance(value, str) and _SF_ERROR_RE.match(value):
+    if isinstance(value, str) and _SF_ERROR_RE.fullmatch(value):
         return value
     return "UNKNOWN"
 
@@ -29,7 +29,7 @@ class MigrateError(Exception):
         self.code = code or type(self).code
         self.status = status if isinstance(status, int) else None
         self.sf_error = safe_sf_error_code(sf_error) if sf_error is not None else None
-        if detail is not None and not (isinstance(detail, str) and _DETAIL_RE.match(detail)):
+        if detail is not None and not (isinstance(detail, str) and _DETAIL_RE.fullmatch(detail)):
             detail = "<redacted>"
         self.detail = detail
         super().__init__(self.safe_message())

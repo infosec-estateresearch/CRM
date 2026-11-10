@@ -239,11 +239,21 @@ byte-identical to a fixed template. No other SOAP operation can be expressed. Th
 `serverUrl` origin must equal `CRM_SF_ORIGIN` exactly, otherwise the run aborts before any
 REST call. The session id is used only as the Bearer token for that origin and is held only
 in memory. SOAP faults are reduced to `faultcode` and the first `exceptionCode` token.
+SOAP responses must be strict UTF-8 (no UTF-16/UTF-32, with or without BOM, and no other
+declared `encoding`). Any `<!DOCTYPE` or `<!ENTITY` in the decoded text is refused, and the
+expat parser itself raises on any DTD, entity declaration or external entity. A failed
+`logout` is logged as `soap_logout ok=false code=<exception class>` and never changes the
+exit code.
 
 **Operator-only procedure** (root, on the host):
 
-1. `/srv/CRM/runtime/migrate/env` holds only `CRM_SF_ORIGIN` and `CRM_SF_API_VERSION`
-   (31.0 to 64.0; the tool defaults to `59.0`); see `deploy/migrate/env.legacy.example`.
+1. `/srv/CRM/runtime/migrate/env` holds only `CRM_SF_ORIGIN`, `CRM_SF_API_VERSION`
+   (31.0 to 64.0; the tool defaults to `59.0`) and `CRM_LEGACY_ENV_FILE`; see
+   `deploy/migrate/env.legacy.example`. `CRM_LEGACY_ENV_FILE` is the absolute path of the
+   existing ELT env file. The path is never committed. While it is empty the legacy commands
+   refuse ("not configured"). `hostcheck` requires it to be absolute, with no symlinked
+   component (`realpath` equals the path), and to name a regular file owned by root that is
+   not group- or world-writable.
 2. Optional waiver, `/srv/CRM/runtime/migrate/waiver.json` (root:root, `0600`):
    `{"authorisation": "<Issue #9 comment URL>", "identity": "legacy-eric", "expires": "YYYY-MM-DD"}`.
    `expires` must be today or later, and at most 30 days ahead. If the waiver is expired,
@@ -254,7 +264,9 @@ in memory. SOAP faults are reduced to `faultcode` and the first `exceptionCode` 
 3. `scripts/migrate.sh --auth soap-legacy contract-check` (then `count`, then `extract`).
    The script reads only `NIF_SRC_SALESFORCE_USER` and `NIF_SRC_SALESFORCE_PASS` from the
    existing ELT env file. It opens the file read-only, never follows a symlink, and parses it
-   strictly (`hostcheck.parse_legacy_env`). It pipes them as JSON on stdin to
+   strictly (`hostcheck.parse_legacy_env`: unquoted values must not contain whitespace,
+   quotes, backslash or any of ``;&|<>()$` ``, and quoted values must be closed with nothing
+   after them). It pipes them as JSON on stdin to
    `docker compose run -T --rm crm-migrate … --auth soap-legacy --credentials-stdin`. The
    values are never written under `/srv/CRM/runtime/migrate`, into arguments or into the
    environment. The script records the file's sha256 and mtime before and after the run, and

@@ -19,11 +19,11 @@ import stat
 from .errors import OutputError, SnapshotError
 
 MANIFEST = "manifest.json"
-_REL_RE = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
+_REL_RE = re.compile(r"\A[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\Z")
 
 
 def _check_rel(rel):
-    if not isinstance(rel, str) or not _REL_RE.match(rel) or any(p in (".", "..") for p in rel.split("/")):
+    if not isinstance(rel, str) or not _REL_RE.fullmatch(rel) or any(p in (".", "..") for p in rel.split("/")):
         raise OutputError("output_path", detail="invalid relative path")
     return rel
 
