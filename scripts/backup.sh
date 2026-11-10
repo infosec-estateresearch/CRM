@@ -35,6 +35,10 @@ for dir in "${CRM_PERSISTENT_DIRS[@]}"; do
     tar -C "$CRM_RUNTIME_DIR" -czf "$partial/$archive" "$dir"
     archives+=("$archive")
 done
+# CRM-007R: the target marker, covered by SHA256SUMS; restore.sh refuses a
+# backup whose marker is not its own target.
+printf '%s\n' "$CRM_TARGET" > "$partial/TARGET"
+archives+=(TARGET)
 (cd "$partial" && sha256sum "${archives[@]}" > SHA256SUMS)
 
 mv "$partial" "$dest"

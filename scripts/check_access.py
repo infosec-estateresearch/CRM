@@ -4,6 +4,7 @@ crm-beta edge settings (CRM-007), standard library only.
 
     python3 scripts/check_access.py beta [--render]
     python3 scripts/check_access.py restoretest
+    python3 scripts/check_access.py dev|beta --base-url
 
 beta validates CRM_BETA_* and CRM_SITE_URL in /srv/CRM/runtime/beta/env, the
 beta compose bind policy, the crm-app HTTPS policy (crm-proxy.conf) and the
@@ -356,6 +357,23 @@ def _bind_source_ok(src):
     return src.startswith("./") and "$" not in src and "//" not in src
 
 
+# CRM-007R: a top-level beta network may be only {}, {"driver": "bridge"},
+# {"internal": true} or a combination of those. driver_opts (a routed bridge),
+# ipam, any other driver (macvlan, ipvlan, host, ...) and any other key are refused.
+BETA_NETWORK_KEYS = frozenset({"driver", "internal"})
+
+
+def _beta_network_errors(name, spec):
+    out = [f"beta compose network {name}: key {key!r} is not allowed (only driver: bridge "
+           "and internal: true)" for key in sorted(set(spec) - BETA_NETWORK_KEYS)]
+    if "driver" in spec and spec["driver"] != "bridge":
+        out.append(f"beta compose network {name}: driver {spec['driver']!r} is refused "
+                   "(only bridge)")
+    if "internal" in spec and spec["internal"] is not True:
+        out.append(f"beta compose network {name}: internal may only be true")
+    return out
+
+
 def _beta_resources_errors(doc, services):
     """No external or named networks/volumes, no bind source outside the beta
     runtime or the release directory, never docker.sock."""
@@ -370,6 +388,8 @@ def _beta_resources_errors(doc, services):
                 out.append(f"beta compose {kind[:-1]} {name}: not a mapping")
             elif spec and ("external" in spec or "name" in spec):
                 out.append(f"beta compose {kind[:-1]} {name}: external or named {kind} are refused")
+            elif kind == "networks":
+                out += _beta_network_errors(name, spec or {})
     if doc.get("volumes"):
         out.append("beta compose declares named volumes; crm-beta uses bind mounts only")
     if "docker.sock" in json.dumps(doc):
@@ -647,6 +667,17 @@ def check_proxy_conf(text):
 RESTORETEST_PROJECT = "crm-beta-restoretest"
 RESTORETEST_COMPOSE_PATH = os.path.join(REPO, "deploy", "beta", "restoretest", "compose.json")
 RESTORETEST_NETWORK = "restoretest-net"
+# CRM-007R r3: the restore-test compose is an allowlist, as beta's is. Every key
+# the shipped file uses, and nothing else: include, x-*, secrets, configs at top
+# level, and depends_on, ports, network_mode, security_opt, labels, ... (any key
+# not listed here, including restart/command/entrypoint, which the shipped file
+# does not use) on crm-db are refused, so a new Compose feature cannot widen it.
+RESTORETEST_TOP_KEYS = frozenset({"name", "services", "networks", "volumes"})
+RESTORETEST_DB_KEYS = frozenset({"image", "environment", "volumes", "networks", "healthcheck"})
+# A mount is {type: volume, source: <the project volume>, target: /var/lib/mysql}
+# only: no bind/volume/tmpfs option blocks (bind, subpath, propagation, nocopy),
+# no read_only/consistency.
+RESTORETEST_MOUNT_KEYS = frozenset({"type", "source", "target"})
 
 
 def check_restoretest_compose(doc):
@@ -655,10 +686,16 @@ def check_restoretest_compose(doc):
     crm-dev: its own project name, one crm-db service on the registered MariaDB
     image, no published or exposed port, no host network, no bind mount, only
     its own project-scoped named volume and internal network (no `name:` or
-    `external`, which could alias another project's resources)."""
+    `external`, which could alias another project's resources). CRM-007R: the
+    network may set only driver: bridge and internal: true (beta's allowlist),
+    the volume only driver: local. r3: top-level and crm-db keys are allowlisted
+    (RESTORETEST_TOP_KEYS, RESTORETEST_DB_KEYS) and the one mount may carry no
+    options (RESTORETEST_MOUNT_KEYS)."""
     out = []
     if not isinstance(doc, dict):
         return ["restoretest compose is not a mapping"]
+    out += [f"restoretest compose: top-level {key!r} is not allowed"
+            for key in sorted(set(doc) - RESTORETEST_TOP_KEYS, key=str)]
     if doc.get("name") != RESTORETEST_PROJECT:
         out.append(f"restoretest compose project name is not {RESTORETEST_PROJECT}")
     services = doc.get("services")
@@ -667,17 +704,23 @@ def check_restoretest_compose(doc):
     db = services["crm-db"]
     if not isinstance(db, dict):
         return out + ["crm-db: not a mapping"]
-    if not str(db.get("image", "")).startswith("mariadb:") or "@sha256:" not in str(db.get("image")):
-        out.append("crm-db must use the digest-pinned mariadb image")
-    for key in ("ports", "expose", "network_mode", "extends", "env_file", "privileged",
-                "cap_add", "devices", "pid", "ipc", "volumes_from", "container_name"):
-        if key in db:
-            out.append(f"crm-db: '{key}' is not allowed in the restore test")
+    out += [f"crm-db: key {key!r} is not allowed in the restore test"
+            for key in sorted(set(db) - RESTORETEST_DB_KEYS, key=str)]
+    image = db.get("image")
+    if not isinstance(image, str) or not image.startswith("mariadb:") \
+            or not PINNED_IMAGE.fullmatch(image):
+        out.append("crm-db must use the digest-pinned mariadb image (mariadb:<tag>@sha256:<64 hex>)")
     vols = db.get("volumes") or []
     if not isinstance(vols, list) or len(vols) != 1 or not isinstance(vols[0], dict) \
-            or vols[0].get("type") != "volume" or vols[0].get("target") != "/var/lib/mysql":
+            or vols[0].get("type") != "volume" or vols[0].get("target") != "/var/lib/mysql" \
+            or not isinstance(vols[0].get("source"), str):
         out.append("crm-db must mount exactly one named volume at /var/lib/mysql (no bind mounts)")
-    vol_name = vols[0].get("source") if vols and isinstance(vols[0], dict) else None
+    elif set(vols[0]) - RESTORETEST_MOUNT_KEYS:
+        out.append("crm-db: the volume mount may set only type, source and target (refused: "
+                   + ", ".join(repr(k) for k in sorted(set(vols[0]) - RESTORETEST_MOUNT_KEYS,
+                                                       key=str)) + ")")
+    vol_name = vols[0].get("source") if isinstance(vols, list) and vols \
+        and isinstance(vols[0], dict) and isinstance(vols[0].get("source"), str) else None
     top_vols = doc.get("volumes")
     if not isinstance(top_vols, dict) or set(top_vols) != {vol_name}:
         out.append("restoretest compose must declare exactly the one volume crm-db mounts")
@@ -685,6 +728,8 @@ def check_restoretest_compose(doc):
         spec = top_vols[vol_name] or {}
         if not isinstance(spec, dict) or "name" in spec or "external" in spec or "driver_opts" in spec:
             out.append("the restoretest volume must be project-scoped (no name, external or driver_opts)")
+        elif set(spec) - {"driver"} or spec.get("driver", "local") != "local":
+            out.append("the restoretest volume may set only driver: local")
     nets = db.get("networks")
     if not isinstance(nets, dict) or set(nets) != {RESTORETEST_NETWORK}:
         out.append(f"crm-db must join only {RESTORETEST_NETWORK}")
@@ -697,6 +742,8 @@ def check_restoretest_compose(doc):
                 or spec.get("internal") is not True:
             out.append(f"{RESTORETEST_NETWORK} must be internal and project-scoped "
                        "(no name or external)")
+        else:  # the same allowlist as beta: only driver: bridge and internal: true
+            out += _beta_network_errors(RESTORETEST_NETWORK, spec)
     return out
 
 
@@ -791,6 +838,101 @@ def beta_runtime(environ):
     return want, None
 
 
+BETA_APP_PORT_RE = re.compile(r"^[1-9][0-9]{3,4}$")
+
+
+def target_runtime(target, environ):
+    """(runtime, None) or (None, why): target's runtime directory, as the
+    shell scripts' require_target resolves it (beta pinned by beta_runtime;
+    dev from CRM_RUNTIME_DIR, default DEFAULT_RUNTIME; named after the target)."""
+    if target == "beta":
+        runtime, problem = beta_runtime(environ)
+        if problem:
+            return None, problem
+    elif target == "dev":
+        runtime = environ.get("CRM_RUNTIME_DIR") or DEFAULT_RUNTIME
+    else:
+        return None, f"target environment must be 'dev' or 'beta' (got '{target}')"
+    if os.path.basename(runtime) != target:
+        return None, f"runtime directory is not a {target} runtime: {runtime}"
+    return runtime, None
+
+
+# CRM-007R: an export is a new directory export-<name> directly under the
+# target's constant backup directory $runtime/backups.
+# Use fullmatch: `$` alone would also accept a trailing newline ("export-n\n").
+EXPORT_NAME_RE = re.compile(r"export-[A-Za-z0-9._-]+")
+
+
+def export_out_problem(target, out, environ):
+    """None if out may be created as target's export directory; otherwise why
+    not. out must be <target runtime>/backups/<export-name>, the backup
+    directory a real (canonical, non-symlink) directory, and out must not
+    exist yet (not even as a dangling symlink)."""
+    runtime, problem = target_runtime(target, environ)
+    if problem:
+        return problem
+    backups = os.path.join(runtime, "backups")
+    name = os.path.basename(out)
+    if not EXPORT_NAME_RE.fullmatch(name) or ".." in name:
+        return "the export directory must be named export-[A-Za-z0-9._-]+ (no '..')"
+    if out != os.path.join(backups, name):
+        return f"the export directory must sit directly under {backups} (the {target} backups)"
+    if os.path.islink(backups) or not os.path.isdir(backups) \
+            or os.path.realpath(backups) != backups:
+        return f"the {target} backup directory is not a real canonical directory: {backups}"
+    if os.path.lexists(out):
+        return f"the export directory already exists: {out}"
+    return None
+
+
+def pinned_base_url(target, environ):
+    """(url, None) or (None, why): the one base URL the provisioning scripts
+    may use for target (CRM-007R), read from that target's checked env file
+    with read_env_values, never from input.
+    - beta: http://127.0.0.1:<CRM_BETA_APP_PORT> (the runtime is pinned as for
+      `check_access.py beta`);
+    - dev: http://<CRM_BIND_IP>:8180 (CRM_BIND_IP as validated by
+      `check_access.py dev`)."""
+    runtime, problem = target_runtime(target, environ)
+    if problem:
+        return None, problem
+    names = ("CRM_BETA_APP_PORT",) if target == "beta" else ("CRM_BIND_IP",)
+    env_file = os.path.join(runtime, "env")
+    if (environ.get("CRM_ENV_FILE") or env_file) != env_file:
+        return None, f"the env file must be {env_file}"
+    try:
+        with open(env_file, encoding="utf-8") as fh:
+            values, errors = read_env_values(fh.read(), names)
+    except (OSError, UnicodeDecodeError):
+        return None, f"env file not readable: {env_file}"
+    if errors:
+        return None, "; ".join(errors)
+    if target == "beta":
+        port = values["CRM_BETA_APP_PORT"]
+        if not BETA_APP_PORT_RE.match(port) or not 1024 <= int(port) <= 65535:
+            return None, f"CRM_BETA_APP_PORT in {env_file} is not a port 1024-65535"
+        return f"http://127.0.0.1:{port}", None
+    bind_errors = validate_bind_ip(values["CRM_BIND_IP"])
+    if bind_errors:
+        return None, "; ".join(bind_errors)
+    return f"http://{values['CRM_BIND_IP']}:{PORT}", None
+
+
+def base_url_problem(target, url, environ):
+    """None if url is exactly target's pinned base URL; otherwise why not.
+    The message never contains the URL or the bind address."""
+    want, problem = pinned_base_url(target, environ)
+    if problem:
+        return f"cannot determine the {target} base URL: {problem}"
+    if url != want:
+        if target == "beta":
+            return ("the beta base URL must be exactly http://127.0.0.1:<CRM_BETA_APP_PORT "
+                    "from the beta env file>")
+        return f"the dev base URL must be exactly http://<CRM_BIND_IP from the dev env file>:{PORT}"
+    return None
+
+
 def edge_config_problem(runtime, rendered):
     """None if $runtime/edge/haproxy.cfg is byte for byte what render_edge()
     gives for the checked env file; otherwise why not (fail closed: missing,
@@ -821,6 +963,15 @@ def main(argv=None, environ=None):
         for err in errors:
             print(f"{prog()}: refused: {err}", file=sys.stderr)
         return 1 if errors else 0
+    if target in ("dev", "beta") and argv[1:] == ["--base-url"]:
+        # The pinned base URL of the target (beta: loopback only), for
+        # deploy_release.sh and export.sh.
+        url, problem = pinned_base_url(target, environ)
+        if problem:
+            print(f"{prog()}: refusing to run: {problem}", file=sys.stderr)
+            return 1
+        print(url)
+        return 0
     render = target == "beta" and argv[1:] == ["--render"]
     if target not in ("dev", "beta") or (len(argv) != 1 and not render):
         print(f"{prog()}: refusing to run: target environment must be 'dev' or 'beta' "

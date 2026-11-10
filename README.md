@@ -49,7 +49,7 @@ The CRM-001 dev stack is EspoCRM 10.0.12 plus MariaDB 11.4.13, both pinned by di
 
   It runs as Compose project `crm-beta` behind the edge proxy `crm-beta-edge`. The edge is reached only by the PO's TLS-terminating HAProxy; crm-app itself listens only on `127.0.0.1`.
 
-  The other scripts take `beta` as their target: `up.sh`, `backup.sh`, `restore.sh`, `export.sh`, `deploy_custom.sh`, `provision_access.py` and `provision_users.py`. `restore.sh beta --restoretest <backup>` restores a backup into the throwaway project `crm-beta-restoretest`, prints record counts and tears it down. `tests/acceptance/test_beta_safe.py` is the read-only (GET-only) suite for a live beta.
+  The other scripts take `beta` as their target: `up.sh`, `backup.sh`, `restore.sh`, `export.sh`, `deploy_custom.sh`, `provision_access.py` and `provision_users.py`. `restore.sh beta --restoretest <backup>` restores a backup into the throwaway project `crm-beta-restoretest`, prints record counts and tears it down. Backups carry a checksummed `TARGET` marker and `restore.sh` accepts only its own target's marked backups from its own backup directory; a legacy unmarked dev backup needs `restore.sh dev --legacy-unmarked <backup>`. The provisioning scripts accept only the target's own base URL (beta `http://127.0.0.1:<CRM_BETA_APP_PORT>`, dev `http://<CRM_BIND_IP>:8180`). See [docs/BETA.md](docs/BETA.md). `tests/acceptance/test_beta_safe.py` is the read-only (GET-only) suite for a live beta.
 
   See [docs/BETA.md](docs/BETA.md) and [docs/RELEASE.md](docs/RELEASE.md).
 - Checks that need no stack: `python3 -m unittest discover -s tests/unit -v` and `python3 -I -B -m unittest discover -s tests/load -t . -v`.

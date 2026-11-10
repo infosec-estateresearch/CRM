@@ -34,6 +34,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import check_access  # noqa: E402
 import crm_api  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -350,6 +351,11 @@ def main(argv=None, transport=None, environ=None):
                              "users' dashboards")
     parser.add_argument("--config-dir", default=CONFIG_DIR, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    # CRM-007R: the base URL is pinned to the target (check_access.pinned_base_url).
+    problem = check_access.base_url_problem(args.target, args.base_url, environ)
+    if problem:
+        print(f"{prog}: refusing to run: {problem}", file=sys.stderr)
+        return 2
     active = None if args.import_user_active is None else args.import_user_active == "yes"
     try:
         check_new_private_path(args.key_file)

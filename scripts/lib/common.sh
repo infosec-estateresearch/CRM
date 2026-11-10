@@ -56,7 +56,13 @@ require_target() {
         echo "$(basename "$0"): refusing to run: runtime directory is not a $CRM_TARGET runtime: $CRM_RUNTIME_DIR" >&2
         exit 2
     fi
-    CRM_BACKUP_DIR=${CRM_BACKUP_DIR:-$CRM_RUNTIME_DIR/backups}
+    # CRM-007R: the backup directory is the constant $CRM_RUNTIME_DIR/backups
+    # for both targets; it is never read from the environment.
+    if [ -n "${CRM_BACKUP_DIR+set}" ] && [ "$CRM_BACKUP_DIR" != "$CRM_RUNTIME_DIR/backups" ]; then
+        echo "$(basename "$0"): refusing to run: the $CRM_TARGET backup directory is $CRM_RUNTIME_DIR/backups (CRM_BACKUP_DIR is $CRM_BACKUP_DIR); unset CRM_BACKUP_DIR" >&2
+        exit 2
+    fi
+    CRM_BACKUP_DIR=$CRM_RUNTIME_DIR/backups
     CRM_ENV_FILE=${CRM_ENV_FILE:-$CRM_RUNTIME_DIR/env}
     if [ "$CRM_TARGET" = beta ]; then
         require_private_runtime
@@ -258,6 +264,57 @@ compose() {
     env "${unset[@]}" \
         docker compose -p "$CRM_PROJECT" -f "$CRM_COMPOSE_FILE" \
         --env-file "$CRM_ENV_FILE" "$@"
+}
+
+# resolve_backup <name or path> <legacy>: the backup restore.sh may use, set
+# in CRM_BACKUP_PATH (canonical). Runs before any docker call. CRM-007R:
+# - it sits directly under $CRM_BACKUP_DIR (this target's) and is named
+#   crm-<target>-<UTC stamp>; a symlink is refused;
+# - every file in SHA256SUMS matches, and every archive is listed;
+# - the TARGET marker backup.sh writes is listed in SHA256SUMS and holds
+#   exactly this target. A backup with no marker at all (made before CRM-007R)
+#   is accepted only for dev, only when <legacy> is non-empty
+#   (restore.sh dev --legacy-unmarked) and only when its stamp is strictly
+#   earlier than the constant cut-over CRM_LEGACY_CUTOVER (PL decision: every
+#   existing dev backup predates it); beta never accepts one.
+CRM_LEGACY_CUTOVER=20261111T000000Z
+resolve_backup() {
+    local arg=$1 legacy=$2 name canon base archive
+    case "$arg" in
+        */*) ;;
+        *) arg="$CRM_BACKUP_DIR/$arg" ;;
+    esac
+    [ -d "$arg" ] && [ -f "$arg/SHA256SUMS" ] || die "not a backup directory: $arg"
+    name=$(basename -- "$arg")
+    [[ "$name" =~ ^crm-${CRM_TARGET}-[0-9]{8}T[0-9]{6}Z$ ]] \
+        || die "refusing to restore: a $CRM_TARGET backup is named crm-$CRM_TARGET-<UTC stamp> (got '$name')"
+    [ ! -L "$arg" ] || die "refusing to restore: the backup is a symlink: $arg"
+    base=$(realpath -e -- "$CRM_BACKUP_DIR" 2>/dev/null) \
+        || die "refusing to restore: no $CRM_TARGET backup directory: $CRM_BACKUP_DIR"
+    canon=$(realpath -e -- "$arg")
+    [ "$canon" = "$base/$name" ] \
+        || die "refusing to restore: the backup must sit directly under $CRM_BACKUP_DIR (the $CRM_TARGET backups): $arg"
+    (cd "$canon" && sha256sum --quiet -c SHA256SUMS) || die "checksum mismatch in $canon"
+    for archive in db.sql.gz $(for d in "${CRM_PERSISTENT_DIRS[@]}"; do archive_for "$d"; done); do
+        [ -f "$canon/$archive" ] && grep -q "  $archive\$" "$canon/SHA256SUMS" \
+            || die "backup is incomplete (no checksummed $archive): $canon"
+    done
+    if [ -e "$canon/TARGET" ] || [ -L "$canon/TARGET" ] || grep -q "TARGET" "$canon/SHA256SUMS"; then
+        [ -f "$canon/TARGET" ] && [ ! -L "$canon/TARGET" ] \
+            && grep -Eq '^[0-9a-f]{64}  TARGET$' "$canon/SHA256SUMS" \
+            || die "refusing to restore: the backup's TARGET marker is not a checksummed file: $canon"
+        printf '%s\n' "$CRM_TARGET" | cmp -s - "$canon/TARGET" \
+            || die "refusing to restore: the backup's TARGET marker is not '$CRM_TARGET' (a backup of another environment): $canon"
+    elif [ "$CRM_TARGET" = dev ] && [ -n "$legacy" ]; then
+        local stamp=${name#crm-dev-} cut=$CRM_LEGACY_CUTOVER  # both [0-9]{8}T[0-9]{6}Z
+        stamp=${stamp//[TZ]/} cut=${cut//[TZ]/}
+        (( 10#$stamp < 10#$cut )) \
+            || die "refusing to restore: --legacy-unmarked accepts only backups stamped before $CRM_LEGACY_CUTOVER (the TARGET marker cut-over): $canon"
+        echo "$(basename "$0"): warning: restoring a legacy dev backup with no TARGET marker (--legacy-unmarked): $canon" >&2
+    else
+        die "refusing to restore: the backup has no TARGET marker (dev only: a legacy crm-dev-* backup needs --legacy-unmarked): $canon"
+    fi
+    CRM_BACKUP_PATH=$canon
 }
 
 utc_stamp() {

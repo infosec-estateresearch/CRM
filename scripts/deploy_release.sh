@@ -10,7 +10,9 @@
 #     verify --sha256); every later step uses only the copy;
 #  2. refuse a non-empty beta runtime unless --upgrade: "empty" means nothing
 #     but the operator's env file (root, 0600) is in /srv/CRM/runtime/beta;
-#  3. unpack the copy into /srv/CRM/deploy/<shortsha>, root-owned and read-only,
+#  3. unpack the copy into /srv/CRM/deploy/<shortsha> (a constant; the deploy
+#     root and an existing <shortsha> must be root-owned and not group- or
+#     other-writable), root-owned and read-only,
 #     after re-checking every unpacked file against RELEASE.json (release.py
 #     verify-tree: no extra, missing or changed file); with --upgrade and an
 #     existing /srv/CRM/deploy/<shortsha>, that tree is re-checked the same way
@@ -23,8 +25,11 @@
 #     but exactly the PHP boolean false fails the deploy (the CRM-006S load
 #     precondition);
 #  7. provision access (CRM-003) and run the beta-safe acceptance suite
-#     (read-only, GET only) when the operator supplies CRM_ADMIN_USERNAME,
-#     CRM_ADMIN_PASSWORD, CRM_PROVISION_KEY_FILE and CRM_BASE_URL;
+#     (read-only, GET only). Both are mandatory (CRM-007R): the script refuses
+#     to start without CRM_ADMIN_USERNAME, CRM_ADMIN_PASSWORD,
+#     CRM_PROVISION_KEY_FILE (and CRM_BETA_SAFE_KEY_FILE with --upgrade). The
+#     base URL is never operator input: it is http://127.0.0.1:<CRM_BETA_APP_PORT>
+#     from the checked beta env file;
 #  8. write a sanitised deploy report (no secrets, no addresses) to
 #     /srv/CRM/runtime/beta/deploy-report-<stamp>.json.
 # Never seeds synthetic data.
@@ -77,14 +82,27 @@ check_runtime_empty() {
     fi
 }
 
+# require_root_owned <dir>: a real directory owned by uid 0 and not group- or
+# other-writable (CRM-007R: the deploy root, and an existing release before
+# verify-tree on --upgrade).
+require_root_owned() {
+    local dir=$1 owner mode
+    [ -d "$dir" ] && [ ! -L "$dir" ] || die "refusing to deploy: not a real directory: $dir"
+    read -r owner mode < <(stat -c '%u %a' -- "$dir")
+    [ "$owner" = 0 ] || die "refusing to deploy: $dir must be owned by root (uid $owner)"
+    (( (8#$mode & 8#022) == 0 )) || die "refusing to deploy: $dir is group- or other-writable (mode $mode)"
+}
+
 # unpack_release <bundle copy> <short> <upgrade> <sha256>: prints the release directory.
 unpack_release() {
     local bundle=$1 short=$2 upgrade=$3 sha=$4 dest staging
     dest="$CRM_DEPLOY_ROOT/$short"
     umask 022
     mkdir -p -- "$CRM_DEPLOY_ROOT"
+    require_root_owned "$CRM_DEPLOY_ROOT"
     if [ -e "$dest" ] || [ -L "$dest" ]; then
         [ -n "$upgrade" ] || die "refusing to deploy: $dest already exists"
+        require_root_owned "$dest"
         verify_tree "$dest" "$bundle" "$sha" \
             || die "refusing to deploy: the existing $dest differs from the bundle's RELEASE.json"
     else
@@ -177,16 +195,40 @@ sys.exit(0 if result.wasSuccessful() and not result.skipped and result.testsRun 
 ' "$dest"
 }
 
+# CRM-007R: a deploy completes only when provisioning and acceptance both ran,
+# so it refuses to start without their inputs: CRM_ADMIN_USERNAME,
+# CRM_ADMIN_PASSWORD, CRM_PROVISION_KEY_FILE (a new file for the API key) and,
+# with --upgrade (the API user already exists, so no new key is written),
+# CRM_BETA_SAFE_KEY_FILE naming an existing key file. No CRM_BASE_URL: it is
+# derived. There is no skip and no bypass.
+# require_deploy_inputs <upgrade>
+require_deploy_inputs() {
+    local upgrade=$1 name
+    for name in CRM_ADMIN_USERNAME CRM_ADMIN_PASSWORD CRM_PROVISION_KEY_FILE; do
+        [ -n "${!name:-}" ] \
+            || die "refusing to deploy: $name is required (access provisioning and beta-safe acceptance are mandatory)"
+    done
+    if [ -n "$upgrade" ] || [ -n "${CRM_BETA_SAFE_KEY_FILE:-}" ]; then
+        [ -n "${CRM_BETA_SAFE_KEY_FILE:-}" ] && [ -f "$CRM_BETA_SAFE_KEY_FILE" ] \
+            && [ ! -L "$CRM_BETA_SAFE_KEY_FILE" ] \
+            || die "refusing to deploy: CRM_BETA_SAFE_KEY_FILE must name an existing API key file (required with --upgrade)"
+    else
+        [ ! -e "$CRM_PROVISION_KEY_FILE" ] && [ ! -L "$CRM_PROVISION_KEY_FILE" ] \
+            || die "refusing to deploy: CRM_PROVISION_KEY_FILE must not exist yet (provisioning writes the new key there); for an existing API user set CRM_BETA_SAFE_KEY_FILE"
+    fi
+}
+
 # 7. Access and beta-safe acceptance (operator-supplied credentials only).
 # Sets PROVISIONED and ACCEPTANCE for the report.
 provision_and_accept() {
-    local dest=$1
-    PROVISIONED=skipped ACCEPTANCE=skipped
-    if [ -z "${CRM_ADMIN_USERNAME:-}" ] || [ -z "${CRM_ADMIN_PASSWORD:-}" ] \
-            || [ -z "${CRM_PROVISION_KEY_FILE:-}" ] || [ -z "${CRM_BASE_URL:-}" ]; then
-        echo "access provisioning and beta-safe acceptance skipped (credentials not supplied)"
-        return 0
-    fi
+    local dest=$1 url
+    PROVISIONED=failed ACCEPTANCE=failed
+    require_deploy_inputs "${2:-}"
+    # The base URL is never taken from the operator: it is beta's loopback URL,
+    # read from the checked beta env file (check_access.py beta --base-url).
+    url=$(python3 -I "$CRM_REPO_DIR/scripts/check_access.py" beta --base-url) \
+        || die "cannot determine the beta base URL from $CRM_RUNTIME_DIR/env"
+    export CRM_BASE_URL=$url
     python3 -B "$dest/scripts/provision_access.py" beta --key-file "$CRM_PROVISION_KEY_FILE" >/dev/null \
         || die "access provisioning failed"
     PROVISIONED=done
@@ -203,6 +245,8 @@ provision_and_accept() {
 # 8. write_report <release dir> <bundle> <upgrade>: prints the report path.
 write_report() {
     local dest=$1 bundle=$2 upgrade=$3 stamp report
+    [ "${PROVISIONED:-}" = done ] && [ "${ACCEPTANCE:-}" = passed ] \
+        || die "refusing to report success: provisioning is '${PROVISIONED:-unset}' and acceptance '${ACCEPTANCE:-unset}'"
     stamp=$(utc_stamp)
     report="$CRM_RUNTIME_DIR/deploy-report-$stamp.json"
     python3 -I -c '
@@ -217,6 +261,25 @@ print(json.dumps(m, indent=2, sort_keys=True))
         "$PROVISIONED" "$ACCEPTANCE" > "$report"
     chmod 0600 -- "$report"
     echo "$report"
+}
+
+# CRM-007R: the deploy root is the constant /srv/CRM/deploy. The only seam is
+# for tests: with CRM_TEST_ROOT (already checked by pin_beta_runtime: an
+# existing canonical directory under /tmp) it is $CRM_TEST_ROOT/deploy.
+# A CRM_DEPLOY_ROOT naming anything else is refused.
+CRM_DEPLOY_ROOT_CONST=/srv/CRM/deploy
+pin_deploy_root() {
+    local want=$CRM_DEPLOY_ROOT_CONST
+    if [ -n "${CRM_TEST_ROOT:-}" ]; then
+        case "$CRM_TEST_ROOT" in
+            /tmp/?*) want=$CRM_TEST_ROOT/deploy ;;
+            *) die "refusing to run: CRM_TEST_ROOT must be under /tmp: $CRM_TEST_ROOT" ;;
+        esac
+    fi
+    if [ -n "${CRM_DEPLOY_ROOT:-}" ] && [ "$CRM_DEPLOY_ROOT" != "$want" ]; then
+        die "refusing to run: the deploy root is $want (CRM_DEPLOY_ROOT is $CRM_DEPLOY_ROOT)"
+    fi
+    CRM_DEPLOY_ROOT=$want
 }
 
 main() {
@@ -246,8 +309,8 @@ main() {
         echo "$(basename "$0"): refusing to run: runtime directory is not a beta runtime: $CRM_RUNTIME_DIR" >&2
         exit 2
     }
-    CRM_DEPLOY_ROOT=${CRM_DEPLOY_ROOT:-/srv/CRM/deploy}
-    [ "$(basename "$CRM_DEPLOY_ROOT")" = deploy ] || die "refusing to run: deploy root is not named deploy: $CRM_DEPLOY_ROOT"
+    pin_deploy_root
+    require_deploy_inputs "$upgrade"
 
     CRM_STAGE_DIR=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/crm-deploy-XXXXXX")
     trap 'rm -rf -- "$CRM_STAGE_DIR"' EXIT
@@ -263,7 +326,7 @@ main() {
     render_edge "$dest"                                      # 5
     start_stack "$dest"
     configure_site "$dest"                                   # 6
-    provision_and_accept "$dest"                             # 7
+    provision_and_accept "$dest" "$upgrade"                  # 7
     report=$(write_report "$dest" "$copy" "$upgrade")        # 8
     echo "deployed $short to crm-beta; report: $report"
 }

@@ -383,8 +383,7 @@ class ShellEnv(unittest.TestCase):
                "CRM_TEST_ROOT": os.path.join(self.tmp, "runtime"),
                "REAL_STAT": shutil.which("stat"), "REAL_ID": shutil.which("id"),
                "FAKE_DOCKER_LOG": self.log,
-               "FAKE_ROOT_DIR": os.path.join(self.tmp, "runtime") if root else "/nonexistent",
-               "CRM_DEPLOY_ROOT": os.path.join(self.tmp, "deploy")}
+               "FAKE_ROOT_DIR": os.path.join(self.tmp, "runtime") if root else "/nonexistent"}
         env.update(extra or {})
         return subprocess.run(["bash", os.path.join(SCRIPTS, script), *args],
                               capture_output=True, text=True, env=env, timeout=60)
@@ -717,21 +716,29 @@ class TestEdgeRevalidation(BetaStackEnv):
         self.assertFalse([c for c in self.docker_calls() if " up " in f" {c} "])
 
 
+# Stands in for export_csv.py (records its arguments); check_access.py runs for real.
+FAKE_EXPORT_PY = """#!/usr/bin/env bash
+case "$1" in */export_csv.py) echo "EXPORT $*"; exit 0 ;; esac
+exec "$REAL_PY" "$@"
+"""
+
+
 class TestExportBetaBaseUrl(BetaStackEnv):
-    def export(self, url, out="out"):
-        extra = {"CRM_ADMIN_USERNAME": "u", "CRM_ADMIN_PASSWORD": "p"}
+    def export(self, url, *args):
+        extra = {"CRM_ADMIN_USERNAME": "u", "CRM_ADMIN_PASSWORD": "p", "REAL_PY": sys.executable}
         if url is not None:
             extra["CRM_BASE_URL"] = url
         fake_py = os.path.join(self.bin, "python3")
-        with open(fake_py, "w") as fh:  # stands in for export_csv.py: records its arguments
-            fh.write('#!/usr/bin/env bash\necho "EXPORT $*"\n')
+        with open(fake_py, "w") as fh:
+            fh.write(FAKE_EXPORT_PY)
         os.chmod(fake_py, 0o700)
-        return self.run_beta("export.sh", os.path.join(self.tmp, out), extra=extra)
+        return self.run_beta("export.sh", *args, extra=extra)
 
     def test_base_url_must_be_the_env_files_app_port(self):
         res = self.export("http://127.0.0.1:8280")
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("--base-url http://127.0.0.1:8280", res.stdout)
+        self.assertIn("EXPORT", res.stdout)
+        self.assertIn(" beta --base-url http://127.0.0.1:8280 --out ", res.stdout)
         for url in (None, "", "http://127.0.0.1:8180", "http://127.0.0.1:8280/",
                     "https://127.0.0.1:8280", "http://localhost:8280", f"http://{BIND}:8280",
                     "http://127.0.0.1:8443", "http://127.0.0.1:08280"):
@@ -741,14 +748,15 @@ class TestExportBetaBaseUrl(BetaStackEnv):
                 self.assertIn("CRM_BASE_URL", res.stderr)
                 self.assertNotIn("EXPORT", res.stdout)
 
-    def test_app_port_must_be_set_once_in_plain_form(self):
+    def test_app_port_must_be_set_once(self):
+        # CRM-007R: read through check_access.pinned_base_url, as provisioning
+        # does (which, like Compose, unquotes a quoted value).
         env = os.path.join(self.runtime, "env")
         base = read(env)
         for label, text in {
                 "missing": base.replace("CRM_BETA_APP_PORT=8280\n", ""),
                 "twice": base + "CRM_BETA_APP_PORT=8280\n",
                 "exported": base.replace("CRM_BETA_APP_PORT=8280", "export CRM_BETA_APP_PORT=8280"),
-                "quoted": base.replace("CRM_BETA_APP_PORT=8280", 'CRM_BETA_APP_PORT="8280"'),
                 "low port": base.replace("CRM_BETA_APP_PORT=8280", "CRM_BETA_APP_PORT=80")}.items():
             with self.subTest(case=label):
                 with open(env, "w") as fh:
@@ -1007,6 +1015,12 @@ class TestReleaseBundle(unittest.TestCase):
         self.assertEqual(res.returncode, 2)
 
 
+def DEPLOY_INPUTS(tmp):  # noqa: N802
+    """CRM-007R: the inputs deploy_release.sh requires before it starts."""
+    return {"CRM_ADMIN_USERNAME": "a", "CRM_ADMIN_PASSWORD": "p",
+            "CRM_PROVISION_KEY_FILE": os.path.join(tmp, "new-key.env")}
+
+
 class TestDeployRelease(ShellEnv):
     def setUp(self):
         super().setUp()
@@ -1028,23 +1042,28 @@ class TestDeployRelease(ShellEnv):
 
     def deploy(self, *extra, sha=True, env=None, **kw):
         args = ["--sha256", self.sha] if sha is True else (["--sha256", sha] if sha else [])
+        if "--upgrade" in extra:  # CRM-007R: an upgrade needs the existing API key file
+            key = os.path.join(self.tmp, "existing-key.env")
+            open(key, "a").close()
+            env = {"CRM_BETA_SAFE_KEY_FILE": key, **(env or {})}
         return self.run_sh("deploy_release.sh", "beta", self.bundle, *args, *extra,
-                           extra={"FAKE_UID": "0", "TMPDIR": self.tmp, **(env or {})}, **kw)
+                           extra={"FAKE_UID": "0", "TMPDIR": self.tmp, **DEPLOY_INPUTS(self.tmp),
+                                  **(env or {})}, **kw)
 
     def deploy_dir(self):
         short = os.path.basename(self.bundle)[len("crm-release-"):-len(".tar.gz")]
-        return os.path.join(self.tmp, "deploy", short)
+        return os.path.join(self.tmp, "runtime", "deploy", short)
 
     def assert_nothing_done(self, res):
         self.assertNotEqual(res.returncode, 0)
-        self.assertFalse(os.path.exists(os.path.join(self.tmp, "deploy")))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "runtime", "deploy")))
         self.assertEqual(self.docker_calls(), [])
         self.assertEqual(sorted(os.listdir(self.runtime)), ["env"])
         self.assertFalse([n for n in os.listdir(self.tmp) if n.startswith("crm-deploy-")],
                          "private staging directory removed")
 
     def make_writable(self):
-        for root, dirs, _ in os.walk(os.path.join(self.tmp, "deploy")):
+        for root, dirs, _ in os.walk(os.path.join(self.tmp, "runtime", "deploy")):
             os.chmod(root, 0o755)
 
     def test_sha256_is_mandatory_and_well_formed(self):
@@ -1091,7 +1110,7 @@ class TestDeployRelease(ShellEnv):
                 self.assertEqual(res.returncode, 1, res.stderr)
                 self.assertIn("unpacked files differ from the bundle", res.stderr)
                 self.assertFalse(os.path.exists(self.deploy_dir()))
-                self.assertEqual(os.listdir(os.path.join(self.tmp, "deploy")), [])
+                self.assertEqual(os.listdir(os.path.join(self.tmp, "runtime", "deploy")), [])
                 self.assertEqual(self.docker_calls(), [])
 
     def test_upgrade_rechecks_an_existing_release_dir(self):
@@ -1135,7 +1154,7 @@ class TestDeployRelease(ShellEnv):
         res = self.deploy()
         self.assertEqual(res.returncode, 1, res.stderr)
         self.assertIn("is not empty", res.stderr)
-        self.assertFalse(os.path.exists(os.path.join(self.tmp, "deploy")))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "runtime", "deploy")))
         self.assertEqual(self.docker_calls(), [])
 
     def test_tampered_bundle_refused_before_anything(self):
@@ -1156,7 +1175,7 @@ class TestDeployRelease(ShellEnv):
         self.assertIn("must run as root", res.stderr)
         res = self.deploy(root=False)
         self.assertIn("owned by root with mode 0700", res.stderr)
-        self.assertFalse(os.path.exists(os.path.join(self.tmp, "deploy")))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "runtime", "deploy")))
 
     def test_empty_runtime_passes_the_emptiness_check_and_unpacks(self):
         # The minimal test repo has no scripts beyond release.py, so the deploy
@@ -1460,7 +1479,12 @@ exit 0
 """
 
 
-def make_backup(parent, name="crm-beta-20261110T000000Z"):
+def make_backup(parent, name="crm-beta-20261110T000000Z", marker="from-name"):
+    """A synthetic backup as backup.sh writes it. marker: the TARGET file's
+    text (default: the target in the name), or None for a legacy backup with
+    no marker. TARGET is covered by SHA256SUMS."""
+    if marker == "from-name":
+        marker = name.split("-")[1] + "\n"
     backup = os.path.join(parent, name)
     os.makedirs(backup, mode=0o700)
     src = os.path.join(parent, ".src-" + name)
@@ -1473,8 +1497,12 @@ def make_backup(parent, name="crm-beta-20261110T000000Z"):
         subprocess.run(["tar", "-C", src, "-czf", os.path.join(backup, archive), rel], check=True)
     subprocess.run(["sh", "-c", "printf 'CREATE TABLE t (x int);\\n' | gzip -c > db.sql.gz"],
                    cwd=backup, check=True)
-    subprocess.run(["sh", "-c", "sha256sum db.sql.gz data.tar.gz custom.tar.gz client-custom.tar.gz"
-                    " > SHA256SUMS"], cwd=backup, check=True)
+    names = "db.sql.gz data.tar.gz custom.tar.gz client-custom.tar.gz"
+    if marker is not None:
+        with open(os.path.join(backup, "TARGET"), "w") as fh:
+            fh.write(marker)
+        names += " TARGET"
+    subprocess.run(["sh", "-c", f"sha256sum {names} > SHA256SUMS"], cwd=backup, check=True)
     shutil.rmtree(src)
     return backup
 
@@ -1763,8 +1791,10 @@ class TestDeploySteps(ShellEnv):
                 self.assertEqual(res.returncode, 1)
                 self.assertIn("not exactly false", res.stderr)
 
-    PY_STUB = ('python3() { printf "python3 %s\\n" "$*" | head -n1 >> "$FAKE_DOCKER_LOG"; '
-               'case "$*" in *provision_access.py*) '
+    # check_access.py runs for real (the pinned beta URL from the env file).
+    PY_STUB = ('python3() { case "$*" in *check_access.py*) command python3 "$@"; return;; esac; '
+               'printf "python3 %s\\n" "$*" | head -n1 >> "$FAKE_DOCKER_LOG"; '
+               'case "$*" in *provision_access.py*) echo "url=$CRM_BASE_URL" >> "$FAKE_DOCKER_LOG"; '
                '[ -z "${WRITE_KEY:-}" ] || printf "CRM_IMPORT_API_KEY=k\\n" > "$CRM_PROVISION_KEY_FILE"; '
                'return "${FAKE_PROV_RC:-0}";; '
                '*" -c "*) echo "safe-key=$CRM_BETA_SAFE_KEY_FILE" >> "$FAKE_DOCKER_LOG"; '
@@ -1772,7 +1802,6 @@ class TestDeploySteps(ShellEnv):
 
     def creds(self, **over):
         env = {"CRM_ADMIN_USERNAME": "a", "CRM_ADMIN_PASSWORD": "p",
-               "CRM_BASE_URL": "http://127.0.0.1:8280",
                "CRM_PROVISION_KEY_FILE": os.path.join(self.tmp, "new-key.env")}
         env.update(over)
         return {k: v for k, v in env.items() if v is not None}
@@ -1781,28 +1810,52 @@ class TestDeploySteps(ShellEnv):
         return self.step(f'provision_and_accept {REPO}; echo "RESULT $PROVISIONED $ACCEPTANCE"',
                          extra=extra, stubs=self.PY_STUB)
 
-    def test_provision_and_accept_skips_without_credentials(self):
-        for missing in ("CRM_ADMIN_USERNAME", "CRM_ADMIN_PASSWORD", "CRM_BASE_URL",
-                        "CRM_PROVISION_KEY_FILE"):
+    def test_provision_and_accept_never_skips(self):
+        # CRM-007R (was: skipped without credentials): a missing input refuses.
+        for missing in ("CRM_ADMIN_USERNAME", "CRM_ADMIN_PASSWORD", "CRM_PROVISION_KEY_FILE"):
             with self.subTest(missing=missing):
                 res = self.accept(self.creds(**{missing: None}))
-                self.assertEqual(res.returncode, 0, res.stderr)
-                self.assertIn("RESULT skipped skipped", res.stdout)
+                self.assertEqual(res.returncode, 1, res.stdout)
+                self.assertIn(f"{missing} is required", res.stderr)
+                self.assertNotIn("RESULT", res.stdout)
         self.assertEqual(self.docker_calls(), [])
 
+    def test_report_refuses_skipped_or_failed_steps(self):
+        for prov, acc in (("skipped", "skipped"), ("done", "skipped"), ("skipped", "passed"),
+                          ("done", "failed"), ("", "")):
+            with self.subTest(provisioning=prov, acceptance=acc):
+                res = self.step(f"PROVISIONED={prov} ACCEPTANCE={acc}; write_report {REPO} x 1")
+                self.assertEqual(res.returncode, 1)
+                self.assertIn("refusing to report success", res.stderr)
+        self.assertFalse([n for n in os.listdir(self.runtime) if n.startswith("deploy-report")])
+
     def test_provision_then_beta_safe_with_the_new_key(self):
-        res = self.accept(dict(self.creds(), WRITE_KEY="1"))
+        # An operator CRM_BASE_URL (here dev-style) is never used: the URL is
+        # beta's loopback URL from the env file.
+        res = self.accept(dict(self.creds(), WRITE_KEY="1", CRM_BASE_URL=f"http://{BIND}:8180"))
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn("RESULT done passed", res.stdout)
         calls = self.docker_calls()
         self.assertIn(f"provision_access.py beta --key-file {self.tmp}/new-key.env", calls[0])
-        self.assertIn(" -c ", calls[1])
-        self.assertEqual(calls[2], f"safe-key={self.tmp}/new-key.env")
+        self.assertEqual(calls[1], "url=http://127.0.0.1:8280")
+        self.assertIn(" -c ", calls[2])
+        self.assertEqual(calls[3], f"safe-key={self.tmp}/new-key.env")
 
-    def test_upgrade_without_a_new_key_needs_an_explicit_key_file(self):
+    def test_existing_provision_key_without_safe_key_file_refused(self):
+        key = os.path.join(self.tmp, "new-key.env")
+        open(key, "w").close()
         res = self.accept(self.creds())
         self.assertEqual(res.returncode, 1)
+        self.assertIn("CRM_PROVISION_KEY_FILE must not exist yet", res.stderr)
+        self.assertEqual(self.docker_calls(), [])
+
+    def test_upgrade_without_a_new_key_needs_an_explicit_key_file(self):
+        res = self.accept(self.creds())  # provisioning wrote no key (API user existed)
+        self.assertEqual(res.returncode, 1)
         self.assertIn("set CRM_BETA_SAFE_KEY_FILE", res.stderr)
+        res = self.step(f'provision_and_accept {REPO} 1', extra=self.creds(), stubs=self.PY_STUB)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("required with --upgrade", res.stderr)
         existing = os.path.join(self.tmp, "existing.env")
         open(existing, "w").close()
         res = self.accept(dict(self.creds(), CRM_BETA_SAFE_KEY_FILE=existing))
@@ -1813,7 +1866,8 @@ class TestDeploySteps(ShellEnv):
         res = self.accept(dict(self.creds(), WRITE_KEY="1", FAKE_SAFE_RC="1"))
         self.assertEqual(res.returncode, 1)
         self.assertIn("beta-safe acceptance failed", res.stderr)
-        res = self.accept(dict(self.creds(), FAKE_PROV_RC="1"))
+        res = self.accept(dict(self.creds(CRM_PROVISION_KEY_FILE=os.path.join(self.tmp, "k2")),
+                               FAKE_PROV_RC="1"))
         self.assertEqual(res.returncode, 1)
         self.assertIn("access provisioning failed", res.stderr)
 
@@ -1853,14 +1907,14 @@ class TestDeploySteps(ShellEnv):
             '; id() { echo 0; }')
         sha = "a" * 64
         res = self.step(f"main beta x.tar.gz --sha256 {sha}", stubs=stubs,
-                        extra={"CRM_DEPLOY_ROOT": "/x/deploy"})
+                        extra=DEPLOY_INPUTS(self.tmp))
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(self.docker_calls(), [
             "verify_bundle", "check_runtime_empty", "unpack_release", "make_runtime", "render_edge",
             "start_stack", "configure_site", "provision_and_accept", "write_report"])
         os.unlink(self.log)
         res = self.step(f"main beta x.tar.gz --sha256 {sha}", stubs=stubs,
-                        extra={"CRM_DEPLOY_ROOT": "/x/deploy", "RENDER_RC": "1"})
+                        extra={**DEPLOY_INPUTS(self.tmp), "RENDER_RC": "1"})
         self.assertNotEqual(res.returncode, 0)
         self.assertEqual(self.docker_calls()[-1], "render_edge")
 
