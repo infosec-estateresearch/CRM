@@ -119,8 +119,9 @@ class ReconcileTest(TempDirMixin, unittest.TestCase):
         self.assertEqual(c["absent_since_previous_explained_by"],
                          {"soft_deleted_available": 1, "merged": 1, "deletion_evidence": 1})
         self.assertEqual(c["absent_since_previous_unexplained"], 1)
+        # CRM-002-V: the fixture's soft-deleted visibleVia parent Contact is the second soft-deleted row
         self.assertEqual((c["current"], c["soft_deleted_available"], c["merged"], c["deletion_evidence"]),
-                         (36, 1, 1, 3))
+                         (35, 2, 1, 3))
         # Note is not replicateable: its logged permanent delete has no evidence and stays unexplained.
         n = self.report["objects"]["Note"]["deletion_classes"]
         self.assertEqual((n["absent_since_previous_explained"], n["absent_since_previous_unexplained"]), (0, 1))

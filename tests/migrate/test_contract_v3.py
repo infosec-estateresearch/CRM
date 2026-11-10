@@ -48,7 +48,7 @@ def l1_describes():
 
 
 def v2_typed_contract():
-    """The v3 file with the v2 field types and fields restored (version left at 3 so it parses)."""
+    """The v3 file with the v2 field types and fields restored (version left at the current one so it parses)."""
     doc = json.loads(contract_bytes())
     _fld(doc, "Account", "Interested_in_integration__c")["type"] = "boolean"
     _fld(doc, "EmailMessageRelation", "RelationAddress")["type"] = "email"
@@ -64,8 +64,8 @@ def v2_typed_contract():
 class ContractV3Test(unittest.TestCase):
     def test_version_and_l1_fields(self):
         c = contract()
-        self.assertEqual(CONTRACT_VERSION, 3)
-        self.assertEqual(c.version, 3)
+        self.assertEqual(CONTRACT_VERSION, 4)
+        self.assertEqual(c.version, 4)
         acc = c.object("Account").field("Interested_in_integration__c")
         self.assertEqual((acc.type, acc.required), ("picklist", True))
         rel = c.object("EmailMessageRelation").field("RelationAddress")
@@ -80,7 +80,7 @@ class ContractV3Test(unittest.TestCase):
             with self.assertRaises(ContractError) as ctx:
                 contract_from_doc(doc)
             self.assertEqual(ctx.exception.code, "contract_version")
-        for bad in (None, "3", 3.5, 4, True):
+        for bad in (None, "4", 3, 3.5, 5, True):
             doc = json.loads(contract_bytes())
             doc["contractVersion"] = bad
             with self.subTest(version=bad), self.assertRaises(ContractError) as ctx:
@@ -93,7 +93,7 @@ class L1GateTest(unittest.TestCase):
         result = evaluate_gate(contract(), l1_describes(), WAIVER)
         self.assertTrue(result.ok, json.dumps(result.report["objects"], indent=1))
         self.assertEqual(result.report["objects_failed"], 0)
-        self.assertEqual(result.report["contract_version"], 3)
+        self.assertEqual(result.report["contract_version"], 4)
         self.assertEqual(result.report["writable_objects"], 12)
         self.assertTrue(result.report["identity"].startswith("write-capable (waived: "))
         self.assertEqual(result.report["findings"],

@@ -1,4 +1,4 @@
-"""Contract v3 content and the contract-to-SOQL rule (WO Change 1, AC2)."""
+"""Contract v4 content and the contract-to-SOQL rule (WO Change 1, AC2)."""
 
 import copy
 import datetime as dt
@@ -48,7 +48,7 @@ OWNER_CHECK = {"Account", "Contact", "Opportunity", "Task", "Event", "Note"}
 class ContractContentTest(unittest.TestCase):
     def test_objects_and_fields_match_the_work_order_table(self):
         c = contract()
-        self.assertEqual(c.version, 3)
+        self.assertEqual(c.version, 4)
         self.assertEqual(list(c.object_names), list(WO_TABLE))
         for obj in c.objects:
             self.assertEqual(list(obj.field_names), WO_TABLE[obj.name].split(), obj.name)
@@ -96,7 +96,7 @@ class ContractValidationTest(unittest.TestCase):
         return next(f for f in self.obj(doc, obj)["fields"] if f["name"] == name)
 
     def test_real_contract_parses(self):
-        self.assertEqual(contract_from_doc(self.doc).version, 3)
+        self.assertEqual(contract_from_doc(self.doc).version, 4)
 
     def test_broken_contracts_are_refused(self):
         cases = {

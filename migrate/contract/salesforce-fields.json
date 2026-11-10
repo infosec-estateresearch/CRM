@@ -1,12 +1,13 @@
 {
   "contract": "crm-migrate source-field contract",
-  "contractVersion": 3,
+  "contractVersion": 4,
   "workOrder": "CRM-002 v1.2",
   "notes": [
     "SOQL is built only from this file. Compound address fields are never selected; only their components.",
     "HtmlBody, BccAddress and attachment content are excluded (D5).",
     "referenceMatch 'superset' marks polymorphic fields whose describe referenceTo is org-dependent: the listed targets must be present.",
-    "Types are the expected Salesforce describe types; uncertain ones are listed in docs/MIGRATION.md and confirmed at L1."
+    "Types are the expected Salesforce describe types; uncertain ones are listed in docs/MIGRATION.md and confirmed at L1.",
+    "visibleVia (contract v4, CRM-002-V) lists reference fields whose soft-deleted parent hides a row from query; each parent is an earlier softDelete object."
   ],
   "waivers": [],
   "objects": [
@@ -1212,6 +1213,16 @@
       "ownerCheck": false,
       "softDelete": false,
       "changeKey": "SystemModstamp",
+      "visibleVia": [
+        {
+          "field": "EmailMessageId",
+          "object": "EmailMessage"
+        },
+        {
+          "field": "RelationId",
+          "object": "Contact"
+        }
+      ],
       "fields": [
         {
           "name": "Id",

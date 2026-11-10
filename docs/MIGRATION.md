@@ -9,7 +9,7 @@
 
 | Path | Contents |
 |---|---|
-| `migrate/contract/salesforce-fields.json` | Source-field contract, version 3 (CRM-002-U, L1 corrections). SOQL is built only from this file. The tool refuses any other `contractVersion` with `contract_version`. |
+| `migrate/contract/salesforce-fields.json` | Source-field contract, version 4 (CRM-002-V, `visibleVia`; version 3 was CRM-002-U, L1 corrections). SOQL is built only from this file. The tool refuses any other `contractVersion` with `contract_version`. |
 | `migrate/bin/crm-migrate.py` | Entry point. It runs only as `python -I -B` and inserts exactly one library path. |
 | `migrate/lib/crm_migrate/` | The package. `policy.py` holds the request allowlist, `client.py` the single Salesforce client, `transport.py` the only real transport, and `hostcheck.py` the host guard decisions. |
 | `deploy/migrate/compose.json` | Compose project `crm-migrate`, with services `crm-migrate` (live) and `crm-migrate-selftest` (no network). |
@@ -98,6 +98,8 @@ All HTTP goes through `SalesforceClient`. The allowlist is checked before the tr
 
    A row that is in the baseline but no longer returned counts as deleted during the run **only** if the deletion log shows it. Otherwise it is kept, and the object is `INCOMPLETE`.
 
+   `count_query` must equal the number of query-visible baseline rows exactly. A row is not query-visible when it is soft-deleted (`IsDeleted = true`), archived (`IsArchived = true`), or, for an object with `visibleVia` (contract v4, see below), hidden through a soft-deleted parent.
+
    The verification reads are assumed to be free of concurrent change. A change that lands between the verification `COUNT()` and the id-only query shows up as a mismatch, and the run fails safe to `INCOMPLETE`.
 4. **Output.** The run directory holds:
    - `objects/<Object>.jsonl.gz`, sorted by Id, holding only the effective contract fields;
@@ -124,9 +126,10 @@ The overall status is the worst object status.
 
 | Class | Source | Meaning |
 |---|---|---|
-| `current` | `IsDeleted = false` | Exists now |
+| `current` | `IsDeleted = false`, and for a `visibleVia` object no listed parent soft-deleted | Exists now |
 | `soft_deleted_available` | `queryAll`, `IsDeleted = true`, no `MasterRecordId` | In the Recycle Bin now |
 | `merged` | Soft-deleted with `MasterRecordId` set | Merged into a surviving record, not lost |
+| `parent_soft_deleted` | `visibleVia` objects only: the row's listed reference field holds the Id of a soft-deleted row (`IsDeleted = true`) of the parent object in the same snapshot | Hidden from `query` because its parent is in the Recycle Bin. Not `current`. Other objects report `not_applicable`. |
 | `deletion_evidence` | `sobjects/<Object>/deleted/` (replicateable objects only, about 30 days) | Ids and deletion dates only. Objects that are not replicateable report `unavailable`. |
 | `absent_since_previous_explained` | `current` in the previous snapshot, not `current` now, and matched by one of the classes above | Deletion confirmed. The breakdown says which class explained it. |
 | `absent_since_previous_unexplained` | `current` in the previous snapshot, not `current` now, with no evidence | **Not** treated as deleted. Possible causes are a permanent deletion outside the log window, a sharing or permission change, or an extraction fault. Downstream keeps such records, flagged `sfAbsentUnverified`. |
@@ -193,6 +196,33 @@ L1 (`contract-check --auth soap-legacy`, schema only) failed the v2 gate on 3 of
 | `Opportunity.Key_Information__c` | textarea, optional | removed. There is no such field in Salesforce. |
 
 The removals follow the data-minimisation rule: neither field carries the data its purpose names.
+
+## Contract v4: `visibleVia` (CRM-002-V, 2026-11-10)
+
+The first L3 reached `RECONCILED` on 11 of 12 objects. `EmailMessageRelation` was `INCOMPLETE` with `query_count_mismatch`: `query` returned 8 rows fewer than `queryAll`, and `queryAll` matched the id set and the baseline exactly. `EmailMessageRelation` has no `IsDeleted` field, so v3 could not tell which rows `query` hides. Salesforce's `query` hides the child rows of soft-deleted parents; `queryAll` returns them. The 8 rows split as 4 under a soft-deleted `EmailMessage` and 4 whose `RelationId` is a soft-deleted `Contact`, with 0 unexplained.
+
+Contract v4 adds one optional per-object key and changes nothing else:
+
+```json
+"visibleVia": [{"field": "EmailMessageId", "object": "EmailMessage"},
+               {"field": "RelationId", "object": "Contact"}]
+```
+
+It is set on `EmailMessageRelation` only. The loader refuses it with `visible_via` unless:
+- the object has `softDelete: false`;
+- the list is not empty, and each entry has exactly `field` and `object`, with no duplicate;
+- each `field` is a required `reference` field of the object;
+- each `object` is an **earlier** contract object with `softDelete: true`. The parents are therefore extracted and verified first.
+
+The effective contract in `manifest.json` lists `visibleVia` for every object (an empty list when it is not set).
+
+**Verification rule.** For an object with `visibleVia`, a baseline row is query-visible when, for every entry, its `field` value is not the Id of a soft-deleted row in that parent object's **final baseline of the same run** (after the catch-up passes, without rows deleted during the run). `count_query` must equal the number of visible rows **exactly**; otherwise the object stays `INCOMPLETE` with `query_count_mismatch`. No other rule changes. The object details in the manifest record, counts only:
+- `hidden_via`: rows hidden per entry, keyed `<parent object>.<field>`, for example `{"EmailMessage.EmailMessageId": 4, "Contact.RelationId": 4}`. A row hidden through both entries counts in both;
+- `hidden_via_rows`: distinct rows hidden through any entry. These are not counted in `current`.
+
+**Reconcile.** `reconcile` reports the `parent_soft_deleted` deletion class (see Deletion classes) and copies `hidden_via` into the object's `verification`. Against a previous snapshot, a row that was `current` and is now `parent_soft_deleted` is explained by `parent_soft_deleted`.
+
+**Selftest.** The synthetic org has one soft-deleted `EmailMessage` and one soft-deleted `Contact`, each with 4 child relations, shaped like the L3 result. The full selftest adds the scenarios `parent_soft_delete` (a parent soft-deleted during the run, `RECONCILED`) and `unexplained_hidden_relation` (one row hidden from `query` with no parent explanation, `INCOMPLETE`).
 
 ## To be confirmed at L1
 
