@@ -28,9 +28,35 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 import provision_access  # noqa: E402
 import provision_users  # noqa: E402
 
-BASE = "http://127.0.0.1:8180"
+from test_check_access import host, private  # noqa: E402
+import check_access  # noqa: E402
+
+# CRM-007R: the base URL is pinned to the target's own env file. A synthetic
+# runtime root (canonical, under /tmp) holds dev/env (CRM_BIND_IP) and
+# beta/env (CRM_BETA_APP_PORT); dev's URL is http://<CRM_BIND_IP>:8180 and
+# beta's http://127.0.0.1:<CRM_BETA_APP_PORT>.
+DEV_BIND = host(private(check_access.RFC1918[2], 44), 9)
+BETA_APP_PORT = "8280"
+RUNTIME_ROOT = os.path.realpath(tempfile.mkdtemp(prefix="crm-provision-"))
+for _target, _text in (("dev", f"CRM_BIND_IP={DEV_BIND}\n"),
+                       ("beta", f"CRM_BETA_APP_PORT={BETA_APP_PORT}\n")):
+    os.makedirs(os.path.join(RUNTIME_ROOT, _target))
+    with open(os.path.join(RUNTIME_ROOT, _target, "env"), "w") as _fh:
+        _fh.write(_text)
+
+
+def tearDownModule():
+    shutil.rmtree(RUNTIME_ROOT, True)
+
+
+BASE = f"http://{DEV_BIND}:8180"
+BETA_BASE = f"http://127.0.0.1:{BETA_APP_PORT}"
+DEV_RUNTIME = {"CRM_RUNTIME_DIR": os.path.join(RUNTIME_ROOT, "dev")}
+BETA_RUNTIME = {"CRM_TEST_ROOT": RUNTIME_ROOT}
 ENV = {"CRM_ADMIN_USERNAME": "unit-admin", "CRM_ADMIN_PASSWORD": "unit-admin-pass",
-       "CRM_BASE_URL": BASE}
+       "CRM_BASE_URL": BASE, **DEV_RUNTIME}
+BETA_ENV = dict(ENV, CRM_BASE_URL=BETA_BASE, **BETA_RUNTIME)
+del BETA_ENV["CRM_RUNTIME_DIR"]
 API_KEY_SENTINEL = "NOT-A-REAL-KEY-SENTINEL"
 
 
@@ -155,7 +181,9 @@ class FakeEspo:
 def run(main, argv, fake, environ=None):
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
-        code = main(argv, transport=fake, environ=ENV if environ is None else environ)
+        if environ is None:
+            environ = BETA_ENV if argv[:1] == ["beta"] else ENV
+        code = main(argv, transport=fake, environ=environ)
     return code, out.getvalue(), err.getvalue()
 
 
@@ -232,7 +260,7 @@ class TestEnvironmentGuard(TmpDir):
     def test_missing_credentials_fail_loudly_without_http(self):
         fake = FakeEspo()
         code, _, err = run(provision_access.main, ["dev", "--key-file", self.path("k")], fake,
-                           environ={"CRM_BASE_URL": BASE})
+                           environ={"CRM_BASE_URL": BASE, **DEV_RUNTIME})
         self.assertEqual(code, 2)
         self.assertIn("CRM_ADMIN_USERNAME", err)
         self.assertEqual(fake.calls, [])

@@ -268,8 +268,10 @@ class TestBackupRestore(ScriptEnv):
     def test_backup_writes_dump_data_and_checksums(self):
         dest = self.backup()
         self.assertEqual(sorted(os.listdir(dest)),
-                         ["SHA256SUMS", "client-custom.tar.gz", "custom.tar.gz",
+                         ["SHA256SUMS", "TARGET", "client-custom.tar.gz", "custom.tar.gz",
                           "data.tar.gz", "db.sql.gz"])
+        with open(os.path.join(dest, "TARGET")) as fh:
+            self.assertEqual(fh.read(), "dev\n")  # CRM-007R: the target marker
         tops = {"data.tar.gz": "data/config.php",
                 "custom.tar.gz": "custom/Espo/Custom/Resources/metadata/entityDefs/Account.json",
                 "client-custom.tar.gz": "client/custom/res.js"}
@@ -281,7 +283,9 @@ class TestBackupRestore(ScriptEnv):
             self.assertTrue(all(n == root or n.startswith(root + "/") for n in names),
                             f"{archive} holds only {root}: {names}")
         with open(os.path.join(dest, "SHA256SUMS")) as fh:
-            self.assertEqual(len(fh.read().splitlines()), 4)
+            sums = fh.read().splitlines()
+        self.assertEqual(len(sums), 5)
+        self.assertRegex(sums[-1], r"^[0-9a-f]{64}  TARGET$")
         with gzip.open(os.path.join(dest, "db.sql.gz"), "rt") as fh:
             self.assertIn("fake dump", fh.read())
         calls = self.docker_calls()
@@ -617,6 +621,14 @@ class TestEnvPathDivergence(ScriptEnv):
     SCRIPTS = [("deploy_custom.sh",), ("backup.sh",), ("restore.sh", "crm-dev-20261110T120000Z"),
                ("up.sh",)]
     VARS = {"CRM_DATA_DIR": "data", "CRM_CUSTOM_DIR": "custom", "CRM_CLIENT_CUSTOM_DIR": "client/custom"}
+
+    def setUp(self):
+        super().setUp()
+        # CRM-007R: restore.sh checks the backup (its own, marked) before the
+        # env file, so these cases use a valid dev backup.
+        from test_beta import make_backup
+        os.makedirs(os.path.join(self.runtime, "backups"))
+        make_backup(os.path.join(self.runtime, "backups"), "crm-dev-20261110T120000Z")
 
     def assert_all_refuse(self, needle, extra_env=None, config_ran=False):
         listing = sorted(os.listdir(self.runtime))

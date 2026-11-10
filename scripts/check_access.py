@@ -356,6 +356,23 @@ def _bind_source_ok(src):
     return src.startswith("./") and "$" not in src and "//" not in src
 
 
+# CRM-007R: a top-level beta network may be only {}, {"driver": "bridge"},
+# {"internal": true} or a combination of those. driver_opts (a routed bridge),
+# ipam, any other driver (macvlan, ipvlan, host, ...) and any other key are refused.
+BETA_NETWORK_KEYS = frozenset({"driver", "internal"})
+
+
+def _beta_network_errors(name, spec):
+    out = [f"beta compose network {name}: key {key!r} is not allowed (only driver: bridge "
+           "and internal: true)" for key in sorted(set(spec) - BETA_NETWORK_KEYS)]
+    if "driver" in spec and spec["driver"] != "bridge":
+        out.append(f"beta compose network {name}: driver {spec['driver']!r} is refused "
+                   "(only bridge)")
+    if "internal" in spec and spec["internal"] is not True:
+        out.append(f"beta compose network {name}: internal may only be true")
+    return out
+
+
 def _beta_resources_errors(doc, services):
     """No external or named networks/volumes, no bind source outside the beta
     runtime or the release directory, never docker.sock."""
@@ -370,6 +387,8 @@ def _beta_resources_errors(doc, services):
                 out.append(f"beta compose {kind[:-1]} {name}: not a mapping")
             elif spec and ("external" in spec or "name" in spec):
                 out.append(f"beta compose {kind[:-1]} {name}: external or named {kind} are refused")
+            elif kind == "networks":
+                out += _beta_network_errors(name, spec or {})
     if doc.get("volumes"):
         out.append("beta compose declares named volumes; crm-beta uses bind mounts only")
     if "docker.sock" in json.dumps(doc):
@@ -791,6 +810,64 @@ def beta_runtime(environ):
     return want, None
 
 
+BETA_APP_PORT_RE = re.compile(r"^[1-9][0-9]{3,4}$")
+
+
+def pinned_base_url(target, environ):
+    """(url, None) or (None, why): the one base URL the provisioning scripts
+    may use for target (CRM-007R), read from that target's checked env file
+    with read_env_values, never from input.
+    - beta: http://127.0.0.1:<CRM_BETA_APP_PORT> (the runtime is pinned as for
+      `check_access.py beta`);
+    - dev: http://<CRM_BIND_IP>:8180 (CRM_BIND_IP as validated by
+      `check_access.py dev`)."""
+    if target == "beta":
+        runtime, problem = beta_runtime(environ)
+        if problem:
+            return None, problem
+        names = ("CRM_BETA_APP_PORT",)
+    elif target == "dev":
+        runtime = environ.get("CRM_RUNTIME_DIR") or DEFAULT_RUNTIME
+        names = ("CRM_BIND_IP",)
+    else:
+        return None, f"target environment must be 'dev' or 'beta' (got '{target}')"
+    if os.path.basename(runtime) != target:
+        return None, f"runtime directory is not a {target} runtime: {runtime}"
+    env_file = os.path.join(runtime, "env")
+    if (environ.get("CRM_ENV_FILE") or env_file) != env_file:
+        return None, f"the env file must be {env_file}"
+    try:
+        with open(env_file, encoding="utf-8") as fh:
+            values, errors = read_env_values(fh.read(), names)
+    except (OSError, UnicodeDecodeError):
+        return None, f"env file not readable: {env_file}"
+    if errors:
+        return None, "; ".join(errors)
+    if target == "beta":
+        port = values["CRM_BETA_APP_PORT"]
+        if not BETA_APP_PORT_RE.match(port) or not 1024 <= int(port) <= 65535:
+            return None, f"CRM_BETA_APP_PORT in {env_file} is not a port 1024-65535"
+        return f"http://127.0.0.1:{port}", None
+    bind_errors = validate_bind_ip(values["CRM_BIND_IP"])
+    if bind_errors:
+        return None, "; ".join(bind_errors)
+    return f"http://{values['CRM_BIND_IP']}:{PORT}", None
+
+
+def base_url_problem(target, url, environ):
+    """None if url is exactly target's pinned base URL; otherwise why not.
+    The message never contains the URL or the bind address."""
+    want, problem = pinned_base_url(target, environ)
+    if problem:
+        return f"cannot determine the {target} base URL: {problem}"
+    if url != want:
+        if target == "beta":
+            return ("the beta base URL must be exactly http://127.0.0.1:<CRM_BETA_APP_PORT "
+                    "from the beta env file>")
+        return f"the dev base URL must be exactly http://<CRM_BIND_IP from the dev env file>:{PORT}"
+    return None
+
+
 def edge_config_problem(runtime, rendered):
     """None if $runtime/edge/haproxy.cfg is byte for byte what render_edge()
     gives for the checked env file; otherwise why not (fail closed: missing,
@@ -821,6 +898,14 @@ def main(argv=None, environ=None):
         for err in errors:
             print(f"{prog()}: refused: {err}", file=sys.stderr)
         return 1 if errors else 0
+    if target == "beta" and argv[1:] == ["--base-url"]:
+        # The pinned beta base URL (loopback only), for deploy_release.sh.
+        url, problem = pinned_base_url("beta", environ)
+        if problem:
+            print(f"{prog()}: refusing to run: {problem}", file=sys.stderr)
+            return 1
+        print(url)
+        return 0
     render = target == "beta" and argv[1:] == ["--render"]
     if target not in ("dev", "beta") or (len(argv) != 1 and not render):
         print(f"{prog()}: refusing to run: target environment must be 'dev' or 'beta' "

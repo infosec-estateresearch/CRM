@@ -11,23 +11,48 @@
 # /srv/CRM/runtime/beta-restoretest), prints record-count fingerprints and
 # tears it down. crm-beta itself is not stopped or touched (lib/restoretest.sh).
 #
+# CRM-007R: the backup must be this target's own: directly under
+# $CRM_RUNTIME_DIR/backups, named crm-<target>-<UTC stamp>, with a checksummed
+# TARGET marker naming the target. Anything else is refused before any docker
+# call. Dev only: a legacy backup with no marker (made before CRM-007R) is
+# accepted with the explicit flag --legacy-unmarked.
+#
 # Usage: scripts/restore.sh dev|beta <backup name or path>
+#        scripts/restore.sh dev --legacy-unmarked <backup name or path>
 #        scripts/restore.sh beta --restoretest <backup name or path>
 set -euo pipefail
 # shellcheck source=lib/common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
 require_target "${1:-}"
-restoretest=
-if [ "${2:-}" = --restoretest ]; then
-    [ "$CRM_TARGET" = beta ] || {
-        echo "$(basename "$0"): refusing to run: --restoretest is for beta only" >&2
-        exit 2
-    }
-    restoretest=1
+restoretest= legacy=
+case "${2:-}" in
+    --restoretest)
+        [ "$CRM_TARGET" = beta ] || {
+            echo "$(basename "$0"): refusing to run: --restoretest is for beta only" >&2
+            exit 2
+        }
+        restoretest=1 ;;
+    --legacy-unmarked)
+        [ "$CRM_TARGET" = dev ] || {
+            echo "$(basename "$0"): refusing to run: --legacy-unmarked is for dev only; beta never accepts a backup without its TARGET marker" >&2
+            exit 2
+        }
+        legacy=1 ;;
+esac
+if [ -n "$restoretest$legacy" ]; then
     backup=${3:-}
     [ -n "$backup" ] && [ $# -eq 3 ] \
-        || die "usage: $(basename "$0") beta --restoretest <backup name or path>"
+        || die "usage: $(basename "$0") $CRM_TARGET ${2} <backup name or path>"
+else
+    backup=${2:-}
+    [ -n "$backup" ] || die "usage: $(basename "$0") $CRM_TARGET <backup name or path>"
+fi
+# CRM-007R: only this target's own, marked backup, checked before any docker
+# call (lib/common.sh resolve_backup).
+resolve_backup "$backup" "$legacy"
+backup=$CRM_BACKUP_PATH
+if [ -n "$restoretest" ]; then
     # shellcheck source=lib/restoretest.sh
     . "$CRM_REPO_DIR/scripts/lib/restoretest.sh"
     rt_guard
@@ -36,19 +61,7 @@ else
     require_runtime_paths
     # This script starts services again, so the LAN access settings must pass first.
     require_access
-    backup=${2:-}
-    [ -n "$backup" ] || die "usage: $(basename "$0") $CRM_TARGET <backup name or path>"
 fi
-case "$backup" in
-    */*) ;;
-    *) backup="$CRM_BACKUP_DIR/$backup" ;;
-esac
-[ -f "$backup/SHA256SUMS" ] || die "not a backup directory: $backup"
-(cd "$backup" && sha256sum --quiet -c SHA256SUMS) || die "checksum mismatch in $backup"
-for archive in db.sql.gz $(for d in "${CRM_PERSISTENT_DIRS[@]}"; do archive_for "$d"; done); do
-    [ -f "$backup/$archive" ] && grep -q "  $archive\$" "$backup/SHA256SUMS" \
-        || die "backup is incomplete (no checksummed $archive): $backup"
-done
 
 if [ -n "$restoretest" ]; then
     rt_run "$backup"
