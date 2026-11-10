@@ -1,0 +1,6 @@
+# CRM-002 - DELIVERED
+Repository: infosec-estateresearch/CRM   Branch: forge/CRM-002   Candidate: 29c74a2936e2f3d6ea7c7fb04c88f8040cdb4c36   Base: fa1ed80eed749cb2c0e7908ff72ad60a793e3e24   WO: work-orders/CRM-002.md v1.2 (approved 0b954dc)
+Change: crm-migrate read-only Salesforce extractor. Source-field contract v2; allowlisted client and transport (client-credentials token POST plus read GETs only; exact origin; no redirects or proxies); metadata gate before SOQL; reconciled baseline (catch-up passes with overlap, quiet window, count and id-set verification, RECONCILED / WITH_DRIFT / INCOMPLETE); deletion classes; counts-only logs; python -I -B fixed-path layout; per-run UID-64021 directory sealed root-only; in-process synthetic tests.
+Tests: python3 -I -B -m unittest discover -s tests/migrate -t . -v -> Ran 159 tests, OK (reviewers re-ran); bash -n scripts/migrate.sh OK; non-vacuity: 33 Compose and 20 script broken fixtures, plus mutations M1-M4.
+Reviews: Auditor PASS, Tester PASS, DevSecOps PASS (30-case write/origin probe all refused; gitleaks clean). Advisories, carried to CRM-002-S: trailing-newline regex anchors; bridge network not egress-restricted; some defence-in-depth checks untested; runtime-path tautology.
+Not run: O1 (real container) and L1-L3 (Salesforce). Engineer round 1 timed out (void); the work was completed in round 2.
