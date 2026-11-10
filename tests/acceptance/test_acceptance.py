@@ -2,7 +2,8 @@
 
 Run against a freshly deployed and seeded crm-dev stack, from the repository root:
 
-    export CRM_BASE_URL=http://127.0.0.1:8180
+    export CRM_EXPECTED_BIND_IP=<CRM_BIND_IP from the runtime env file>   # AC9 (CRM-D019)
+    export CRM_BASE_URL=http://$CRM_EXPECTED_BIND_IP:8180
     export CRM_ADMIN_USERNAME=...  CRM_ADMIN_PASSWORD=...   # never stored
     export CRM_SEED=1                 # the --seed used by seed_synthetic.py (default 1)
     export CRM_EXPORT_DIR=...         # output of scripts/export.sh dev (AC8)
@@ -12,15 +13,23 @@ Expected values are recomputed from the deterministic seeder, so nothing about
 the dataset is stored. The counts assume the stack holds only the seeded data.
 AC7 tries to create each held-back near-duplicate; if one is wrongly accepted it
 is deleted again and the test fails.
+
+AC9's expected host IP comes from CRM_EXPECTED_BIND_IP, never from Git. It is a
+different name from the env file's CRM_BIND_IP on purpose: Compose prefers the
+process environment to the env file, so CRM_BIND_IP must not be exported.
 """
 
 import collections
 import csv
 import json
 import os
+import socket
 import subprocess
 import sys
 import unittest
+
+ENV_EXPECTED_BIND_IP = "CRM_EXPECTED_BIND_IP"
+APP_PORT = 8180
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "scripts"))
@@ -138,7 +147,15 @@ class TestAcceptance(unittest.TestCase):
                          {norm(c["emailAddress"]) for c in DATA["contacts"]})
         self.assertEqual({r["id"] for r in accounts}, {a["id"] for a in setUpModule.accounts})
 
+    def expected_bind_ip(self):
+        ip = os.environ.get(ENV_EXPECTED_BIND_IP, "")
+        self.assertTrue(ip, f"set {ENV_EXPECTED_BIND_IP} to the env file's CRM_BIND_IP")
+        self.assertNotIn(ip, ("127.0.0.1", "0.0.0.0", ""), "LAN bind expected")
+        return ip
+
     def test_ac9_project_isolation_own_resources_only(self):
+        expected_ip = self.expected_bind_ip()
+
         def docker_json(*args):
             res = subprocess.run(["docker", *args], capture_output=True, text=True, check=True)
             return json.loads(res.stdout)
@@ -155,11 +172,36 @@ class TestAcceptance(unittest.TestCase):
             bindings = c["HostConfig"].get("PortBindings") or {}
             if service == "crm-app":
                 ips = {b.get("HostIp") for v in bindings.values() for b in v or []}
-                self.assertEqual(ips, {"127.0.0.1"})
+                self.assertEqual(ips, {expected_ip})  # was {"127.0.0.1"} before CRM-D019
+                self.assertEqual(set(bindings), {"80/tcp"})
+                self.assertEqual({b.get("HostPort") for b in bindings["80/tcp"]}, {str(APP_PORT)})
             else:
                 self.assertEqual(bindings, {}, f"{service} publishes a port")
             self.assertEqual({m["Type"] for m in c["Mounts"]}, {"bind"},
                              f"{service} uses a volume")
+
+    def test_ac9_app_not_published_on_loopback(self):
+        """Live: nothing answers on the host's 127.0.0.1:8180 any more, while the
+        LAN address does (CRM-D019). Run on the host itself."""
+        expected_ip = self.expected_bind_ip()
+        with self.assertRaises(OSError, msg="127.0.0.1:8180 still accepts connections"):
+            socket.create_connection(("127.0.0.1", APP_PORT), timeout=5).close()
+        socket.create_connection((expected_ip, APP_PORT), timeout=5).close()
+
+    def test_ac9_unlisted_source_refused_loopback_allowed(self):
+        """Live, inside the project's own containers only: crm-daemon's crm-net
+        address is never in CRM_ALLOWED_SOURCES (check_access.py refuses any
+        overlap), so Apache must answer it 403; the loopback healthcheck must
+        still pass."""
+        def docker(*args):
+            return subprocess.run(["docker", *args], capture_output=True, text=True,
+                                  check=True).stdout.strip()
+
+        status = docker("exec", "crm-dev-crm-daemon-1", "curl", "-s", "-o", "/dev/null",
+                        "-w", "%{http_code}", "http://crm-app/")
+        self.assertEqual(status, "403", "a source outside CRM_ALLOWED_SOURCES was not refused")
+        health = docker("inspect", "-f", "{{.State.Health.Status}}", "crm-dev-crm-app-1")
+        self.assertEqual(health, "healthy", "loopback healthcheck refused")
 
 
 if __name__ == "__main__":

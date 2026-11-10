@@ -2,6 +2,8 @@
 # Restore the crm-dev stack from a backup made by backup.sh.
 # Each current runtime directory (data/, custom/, client/custom/) is moved
 # aside to <dir>.replaced-<stamp>, not deleted, and replaced from the backup.
+# Because it starts the stack, the LAN access check (scripts/check_access.py)
+# runs first and a refusal stops the restore before the stack is touched.
 # Usage: scripts/restore.sh dev <backup name or path>
 set -euo pipefail
 # shellcheck source=lib/common.sh
@@ -10,6 +12,8 @@ set -euo pipefail
 require_dev "${1:-}"
 require_env_file
 require_runtime_paths
+# This script starts services again, so the LAN access settings must pass first.
+require_access
 backup=${2:-}
 [ -n "$backup" ] || die "usage: $(basename "$0") dev <backup name or path>"
 case "$backup" in

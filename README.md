@@ -21,11 +21,23 @@ Rules:
 
 ## Usage
 
-The CRM-001 dev stack is EspoCRM 10.0.12 plus MariaDB 11.4.13, both pinned by digest, with Estate Research's customisations in `custom/`, deployed into the runtime by script. It runs only on the development host, as Compose project `crm-dev`, at `127.0.0.1:8180`. All of its data is synthetic.
+The CRM-001 dev stack is EspoCRM 10.0.12 plus MariaDB 11.4.13, both pinned by digest, with Estate Research's customisations in `custom/`, deployed into the runtime by script. It runs only on the development host, as Compose project `crm-dev`. All of its data is synthetic.
+
+### Access
+
+- `crm-app` is published on port 8180 of one host LAN address, `CRM_BIND_IP`. It is not published on `127.0.0.1` or `0.0.0.0`.
+- Apache inside `crm-app` admits only the authorised internal networks in `CRM_ALLOWED_SOURCES`, plus loopback for the healthcheck. Every other source gets 403 (`deploy/apache/crm-access.conf`, CRM-D019).
+- The values exist only in the runtime env file, never in this repository. Start the stack only with `scripts/up.sh dev`, which checks them (`scripts/check_access.py`) before every `up`. A raw `docker compose up` skips that check.
+- The database publishes nothing.
+- The connection is plain HTTP. TLS is mandatory before any real data.
+- Operator steps, including moving the existing install: [docs/BUILD.md §7.6](docs/BUILD.md#76-lan-access-crm-d019).
+
+### Usage
+
 
 - EspoCRM's persistent directories (`data/`, `custom/`, `client/custom/`) are bind-mounted individually and read-write from `/srv/CRM/runtime/dev`. `/var/www/html` itself is never mounted.
 - Git is authoritative for the customisation. `scripts/deploy_custom.sh dev` deploys `custom/Espo/Custom/` into the runtime, before the first start and after every change. It stops `crm-app` and `crm-daemon` for the swap and refuses to run if any path it works on is a symlink or diverges from the env file. If the app was running, it then starts it again, clears the cache and rebuilds. Admin-UI changes to custom metadata are overwritten by the next deploy.
 - Backups cover the database, `data/`, `custom/` and `client/custom/`.
 - Deploy, seed, back up, restore and export: see [docs/BUILD.md §7](docs/BUILD.md#7-usage-crm-001-dev-stack).
 - Checks that need no stack: `python3 -m unittest discover -s tests/unit -v`.
-- Checks against the running stack (operator stage): `python3 -m unittest discover -s tests/acceptance -v`. These need `CRM_BASE_URL`, `CRM_ADMIN_USERNAME` and `CRM_ADMIN_PASSWORD` in the environment.
+- Checks against the running stack (operator stage): `python3 -m unittest discover -s tests/acceptance -v`. These need `CRM_BASE_URL`, `CRM_ADMIN_USERNAME`, `CRM_ADMIN_PASSWORD` and `CRM_EXPECTED_BIND_IP` in the environment.

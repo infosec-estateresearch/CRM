@@ -23,10 +23,16 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SCRIPTS = os.path.join(REPO, "scripts")
 sys.path.insert(0, SCRIPTS)
 
+import check_access  # noqa: E402
 import crm_api  # noqa: E402
 import export_csv  # noqa: E402
+# Derived private addresses (no literal private address in the repository).
+from test_check_access import BIND, SUBNET_A, SUBNET_B  # noqa: E402
 
-GUARDED = ["backup.sh", "restore.sh", "export.sh", "deploy_custom.sh"]
+GUARDED = ["backup.sh", "restore.sh", "export.sh", "deploy_custom.sh", "up.sh"]
+# Valid LAN access settings for the synthetic env files.
+ACCESS = {"CRM_BIND_IP": BIND, "CRM_ALLOWED_SOURCES": f"{SUBNET_A} {SUBNET_B}",
+          "CRM_SITE_URL": f"http://{BIND}:8180"}
 REPO_CUSTOM = os.path.join(REPO, "custom", "Espo", "Custom")
 
 FAKE_DOCKER = """#!/usr/bin/env bash
@@ -156,7 +162,8 @@ class ScriptEnv(unittest.TestCase):
         values = {"CRM_DB_DIR": f"{runtime}/db",
                   "CRM_DATA_DIR": f"{runtime}/data",
                   "CRM_CUSTOM_DIR": f"{runtime}/custom",
-                  "CRM_CLIENT_CUSTOM_DIR": f"{runtime}/client/custom"}
+                  "CRM_CLIENT_CUSTOM_DIR": f"{runtime}/client/custom",
+                  **ACCESS}
         values.update(override)
         with open(os.path.join(runtime, "env"), "w") as fh:
             fh.write("# synthetic test env\nCRM_DB_NAME=\n")
@@ -190,6 +197,8 @@ class ScriptEnv(unittest.TestCase):
                              capture_output=True, text=True, env=env, timeout=60,
                              preexec_fn=preexec)
         self.assertNotIn(FAKE_SECRET, res.stdout + res.stderr, "resolved config printed")
+        for value in (BIND, SUBNET_A, SUBNET_B):
+            self.assertNotIn(value, res.stdout + res.stderr, "an access value was printed")
         return res
 
     def docker_calls(self, config=False):
@@ -605,7 +614,8 @@ class TestEnvPathDivergence(ScriptEnv):
     """CRM-001-C2: deploy, backup and restore refuse unless the env file's
     bind-mount sources are exactly $CRM_RUNTIME_DIR/{data,custom,client/custom}."""
 
-    SCRIPTS = [("deploy_custom.sh",), ("backup.sh",), ("restore.sh", "crm-dev-20261110T120000Z")]
+    SCRIPTS = [("deploy_custom.sh",), ("backup.sh",), ("restore.sh", "crm-dev-20261110T120000Z"),
+               ("up.sh",)]
     VARS = {"CRM_DATA_DIR": "data", "CRM_CUSTOM_DIR": "custom", "CRM_CLIENT_CUSTOM_DIR": "client/custom"}
 
     def assert_all_refuse(self, needle, extra_env=None, config_ran=False):
@@ -684,7 +694,7 @@ class TestEnvOverrideAndResolvedMounts(TestEnvPathDivergence):
     def plain_lines(self, **skip):
         values = {"CRM_DB_DIR": f"{self.runtime}/db", "CRM_DATA_DIR": f"{self.runtime}/data",
                   "CRM_CUSTOM_DIR": f"{self.runtime}/custom",
-                  "CRM_CLIENT_CUSTOM_DIR": f"{self.runtime}/client/custom"}
+                  "CRM_CLIENT_CUSTOM_DIR": f"{self.runtime}/client/custom", **ACCESS}
         return [f"{k}={v}" for k, v in values.items() if k not in skip]
 
     def test_shell_override_is_refused(self):
@@ -743,19 +753,172 @@ class TestEnvOverrideAndResolvedMounts(TestEnvPathDivergence):
         self.assertEqual(self.verbs(config=True)[:2], ["config --format json",
                                                        "ps --status running -q crm-app"])
 
-    def test_compose_wrapper_removes_path_variables(self):
+    def test_compose_wrapper_removes_every_env_file_variable(self):
         envlog = os.path.join(self.tmp.name, "docker.env")
+        names = check_access.env_example_names()
+        self.assertTrue(set(self.ALL_VARS) | set(check_access.NAMES) <= set(names))
         env = {"PATH": self.bin + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"),
                "FAKE_DOCKER_LOG": self.log, "FAKE_DOCKER_ENV_LOG": envlog,
                "FAKE_COMPOSE_CONFIG": self.compose_config, "KEEP_ME": "1",
-               **{name: "/etc" for name in self.ALL_VARS}}
+               **{name: "/etc" for name in names}}
         script = f". {shlex.quote(os.path.join(SCRIPTS, 'lib', 'common.sh'))}; " \
                  f"CRM_ENV_FILE={shlex.quote(os.path.join(self.runtime, 'env'))}; compose ps"
         subprocess.run(["bash", "-c", script], env=env, check=True)
         with open(envlog) as fh:
             seen = {line.split("=", 1)[0] for line in fh.read().splitlines() if "=" in line}
         self.assertIn("KEEP_ME", seen)
-        self.assertFalse(seen & set(self.ALL_VARS), "bind-mount variables reached docker")
+        self.assertEqual(seen & set(names), set(), "env-file variables reached docker")
+
+
+def run_common(script, env=None, repo_lib=None):
+    """Run bash code after sourcing scripts/lib/common.sh (or another copy)."""
+    lib = repo_lib or os.path.join(SCRIPTS, "lib", "common.sh")
+    return subprocess.run(["bash", "-c", f". {shlex.quote(lib)}; {script}"], capture_output=True,
+                          text=True, env=env or {"PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+
+
+class TestSharedEnvNames(unittest.TestCase):
+    """CRM-001-LAN round 2: one list of env-file names, read from deploy/env.example."""
+
+    def test_shell_list_equals_env_example(self):
+        res = run_common('printf "%s\\n" "${CRM_ENV_NAMES[@]}"')
+        self.assertEqual(res.returncode, 0, res.stderr)
+        with open(os.path.join(REPO, "deploy", "env.example")) as fh:
+            independent = [l.split("=", 1)[0] for l in fh
+                           if l[:1].isupper() and "=" in l and not l.startswith("#")]
+        self.assertEqual(res.stdout.split(), independent)
+        self.assertEqual(res.stdout.split(), check_access.env_example_names())
+        self.assertEqual(len(independent), 13)
+
+    def test_missing_env_example_fails_closed(self):
+        with tempfile.TemporaryDirectory() as repo:
+            os.makedirs(os.path.join(repo, "scripts", "lib"))
+            lib = os.path.join(repo, "scripts", "lib", "common.sh")
+            shutil.copy(os.path.join(SCRIPTS, "lib", "common.sh"), lib)
+            bin_dir = os.path.join(repo, "bin")
+            os.mkdir(bin_dir)
+            log = os.path.join(repo, "docker.log")
+            with open(os.path.join(bin_dir, "docker"), "w") as fh:
+                fh.write(f"#!/bin/sh\necho \"$*\" >> {shlex.quote(log)}\n")
+            os.chmod(os.path.join(bin_dir, "docker"), stat.S_IRWXU)
+            env = {"PATH": bin_dir + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin")}
+            for call in ("CRM_ENV_FILE=/x; compose up -d", "require_runtime_paths"):
+                with self.subTest(call=call):
+                    res = run_common(call, env=env, repo_lib=lib)
+                    self.assertEqual(res.returncode, 1)
+                    self.assertIn("no variable names could be read", res.stderr)
+            self.assertFalse(os.path.exists(log), "docker never ran")
+
+
+class TestAccessEnforced(ScriptEnv):
+    """CRM-001-LAN round 2 (script-env-override): every script that can start or
+    recreate a service refuses, before any docker call, when the LAN access
+    settings would be bypassed or are invalid. Against the round-1 candidate
+    (49bbbe0) deploy_custom.sh and restore.sh exit 0 and run `up` in each case."""
+
+    STARTERS = ["deploy_custom.sh", "restore.sh", "up.sh"]
+
+    def make_backup(self):
+        res = self.run_script("backup.sh", "dev")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        return os.listdir(os.path.join(self.runtime, "backups"))[0]
+
+    def run_starter(self, script, backup, extra_env=None):
+        open(self.log, "w").close()
+        args = [backup] if script == "restore.sh" else []
+        env = {"FAKE_DOCKER_RUNNING": "1", **(extra_env or {})}
+        return self.run_script(script, "dev", *args, extra_env=env)
+
+    def assert_refused_before_docker(self, needle, extra_env=None):
+        backup = self.make_backup()
+        live = tree_hash(os.path.join(self.runtime, "custom"))
+        for script in self.STARTERS:
+            with self.subTest(script=script):
+                res = self.run_starter(script, backup, extra_env)
+                self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+                self.assertIn(needle, res.stderr)
+                self.assertEqual(self.verbs(), [], "refused before the stack is touched")
+                self.assertEqual(tree_hash(os.path.join(self.runtime, "custom")), live)
+                self.assertFalse([d for d in os.listdir(self.runtime) if ".replaced-" in d])
+
+    def test_good_settings_start_the_stack(self):
+        backup = self.make_backup()
+        for script in self.STARTERS:
+            with self.subTest(script=script):
+                res = self.run_starter(script, backup)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                self.assertIn("access settings OK", res.stdout)
+                self.assertTrue([v for v in self.verbs() if v.startswith("up -d --wait")])
+
+    def test_exported_bind_ip_is_refused(self):
+        self.assert_refused_before_docker("CRM_BIND_IP is set in the environment",
+                                          {"CRM_BIND_IP": "0.0.0.0"})
+
+    def test_exported_allowed_sources_is_refused(self):
+        self.assert_refused_before_docker("CRM_ALLOWED_SOURCES is set in the environment",
+                                          {"CRM_ALLOWED_SOURCES": "0.0.0.0/0"})
+
+    def test_exported_site_url_is_refused(self):
+        self.assert_refused_before_docker("CRM_SITE_URL is set in the environment",
+                                          {"CRM_SITE_URL": "http://127.0.0.1:8180"})
+
+    def test_invalid_env_file_sources_are_refused(self):
+        self.write_env(self.runtime, CRM_ALLOWED_SOURCES="0.0.0.0/0")
+        self.assert_refused_before_docker("failed scripts/check_access.py")
+
+    def test_bind_ip_outside_the_sources_is_refused(self):
+        self.write_env(self.runtime, CRM_ALLOWED_SOURCES=SUBNET_B)
+        self.assert_refused_before_docker("failed scripts/check_access.py")
+
+    def test_every_env_example_name_is_refused_when_exported(self):
+        names = check_access.env_example_names()
+        backup = self.make_backup()
+        for name in names:
+            for script in self.STARTERS + ["backup.sh"]:
+                with self.subTest(name=name, script=script):
+                    res = self.run_starter(script, backup, {name: "x"})
+                    self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+                    self.assertIn(f"{name} is set in the environment", res.stderr)
+                    self.assertEqual(self.docker_calls(config=True), [])
+
+    def test_env_file_other_than_the_runtime_env_is_refused(self):
+        other = os.path.join(self.tmp.name, "other.env")
+        shutil.copy(os.path.join(self.runtime, "env"), other)
+        backup = self.make_backup()
+        for value in (other, self.runtime + "/env.bak"):
+            for script in self.STARTERS + ["backup.sh"]:
+                with self.subTest(env_file=value, script=script):
+                    res = self.run_starter(script, backup, {"CRM_ENV_FILE": value})
+                    self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+                    self.assertIn(f"the env file must be {self.runtime}/env", res.stderr)
+                    self.assertEqual(self.docker_calls(config=True), [])
+        res = self.run_starter("up.sh", backup, {"CRM_ENV_FILE": os.path.join(self.runtime, "env")})
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+
+class TestUp(ScriptEnv):
+    """scripts/up.sh dev: guard, path checks and access check, then up -d --wait."""
+
+    def test_runs_the_checks_then_up(self):
+        res = self.run_script("up.sh", "dev")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("access settings OK", res.stdout)
+        self.assertEqual(self.verbs(config=True), ["config --format json", "up -d --wait"])
+
+    def test_extra_arguments_are_appended(self):
+        res = self.run_script("up.sh", "dev", "--force-recreate", "crm-app")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.verbs(), ["up -d --wait --force-recreate crm-app"])
+
+    def test_missing_access_setting_is_refused(self):
+        for name in check_access.NAMES:
+            with self.subTest(name=name):
+                open(self.log, "w").close()
+                self.write_env(self.runtime, **{name: None})
+                res = self.run_script("up.sh", "dev")
+                self.assertEqual(res.returncode, 1)
+                self.assertIn(f"must set {name} exactly once (found 0)", res.stderr)
+                self.assertEqual(self.verbs(), [])
 
 
 class TestRemoveTree(unittest.TestCase):
