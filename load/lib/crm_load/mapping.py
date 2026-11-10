@@ -35,7 +35,7 @@ EXCEPTION_CODES = frozenset({
     "synthetic_enum_mapped",
     # CRM-008
     "owner_required_unresolved", "task_email_imported_as_task", "value_too_long",
-    "email_address_invalid", "email_from_invalid",
+    "email_address_invalid", "email_from_invalid", "service_type_refused",
 })
 # Codes that refuse the record: it is never sent (CRM-008).
 REFUSING_CODES = frozenset({"owner_required_unresolved", "email_from_invalid"})

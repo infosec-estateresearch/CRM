@@ -216,6 +216,10 @@ class Loader:
         self.max_length = {e: dict(v) for e, v in mapping.get("maxLength", {}).items() if e != "note"}
         # CRM-008 round 3: required target attributes; an over-length one refuses the record.
         self.required = {e: set(v) for e, v in mapping.get("requiredAttributes", {}).items() if e != "note"}
+        # CRM-008 round 4: records refused by upsert in this run, (object, sfId); every later
+        # write for them (second passes included) is skipped. ServiceType refusals by value.
+        self.refused_records = set()
+        self.refused_service_types = set()
 
     # ---------------------------------------------------------------- index
     def _attrs(self, entity):
@@ -287,18 +291,25 @@ class Loader:
         t[action] += 1
 
     # ---------------------------------------------------------------- upsert
+    def _refuse(self, obj, sf_id, entity, key, reason):
+        """The record is not sent: counted once in skipped, remembered so no later write is made."""
+        self.objects[obj]["skipped"][reason] += 1
+        if entity == "ServiceType":
+            self.refused_service_types.add(key)
+        else:
+            self.refused_records.add((obj, sf_id))
+        return None
+
     def upsert(self, phase, obj, sf_id, entity, key, attrs, create=True):
         attrs = self._limit_lengths(obj, sf_id, entity, attrs)
         if attrs is None:
             # A required attribute is over length: null would be refused (400 required). Never sent.
-            self.objects[obj]["skipped"]["value_too_long"] += 1
-            return None
+            return self._refuse(obj, sf_id, entity, key, "value_too_long")
         blank_enum = [a for a in attrs if f"{entity}.{a}" in self.no_blank and _norm(attrs[a]) is None]
         if blank_enum:
             # No "" option: null and "" are refused (400 valid) and omitting stores the default.
             self.exception(obj, sf_id, "enum_blank_unrepresentable")
-            self.objects[obj]["skipped"]["enum_blank_unrepresentable"] += 1
-            return None
+            return self._refuse(obj, sf_id, entity, key, "enum_blank_unrepresentable")
         attrs = self._known_refusals(obj, sf_id, attrs)
         existing = self.index[entity].get(key)
         text = self.text_attrs.get(entity, set())
@@ -497,7 +508,8 @@ class Loader:
         for r in accounts:
             attrs, exc = m.account_parent(r, ctx)
             self._record_exc("Account", r, exc)
-            if r["Id"] in self.index["Account"]:
+            # A record refused in pass 1 gets no write at all, not even its parent link.
+            if r["Id"] in self.index["Account"] and ("Account", r["Id"]) not in self.refused_records:
                 self._upsert_quiet("account_parent", "Account", r, "Account", attrs)
         for r in self._source("Contact"):
             attrs, exc = m.contact(r, ctx)
@@ -506,6 +518,11 @@ class Loader:
         for r in opps:
             attrs, exc = m.opportunity(r, ctx)
             self._record_exc("Opportunity", r, exc)
+            service = r.get("Opportunity_Service__c")
+            if isinstance(service, str) and service.strip() in self.refused_service_types:
+                # Its ServiceType was refused: no link, and a code on this Opportunity (id only).
+                attrs["serviceTypeId"] = None
+                self.exception("Opportunity", r["Id"], "service_type_refused")
             self.upsert("opportunity", "Opportunity", r["Id"], "Opportunity", r["Id"], attrs)
         self._contact_roles(ctx)
         tasks = self._source("Task")
@@ -584,6 +601,8 @@ class Loader:
                 role = ""
             by_opp.setdefault(opp, {})[cid] = role
         for opp, contacts in sorted(by_opp.items()):
+            if ("Opportunity", opp) in self.refused_records:
+                continue          # the Opportunity was refused in this run: its roles are not written
             attrs = {"contactsIds": sorted(contacts),
                      "contactsColumns": {c: {"role": role} for c, role in sorted(contacts.items())}}
             self.upsert("contact_roles", "OpportunityContactRole", opp, "Opportunity", opp, attrs, create=False)

@@ -1825,6 +1825,72 @@ class TestCrm008(Base):
                           and w[2].get("name", before) != before])
         self.assertEqual(self.report()["objects"]["Account"]["skipped"]["value_too_long"], 1)
 
+    def test_refused_existing_account_gets_no_write_in_any_pass(self):
+        # Auditor probe (round 4): an existing Account re-loaded with Name of 250 characters,
+        # a changed ParentId and a changed city.
+        snap, espo = self.load(fx.org(), "p1")
+        acc = espo.by_sf("Account")[fx.A[2]]
+        before = dict(acc)
+        data = fx.org()
+        data["Account"][2]["Name"] = "N" * 250
+        data["Account"][2]["ParentId"] = fx.A[0]                     # was A[1]
+        data["Account"][2]["BillingCity"] = "Elsewhere"
+        data["Account"][2]["ShippingCity"] = "Elsewhere"
+        n_req = len(espo.requests)
+        self.assertEqual(self.run_load(snap=write_snapshot(os.path.join(self.tmp, "p2"), data=data),
+                                       espo=espo), 0, self.last_err)
+        self.assertEqual([r for r in espo.requests[n_req:] if r[0] != "GET"], [])
+        self.assertEqual(espo.by_sf("Account")[fx.A[2]], before)
+        acc_rep = self.report()["objects"]["Account"]
+        self.assertEqual(acc_rep["skipped"]["value_too_long"], 1)
+        self.assertEqual(acc_rep["targets"]["Account"]["updated"], 0)
+        self.assertEqual(acc_rep.get("second_pass", {}).get("updated", 0), 0)
+        self.assertIn("value_too_long", self.codes(fx.A[2]))
+
+    def test_refused_existing_opportunity_gets_no_contact_role_write(self):
+        snap, espo = self.load(fx.org(), "r1")
+        before = dict(espo.by_sf("Opportunity")[fx.O[0]])
+        data = fx.org()
+        data["Opportunity"][0]["StageName"] = None                   # Opportunity.stage: refused
+        data["OpportunityContactRole"][1]["ContactId"] = fx.C[2]    # O[0] gains a role contact
+        n_req = len(espo.requests)
+        self.assertEqual(self.run_load(snap=write_snapshot(os.path.join(self.tmp, "r2"), data=data),
+                                       espo=espo), 0, self.last_err)
+        self.assertEqual([r for r in espo.requests[n_req:] if r[0] != "GET"], [])
+        self.assertEqual(espo.by_sf("Opportunity")[fx.O[0]], before)
+        rep = self.report()["objects"]
+        self.assertEqual(rep["Opportunity"]["skipped"]["enum_blank_unrepresentable"], 2)   # O[0], O[5]
+        self.assertEqual(rep["OpportunityContactRole"]["targets"].get("Opportunity", {}).get("updated", 0), 0)
+
+    def test_refused_service_type_marks_every_opportunity_naming_it(self):
+        data = fx.org()
+        named = []
+        for r in data["Opportunity"]:
+            if r.get("Opportunity_Service__c") == "Service X":
+                r["Opportunity_Service__c"] = "S" * 151
+                if r.get("IsDeleted") is not True:
+                    named.append(r["Id"])
+        data["Opportunity"][5]["Opportunity_Service__c"] = " " + "S" * 151      # padded: same value
+        named.append(data["Opportunity"][5]["Id"])
+        self.assertGreater(len(named), 2)
+        _, espo = self.load(data, "st")
+        lines = [e for e in self.exceptions() if e["reason"] == "service_type_refused"]
+        self.assertEqual(sorted(e["sfId"] for e in lines), sorted(named))
+        self.assertEqual({e["object"] for e in lines}, {"Opportunity"})
+        self.assertFalse([e for e in lines if set(e) - {"object", "sfId", "reason"}])     # id only
+        opps = espo.by_sf("Opportunity")
+        for sf_id in named:
+            if sf_id in opps:
+                self.assertIsNone(opps[sf_id]["serviceTypeId"], sf_id)
+        # An Opportunity naming an accepted ServiceType gets no such code.
+        y = [r["Id"] for r in data["Opportunity"] if r.get("Opportunity_Service__c") == "Service Y"]
+        self.assertTrue(y)
+        for sf_id in y:
+            self.assertNotIn("service_type_refused", self.codes(sf_id))
+            self.assertIsNotNone(opps[sf_id]["serviceTypeId"])
+        self.assertEqual(self.report()["objects"]["Opportunity"]["exceptions"]["service_type_refused"], len(named))
+        self.assertNotIn("S" * 151, json.dumps(self.exceptions()))
+
     def test_over_length_optional_value_clears_the_field_on_update(self):
         snap, espo = self.load(fx.org(), "c1")
         self.assertIsNotNone(espo.by_sf("Account")[fx.A[0]]["billingAddressCity"])

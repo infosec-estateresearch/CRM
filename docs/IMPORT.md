@@ -10,13 +10,13 @@
 |---|---|
 | `scripts/load.sh` | The operator wrapper. Root only. |
 | `load/bin/crm-load.py` | The entry point, run as `python3 -I -B`. Standard library only. |
-
-**Usage note.** `load/bin/crm-load.py` and `scripts/crm_api.py` have the executable bit but no shebang, by design. Always run them through the interpreter as `python3 -I -B <file> …`, never as `./<file>`. `-I` keeps the environment and the current directory off the import path, and `-B` writes no `.pyc` files.
 | `load/lib/crm_load/` | Gate, reader, mapping, upsert engine, report and transport. |
 | `load/contract/mapping.json` | The versioned mapping (`mappingVersion` 2, `contractVersion` 4). |
 | `load/contract/lead_source_map.json` | The PO-approved D7 LeadSource table. It starts empty. |
 | `load/contract/name_patterns.json` | The D8 enquiry-name patterns. The table ships **empty** (PL decision): until patterns are added, every enquiry gets `name_unparsed` and the name parts stay empty. The patterns are derived after the load from a counts-only analysis of the loaded names, then added by the PL; a re-run fills the parts. |
 | `load/examples/role-map.example.json` | An example Profile/Role → team/role table, with placeholders only. |
+
+**Usage note.** `load/bin/crm-load.py` and `scripts/crm_api.py` have the executable bit but no shebang, by design. Always run them through the interpreter as `python3 -I -B <file> …`, never as `./<file>`. `-I` keeps the environment and the current directory off the import path, and `-B` writes no `.pyc` files.
 
 ## Operator procedure
 
@@ -170,7 +170,7 @@ The full mapping is in `load/contract/mapping.json`. The decisions are in `MIGRA
 
 - **Length limits.** `mapping.json` `maxLength` holds the target limits: Account `name` 249; address city, state and country 100 and postal code 40; Contact `title` 255 (raised in the custom Contact entityDefs); `sfStageName`, `sfLeadSource`, `clientReference` and `caseNumber` 100; ServiceType `name` 150; phone numbers 36. Before sending, each such value (trimmed) is checked. A value that is too long is sent as **null** and recorded as `value_too_long` with the record id and the **attribute name** only. It is never truncated. A phone number longer than 36 is dropped with `phone_rejected`.
   - **Attribute names are qualified** by the target entity, for example `Account.billingAddressCity`, `ServiceType.name` or `Opportunity.sfLeadSource`. A ServiceType is reported against the first Opportunity that names it, so `ServiceType.name` on an Opportunity line means the service-type name was too long, not the Opportunity's own name.
-  - **Required attributes refuse the record.** Account `name` and ServiceType `name` are required in EspoCRM (null is `400 required`). `mapping.json` `requiredAttributes` lists them. If one of them is too long, the record is **not sent** (on create or update). It gets `value_too_long` with its attribute name and is counted in `skipped.value_too_long`. An Account already in EspoCRM keeps its stored name. A refused ServiceType is counted under `objects.Opportunity.skipped.value_too_long`. Opportunities naming it are still written, with `serviceTypeId` empty.
+  - **Required attributes refuse the record.** Account `name` and ServiceType `name` are required in EspoCRM (null is `400 required`). `mapping.json` `requiredAttributes` lists them. If one of them is too long, the record is **not sent** (on create or update). It gets `value_too_long` with its attribute name and is counted in `skipped.value_too_long`. An Account already in EspoCRM keeps its stored name. A refused ServiceType is counted under `objects.Opportunity.skipped.value_too_long`. Opportunities naming it are still written, with `serviceTypeId` empty, and each gets `service_type_refused`. A refused record (an over-length required attribute, or `enum_blank_unrepresentable`) gets **no write at all** in that run: no parent link (Account second pass) and no contact roles (Opportunity). It is counted once, in `skipped`, never also as `updated`.
   - **Update clears the field.** A non-required over-length value is also sent as null on **update**, so it **clears** whatever that field held in EspoCRM (for example, a value stored by an earlier run before the source value grew).
 - **Email addresses.** Each address is validated against an approximation of EspoCRM's check (PHP `FILTER_VALIDATE_EMAIL`). The rule is deliberately **stricter** than PHP's, so a borderline address is refused here rather than sent and refused by the server. Some addresses PHP would accept are therefore dropped. On the real extract, the PL counted (counts only) **3** addresses dropped with `email_address_invalid` (2 To, 1 Cc) and **0** `from` addresses refused. An address is valid only if it is ASCII, at most 254 characters, has no whitespace, and is `local@domain` where:
   - the local part is a dot-atom (letters, digits and ``!#$%&'*+/=?^_`{|}~-``, single dots not at either end), at most 64 characters, never quoted;
@@ -209,6 +209,7 @@ There is one line per `{object, sfId, reason}`. It holds ids and codes only; a `
 | `value_too_long` | A value exceeds the target `maxLength`: sent as null (create and update), never truncated. For a required attribute (Account and ServiceType `name`), the record is refused instead and counted in `skipped.value_too_long`. The line carries `attributes` (qualified names only). |
 | `email_address_invalid` | An invalid To or Cc address was dropped from the list. |
 | `email_from_invalid` | The EmailMessage `from` is blank or invalid: the record is not written. |
+| `service_type_refused` | (Opportunity) The ServiceType this Opportunity names was refused (`value_too_long` on ServiceType `name`). The Opportunity is written with `serviceTypeId` null. The line carries the record id only. |
 | `account_unresolved` | `AccountId` doesn't resolve, for example because the account is soft-deleted. |
 | `parent_unresolved` | The Account `ParentId` doesn't resolve. |
 | `contact_unresolved` / `opportunity_unresolved` | The contact role or relation endpoint doesn't resolve. |
