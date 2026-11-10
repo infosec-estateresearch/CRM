@@ -229,25 +229,63 @@ cmd_live() {
     run_container crm-migrate "$mode" "${args[@]}"
 }
 
+snapshot_root() {
+    # snapshot_root <snapshot-id>: print the directory that holds the snapshot's manifest.json
+    # (CRM-002-W). Exactly two layouts are accepted; anything else is refused:
+    #   client-credentials: <id>/manifest.json, and neither <id>/run nor <id>/input;
+    #   legacy (soap-legacy): <id>/run/manifest.json, no <id>/manifest.json, and the top level
+    #                         holds only run/ and, optionally, input/ (the waiver copy).
+    local dir="$SNAPSHOTS/$1" entry name
+    [[ -d "$dir" && ! -L "$dir" ]] || die "snapshot not found"
+    local top=0 run=0 input=0
+    [[ -e "$dir/manifest.json" || -L "$dir/manifest.json" ]] && top=1
+    [[ -e "$dir/run" || -L "$dir/run" ]] && run=1
+    [[ -e "$dir/input" || -L "$dir/input" ]] && input=1
+    if [[ $top -eq 1 && $run -eq 0 && $input -eq 0 ]]; then
+        [[ -f "$dir/manifest.json" && ! -L "$dir/manifest.json" ]] ||
+            die "snapshot layout not recognised: manifest.json is not a regular file"
+        printf '%s\n' "$dir"
+        return 0
+    fi
+    [[ $top -eq 0 && $run -eq 1 ]] ||
+        die "snapshot layout not recognised: expected <id>/manifest.json or <id>/run/manifest.json, not both"
+    [[ -d "$dir/run" && ! -L "$dir/run" ]] || die "snapshot layout not recognised: run is not a directory"
+    [[ -f "$dir/run/manifest.json" && ! -L "$dir/run/manifest.json" ]] ||
+        die "snapshot layout not recognised: run/manifest.json is missing"
+    if [[ $input -eq 1 ]]; then
+        [[ -d "$dir/input" && ! -L "$dir/input" ]] || die "snapshot layout not recognised: input is not a directory"
+    fi
+    while IFS= read -r -d '' entry; do
+        name="${entry##*/}"
+        [[ "$name" == run || "$name" == input ]] ||
+            die "snapshot layout not recognised: unexpected top-level entry in a legacy snapshot"
+    done < <(find "$dir" -mindepth 1 -maxdepth 1 -print0)
+    printf '%s\n' "$dir/run"
+}
+
 cmd_reconcile() {
     [[ $# -ge 1 && $# -le 2 ]] || usage
-    local id
+    local id root roots=()
     for id in "$@"; do
         require run-id "$id"
         [[ "$id" == *-extract ]] || die "reconcile inputs must be extract snapshots"
         [[ -d "$SNAPSHOTS/$id" && ! -L "$SNAPSHOTS/$id" ]] || die "snapshot not found"
+        root="$(snapshot_root "$id")" || exit 1
+        # The whole snapshot tree (including a legacy input/ waiver copy) must be sealed.
         require sealed "$SNAPSHOTS/$id"
-        require verify-manifest "$SNAPSHOTS/$id"
+        require verify-manifest "$root"
+        roots+=("$root")
     done
     command -v docker >/dev/null || die "docker is required"
     new_run_dir reconcile
     # Temporary input copy inside the root-only tree, readable by the run UID only for
-    # the duration of the run, then removed before sealing.
+    # the duration of the run, then removed before sealing. Only the directory holding
+    # manifest.json is copied; a legacy snapshot's input/ (waiver) is not.
     mkdir -m 0700 -- "$RUN_DIR/input"
-    cp -R -P -- "$SNAPSHOTS/$1" "$RUN_DIR/input/current"
+    cp -R -P -- "${roots[0]}" "$RUN_DIR/input/current"
     local args=(--snapshot /out/input/current --out /out/report)
     if [[ $# -eq 2 ]]; then
-        cp -R -P -- "$SNAPSHOTS/$2" "$RUN_DIR/input/previous"
+        cp -R -P -- "${roots[1]}" "$RUN_DIR/input/previous"
         args+=(--previous /out/input/previous)
     fi
     chown -R --no-dereference "$RUN_UID:$RUN_GID" -- "$RUN_DIR/input"
