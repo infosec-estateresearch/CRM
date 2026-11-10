@@ -160,7 +160,20 @@ The overall status is the worst object status.
   4. **seals** the directory: `chown -R root:root`, directories `0700`, files `0400`. It refuses symlinks and special files;
   5. re-verifies every checksum in the manifest. If the seal or the verification fails, it exits with 20 or 21.
 - Inside the container the tool sets umask `077` and creates files `0600` with `O_EXCL`. It never overwrites a file and only writes into an empty directory.
-- `reconcile` copies its input snapshots into `<run>/input/` (root-only tree, readable by the run UID during the run), and deletes that copy before sealing.
+- `reconcile` copies its input snapshots into `<run>/input/` (root-only tree, readable by the run UID during the run), and deletes that copy before sealing. It copies only the directory that holds `manifest.json` (see Snapshot layouts), never a legacy waiver copy.
+
+### Snapshot layouts (CRM-002-W)
+
+A sealed `extract` snapshot `snapshots/<id>/` has exactly one of two layouts:
+
+| Layout | Produced by | `manifest.json` is at | Top level |
+|---|---|---|---|
+| Client-credentials | `migrate.sh extract` | `<id>/manifest.json` | the run files; neither `run/` nor `input/` |
+| Legacy | `migrate.sh --auth soap-legacy extract` | `<id>/run/manifest.json` | only `run/` and, if a waiver was used, `input/` (holding `waiver.json`); no `<id>/manifest.json` |
+
+The directory that holds `manifest.json` is the **snapshot root**. `migrate.sh reconcile` finds it with `snapshot_root`. Any other shape is refused with "snapshot layout not recognised". This includes both manifests at once, `input/` next to a top-level manifest, an extra top-level entry in a legacy snapshot (hidden entries count), a missing manifest, and a symlinked or non-regular `run`, `input` or `manifest.json`. For each input, `reconcile` checks that the whole `<id>` tree is sealed. It then re-verifies the manifest in the snapshot root and copies only the snapshot root, as `input/current` or `input/previous`. The inputs must still be `*-extract` snapshots, and the two inputs may have different layouts.
+
+**Downstream consumers**, such as the CRM-006R importer, must find `manifest.json` by the same rule. They must refuse every other layout, and must not read `input/waiver.json` as snapshot data.
 - Secrets are kept in `/srv/CRM/runtime/migrate/env` (`root:root`, `0600`), which only the live service reads, through `env_file`.
 - `migrate.sh credentials` prompts with `read -rs`, writes a temporary file in the same directory with mode `0600`, then runs `mv -T`. It never echoes, logs or passes the values as arguments.
 - `migrate.sh` refuses to run if any variable named in `env.example` is exported in the shell. It runs `docker compose` under `env -u <every name>` and with `--env-file /dev/null`.

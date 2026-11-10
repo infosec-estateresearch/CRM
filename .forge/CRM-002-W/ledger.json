@@ -1,0 +1,174 @@
+{
+  "base": "forge/CRM-002-V",
+  "base_sha": "8389cab297fc1f1efc72bcd082f26a330c293c60",
+  "branch": "forge/CRM-002-W",
+  "candidate": "47a8b12e01cb5f04a5f2b1118053dd588363016d",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-10T19:59:25Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T19:59:25Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T20:03:23Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r1: snapshot_root helper, cmd_reconcile copies only the manifest root; tests for both layouts and refusals; 323 OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T20:03:44Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "47a8b12e01cb5f04a5f2b1118053dd588363016d",
+      "t": "2026-11-10T20:03:44Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "47a8b12e01cb5f04a5f2b1118053dd588363016d",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-10T20:03:45Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "47a8b12e01cb5f04a5f2b1118053dd588363016d",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-10T20:03:45Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "47a8b12e01cb5f04a5f2b1118053dd588363016d",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-10T20:03:45Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-10T20:06:59Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-10T20:06:59Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-10T20:06:59Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "47a8b12e01cb5f04a5f2b1118053dd588363016d",
+      "findings": [
+        {
+          "key": "doc-heading-placement",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-10T20:07:14Z",
+      "type": "result"
+    },
+    {
+      "candidate": "47a8b12e01cb5f04a5f2b1118053dd588363016d",
+      "findings": [
+        {
+          "key": "misleading-refusal-text",
+          "severity": "advisory"
+        },
+        {
+          "key": "docs-section-splits-list",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-10T20:07:14Z",
+      "type": "result"
+    },
+    {
+      "candidate": "47a8b12e01cb5f04a5f2b1118053dd588363016d",
+      "findings": [],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-10T20:07:14Z",
+      "type": "result"
+    },
+    {
+      "note": "All PASS at round 1; doc heading placement and refusal wording advisories.",
+      "outcome": "DELIVERED",
+      "t": "2026-11-10T20:07:14Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-002-W",
+  "host": "docker1",
+  "known_commit": "8389cab297fc1f1efc72bcd082f26a330c293c60",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-002-W",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-002-W",
+  "wo": "CRM-002-W",
+  "worktree": "/srv/CRM/worktrees/CRM-002-W"
+}
