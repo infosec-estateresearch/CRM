@@ -406,6 +406,11 @@
     "notMapped": {
         "EmailMessage.MessageIdentifier": "EspoCRM 10.0.12 replaces messageId with dummy:<id> on every API write; it cannot be set, so it is neither sent nor compared. ThreadIdentifier goes to sfThreadIdentifier."
     },
+    "requiredAttributes": {
+        "note": "CRM-008: target attributes with required: true (EspoCRM 10.0.12 core) that have a maxLength. An over-length value here refuses the record (value_too_long, counted in skipped.value_too_long) instead of being sent as null.",
+        "ServiceType": ["name"],
+        "Account": ["name"]
+    },
     "maxLength": {
         "note": "CRM-008: target maxLength (EspoCRM 10.0.12 core, PL-verified on crm-dev, and custom entityDefs). A trimmed value longer than this is sent as null with value_too_long (attribute name only); a longer phone number is dropped with phone_rejected. Never truncated.",
         "ServiceType": {

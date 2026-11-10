@@ -354,6 +354,8 @@ class FakeEspo:
     NULL_ACCEPTED = {("Meeting", "meetingType")}     # PL-verified: explicit null accepted, reads back null
     # 10.0.12 refusals (PL-verified, CRM-008). assignedUser is required on these entities.
     OWNER_REQUIRED = ("Task", "Call", "Meeting")
+    # Core required: true varchar attributes (10.0.12): null, "" or blank is 400 required.
+    REQUIRED = {"Account": ("name",), "ServiceType": ("name",)}
     # varchar maxLength (same values as mapping.json maxLength, copied so a wrong table there
     # is caught here). Every phone number is limited to PHONE_MAX_LENGTH.
     MAX_LENGTH = {"ServiceType": {"name": 150},
@@ -477,7 +479,7 @@ class FakeEspo:
         return 405, None
 
     # Each check can be switched off (mutation tests prove each one is exercised).
-    CHECKS = ("owner", "max_length", "currency", "email")
+    CHECKS = ("owner", "required", "max_length", "currency", "email")
 
     def _refused(self, entity, body, create, current=None):
         """The 400 body EspoCRM 10.0.12 returns for ``body``, or None (CRM-008 refusals)."""
@@ -485,6 +487,10 @@ class FakeEspo:
         if "owner" in checks and entity in self.OWNER_REQUIRED and \
                 (create or "assignedUserId" in body) and body.get("assignedUserId") in (None, ""):
             return {"field": "assignedUser", "type": "required"}
+        if "required" in checks:
+            for attr in self.REQUIRED.get(entity, ()):
+                if (create or attr in body) and (not isinstance(body.get(attr), str) or not body[attr].strip()):
+                    return {"field": attr, "type": "required"}
         if "max_length" in checks:
             for attr, limit in self.MAX_LENGTH.get(entity, {}).items():
                 v = body.get(attr)

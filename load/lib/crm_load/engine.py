@@ -208,11 +208,14 @@ class Loader:
                                         "represented_by_email_message": 0, "parent_soft_deleted": 0,
                                         "user_not_human": 0, "value_shape": 0,
                                         "enum_blank_unrepresentable": 0,
-                                        "owner_required_unresolved": 0, "email_from_invalid": 0},
+                                        "owner_required_unresolved": 0, "email_from_invalid": 0,
+                                        "value_too_long": 0},
                             "targets": {}, "exceptions": {}} for o in SOURCE_OBJECTS}
         self.flagged = {}
         # CRM-008: target maxLength per entity and attribute (mapping.json maxLength).
         self.max_length = {e: dict(v) for e, v in mapping.get("maxLength", {}).items() if e != "note"}
+        # CRM-008 round 3: required target attributes; an over-length one refuses the record.
+        self.required = {e: set(v) for e, v in mapping.get("requiredAttributes", {}).items() if e != "note"}
 
     # ---------------------------------------------------------------- index
     def _attrs(self, entity):
@@ -245,17 +248,20 @@ class Loader:
             ex = self.objects[obj]["exceptions"]
             ex[reason] = ex.get(reason, 0) + 1
         if attribute is not None:
-            # The attribute name only (value_too_long), never the value.
+            # The attribute name only (value_too_long, qualified Entity.attribute), never the value.
             self.exceptions[k] = sorted(set(self.exceptions[k] or []) | {attribute})
 
     def _limit_lengths(self, obj, sf_id, entity, attrs):
         """CRM-008 change 5: a varchar, email or phone value longer than the target maxLength
-        (trimmed, as stored) is sent as null with value_too_long and its attribute name; a
-        phone number is dropped with phone_rejected. Never truncated."""
+        (trimmed, as stored) is sent as null with value_too_long and its qualified attribute
+        name (Entity.attribute); a phone number is dropped with phone_rejected. Never truncated.
+        An over-length required attribute (requiredAttributes) refuses the record: None."""
         limits = self.max_length.get(entity)
         if not limits:
             return attrs
         out = dict(attrs)
+        required = self.required.get(entity, set())
+        refused = False
         for a, limit in limits.items():
             if a == "phoneNumber" and a in out and isinstance(out[a], str) and \
                     len(out[a].strip()) > limit:
@@ -271,8 +277,9 @@ class Loader:
                     out[a] = kept or None
             elif isinstance(out.get(a), str) and len(out[a].strip()) > limit:
                 out[a] = None
-                self.exception(obj, sf_id, "value_too_long", a)
-        return out
+                self.exception(obj, sf_id, "value_too_long", f"{entity}.{a}")
+                refused = refused or a in required
+        return None if refused else out
 
     def _count(self, obj, entity, action):
         t = self.objects[obj]["targets"].setdefault(entity, {"created": 0, "updated": 0, "unchanged": 0,
@@ -282,6 +289,10 @@ class Loader:
     # ---------------------------------------------------------------- upsert
     def upsert(self, phase, obj, sf_id, entity, key, attrs, create=True):
         attrs = self._limit_lengths(obj, sf_id, entity, attrs)
+        if attrs is None:
+            # A required attribute is over length: null would be refused (400 required). Never sent.
+            self.objects[obj]["skipped"]["value_too_long"] += 1
+            return None
         blank_enum = [a for a in attrs if f"{entity}.{a}" in self.no_blank and _norm(attrs[a]) is None]
         if blank_enum:
             # No "" option: null and "" are refused (400 valid) and omitting stores the default.

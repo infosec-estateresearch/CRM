@@ -826,9 +826,9 @@ class TestServerBehaviour(Base):
                            "invalid": False}])
         self.assertEqual(f.send("POST", "Contact", body={"sfId": "x2", "phoneNumber": "n/a"})[0], 400)
         intl = FakeEspo(phone_international=True)
-        self.assertEqual(intl.send("POST", "Account", body={"sfId": "a", "phoneNumber": "01632 960000"}),
+        self.assertEqual(intl.send("POST", "Account", body={"sfId": "a", "name": "a", "phoneNumber": "01632 960000"}),
                          (400, {"field": "phoneNumber", "type": "valid"}))
-        _st, doc = intl.send("POST", "Account", body={"sfId": "b", "phoneNumber": "+44 1632 960000"})
+        _st, doc = intl.send("POST", "Account", body={"sfId": "b", "name": "b", "phoneNumber": "+44 1632 960000"})
         self.assertEqual(intl.db["Account"][doc["id"]]["phoneNumber"], "+441632960000")
         _st, doc = f.send("POST", "Email", body={"sfId": "e", "from": "N <a@example.test>", "messageId": "<m>"})
         self.assertIsNone(f.db["Email"][doc["id"]]["from"])
@@ -1278,7 +1278,7 @@ class TestFidelity(Base):
     def test_omitted_blank_would_store_the_default(self):
         """The fake models the server: an omitted enum is the default, an explicit null refused."""
         f = FakeEspo()
-        _st, doc = f.send("POST", "Account", body={"sfId": "a"})
+        _st, doc = f.send("POST", "Account", body={"sfId": "a", "name": "a"})
         self.assertEqual(f.db["Account"][doc["id"]]["learningPlatformAccess"], "No")
         self.assertEqual(f.send("POST", "Opportunity", body={"sfId": "o", "stage": None})[0], 400)
         self.assertEqual(f.send("POST", "Opportunity", body={"sfId": "o", "stage": ""})[0], 400)
@@ -1761,26 +1761,106 @@ class TestCrm008(Base):
         data["Contact"][0]["Title"] = "T" * 255            # fits the raised limit
         data["Contact"][1]["Title"] = "T" * 256
         data["Contact"][0]["Phone"] = "0" * 37
-        data["Account"][0]["Name"] = "N" * 250
+        data["Account"][2]["ShippingCity"] = "B" * 101
         data["Account"][1]["Phone"] = "1" * 37
         _, espo = self.load(data, "len")
         c0 = espo.by_sf("Contact")[fx.C[0]]
         self.assertIsNone(c0["addressPostalCode"])
         self.assertEqual(c0["title"], "T" * 255)
         self.assertIsNone(espo.by_sf("Contact")[fx.C[1]]["title"])
-        self.assertIsNone(espo.by_sf("Account")[fx.A[0]]["name"])
+        self.assertIsNone(espo.by_sf("Account")[fx.A[2]]["billingAddressCity"])
         self.assertIsNone(espo.by_sf("Account")[fx.A[1]]["phoneNumber"])
         self.assertFalse([p for p in c0.get("phoneNumberData") or [] if len(p["phoneNumber"]) > 36])
         lines = [e for e in self.exceptions() if e["reason"] == "value_too_long"]
         self.assertEqual({(e["sfId"], tuple(e["attributes"])) for e in lines},
-                         {(fx.C[0], ("addressPostalCode",)), (fx.C[1], ("title",)),
-                          (fx.A[0], ("name",))})
+                         {(fx.C[0], ("Contact.addressPostalCode",)), (fx.C[1], ("Contact.title",)),
+                          (fx.A[2], ("Account.billingAddressCity",))})
+        # Not required: the record is still written, so nothing is skipped.
+        self.assertEqual({o: v["skipped"]["value_too_long"] for o, v in self.report()["objects"].items()
+                          if v["skipped"]["value_too_long"]}, {})
         self.assertIn("phone_rejected", self.codes(fx.C[0]))
         self.assertIn("phone_rejected", self.codes(fx.A[1]))
         with open(os.path.join(self.last_dir, "exceptions.jsonl")) as fh:
             raw = fh.read()
         self.assertNotIn("P" * 41, raw)
-        self.assertNotIn("N" * 250, raw)
+        self.assertNotIn("B" * 101, raw)
+
+    def test_over_length_required_name_refuses_the_record(self):
+        data = fx.org()
+        data["Account"][0]["Name"] = "N" * 250                       # Account.name 249, required
+        for r in data["Opportunity"]:
+            if r.get("Opportunity_Service__c") == "Service X":
+                r["Opportunity_Service__c"] = "S" * 151              # ServiceType.name 150, required
+        data["Opportunity"][0]["LeadSource"] = "L" * 101             # Opportunity.sfLeadSource: not required
+        _, espo = self.load(data, "req")
+        self.assertNotIn(fx.A[0], espo.by_sf("Account"))
+        self.assertFalse([w for w in espo.writes if w[1] == "Account" and w[2].get("sfId") == fx.A[0]])
+        self.assertEqual(sorted(r["name"] for r in espo.db["ServiceType"].values()), ["Service Y"])
+        self.assertFalse([w for w in espo.writes if w[1] == "ServiceType" and w[2].get("name") is None])
+        o0 = espo.by_sf("Opportunity")[fx.O[0]]                      # the Opportunity is still written
+        self.assertIsNone(o0["serviceTypeId"])
+        self.assertIsNone(o0["sfLeadSource"])
+        self.assertEqual(o0["name"], data["Opportunity"][0]["Name"])
+        lines = {(e["object"], e["sfId"]): e["attributes"] for e in self.exceptions()
+                 if e["reason"] == "value_too_long"}
+        # Qualified names: O[0] carries the ServiceType it first named, never a long Opportunity name.
+        self.assertEqual(lines, {("Account", fx.A[0]): ["Account.name"],
+                                 ("Opportunity", fx.O[0]): ["Opportunity.sfLeadSource", "ServiceType.name"]})
+        rep = self.report()
+        self.assertEqual(rep["objects"]["Account"]["skipped"]["value_too_long"], 1)
+        self.assertEqual(rep["objects"]["Opportunity"]["skipped"]["value_too_long"], 1)   # the ServiceType
+        self.assertNotIn("N" * 250, json.dumps(self.exceptions()))
+
+    def test_over_length_required_name_refuses_an_update_and_keeps_the_stored_name(self):
+        snap, espo = self.load(fx.org(), "u1")
+        before = espo.by_sf("Account")[fx.A[0]]["name"]
+        data = fx.org()
+        data["Account"][0]["Name"] = "N" * 250
+        data["Account"][0]["ShippingCity"] = "B" * 101
+        snap2 = write_snapshot(os.path.join(self.tmp, "u2"), data=data)
+        n = len(espo.writes)
+        self.assertEqual(self.run_load(snap=snap2, espo=espo), 0, self.last_err)
+        self.assertEqual(espo.by_sf("Account")[fx.A[0]]["name"], before)
+        self.assertFalse([w for w in espo.writes[n:] if w[1] == "Account"
+                          and w[2].get("name", before) != before])
+        self.assertEqual(self.report()["objects"]["Account"]["skipped"]["value_too_long"], 1)
+
+    def test_over_length_optional_value_clears_the_field_on_update(self):
+        snap, espo = self.load(fx.org(), "c1")
+        self.assertIsNotNone(espo.by_sf("Account")[fx.A[0]]["billingAddressCity"])
+        data = fx.org()
+        data["Account"][0]["ShippingCity"] = "B" * 101
+        self.assertEqual(self.run_load(snap=write_snapshot(os.path.join(self.tmp, "c2"), data=data),
+                                       espo=espo), 0, self.last_err)
+        self.assertIsNone(espo.by_sf("Account")[fx.A[0]]["billingAddressCity"])
+        self.assertIn("value_too_long", self.codes(fx.A[0]))
+
+    def test_unresolved_owner_on_contact_opportunity_and_email_is_still_written(self):
+        data = fx.org()
+        data["Contact"][0]["OwnerId"] = fx.U_MISSING
+        data["Opportunity"][0]["OwnerId"] = fx.U_MISSING
+        # T[2] is a Task-Email an earlier run created as an Email; it is updated as an Email.
+        data["Task"][2]["OwnerId"] = fx.U_MISSING
+        data["EmailMessage"][1]["ActivityId"] = None
+        snap = write_snapshot(os.path.join(self.tmp, "ow"), data=data)
+        espo = FakeEspo()
+        espo._insert("Email", {"sfId": fx.T[2], "from": "a@example.test", "name": "old", "status": "Archived",
+                               "assignedUserId": None})
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        self.assertNotIn("write_rejected", self.report()["exceptions"]["byReason"])
+        c0 = espo.by_sf("Contact")[fx.C[0]]
+        o0 = espo.by_sf("Opportunity")[fx.O[0]]
+        e2 = espo.by_sf("Email")[fx.T[2]]
+        self.assertIsNone(c0["assignedUserId"])
+        self.assertIsNone(o0["assignedUserId"])
+        self.assertEqual(e2["name"], data["Task"][2]["Subject"])     # written, not refused
+        self.assertNotIn(fx.T[2], espo.by_sf("Task"))
+        for sf_id in (fx.C[0], fx.O[0], fx.T[2]):
+            self.assertIn("owner_unresolved", self.codes(sf_id), sf_id)
+            self.assertNotIn("owner_required_unresolved", self.codes(sf_id), sf_id)
+        rep = self.report()
+        for obj in ("Contact", "Opportunity", "Task"):
+            self.assertEqual(rep["objects"][obj]["skipped"]["owner_required_unresolved"], 0, obj)
 
     def test_value_at_the_limit_is_sent(self):
         data = fx.org()
@@ -1842,19 +1922,31 @@ class TestFaithfulFake(Base):
                     self.assertEqual(self.post(entity, dict(start, **body)),
                                      (400, {"field": "assignedUser", "type": "required"}))
             self.assertEqual(self.post(entity, dict(start, assignedUserId="u"))[0], 200)
-        self.assertEqual(self.post("Account", {"name": "a"})[0], 200)       # not required there
+        self.assertEqual(self.post("Account", {"name": "a"})[0], 200)       # owner not required there
         f = FakeEspo()
         _st, doc = self.post("Task", {"assignedUserId": "u"}, f)
         self.assertEqual(f.send("PUT", f"Task/{doc['id']}", body={"assignedUserId": None})[0], 400)
         self.assertEqual(f.send("PUT", f"Task/{doc['id']}", body={"name": "n"})[0], 200)
+
+    def test_name_required_on_account_and_service_type(self):
+        for entity in ("Account", "ServiceType"):
+            for body in ({}, {"name": None}, {"name": ""}, {"name": "  "}):
+                with self.subTest(entity=entity, body=body):
+                    self.assertEqual(self.post(entity, body), (400, {"field": "name", "type": "required"}))
+            f = FakeEspo()
+            _st, doc = self.post(entity, {"name": "n"}, f)
+            self.assertEqual(f.send("PUT", f"{entity}/{doc['id']}", body={"name": None}),
+                             (400, {"field": "name", "type": "required"}))
+            self.assertEqual(f.send("PUT", f"{entity}/{doc['id']}", body={"description": "d"})[0], 200)
+        self.assertEqual(self.post("Contact", {"lastName": "x"})[0], 200)   # name not checked there
 
     def test_max_length(self):
         self.assertEqual(self.post("Contact", {"title": "t" * 256}), (400, {"field": "title", "type": "maxLength"}))
         self.assertEqual(self.post("Contact", {"title": " " + "t" * 255 + " "})[0], 200)   # trimmed
         self.assertEqual(self.post("Account", {"name": "n" * 250})[0], 400)
         self.assertEqual(self.post("Account", {"name": "n" * 249})[0], 200)
-        self.assertEqual(self.post("Account", {"phoneNumber": "1" * 37})[0], 400)
-        self.assertEqual(self.post("Account", {"phoneNumber": "1" * 36})[0], 200)
+        self.assertEqual(self.post("Account", {"name": "a", "phoneNumber": "1" * 37})[0], 400)
+        self.assertEqual(self.post("Account", {"name": "a", "phoneNumber": "1" * 36})[0], 200)
         self.assertEqual(self.post("Contact", {"phoneNumberData": [{"phoneNumber": "1" * 37, "primary": True}]}),
                          (400, {"field": "phoneNumber", "type": "maxLength"}))
 
