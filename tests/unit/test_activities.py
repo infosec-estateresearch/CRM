@@ -104,7 +104,16 @@ BROKEN = {
                                 "            $this->user->getUserName() === 'er-import';",
                                 "User::TYPE_API;"), {"hook_body"}),
     "hook_other_user_name": (_hook("=== 'er-import'", "=== 'sync-bot'"), {"hook_body"}),
-    "hook_body_unprotected": (_hook("        'bodyPlain',\n", ""), {"hook_body"}),
+    "hook_body_unprotected": (_hook("        'bodyPlain',\n", ""),
+                              {"hook_body", "protected_attributes"}),
+    "hook_reply_to_ids_unprotected": (_hook("        'replyToEmailAddressesIds',\n", ""),
+                                      {"hook_body", "protected_attributes"}),
+    "hook_parent_protected": (_hook("        'status',\n", "        'status',\n        'parentId',\n"),
+                              {"hook_body", "protected_attributes"}),
+    "hook_duplicate_attribute": (_hook("        'status',\n", "        'status',\n        'name',\n"),
+                                 {"hook_body", "protected_attributes"}),
+    "task_detail_no_date_completed": (_call(lambda b: b["layouts"]["Task"]["detail"][0]["rows"]
+                                            .pop(3)), {"layouts"}),
     "hook_wrong_status": (_hook("!== 'Archived'", "!== 'Sent'"), {"hook_body"}),
     "api_user_renamed": (_set(["apiUsers", 0, "userName"], "er-loader"), {"hook_body"}),
 }
@@ -147,15 +156,42 @@ class TestRepository(unittest.TestCase):
 
     def test_protected_attributes_cover_the_work_order(self):
         # body, addresses and dates (WO item 2); parent re-linking stays allowed
-        for name in ("body", "bodyPlain", "from", "to", "cc", "dateSent"):
+        for name in ("body", "bodyPlain", "from", "to", "cc", "dateSent", "subject",
+                     "replyTo", "fromEmailAddressId", "toEmailAddressesIds", "attachmentsIds",
+                     "messageIdInternal", "sendAt", "deliveryDate"):
             self.assertIn(name, policy.PROTECTED_ATTRIBUTES)
-        for name in ("parent", "parentId", "parentType", "assignedUserId", "teamsIds"):
+        for name in ("parent", "parentId", "parentType", "parentName", "assignedUserId",
+                     "assignedUsersIds", "teamsIds", "usersIds"):
             self.assertNotIn(name, policy.PROTECTED_ATTRIBUTES)
+
+    def test_mirrored_list_is_exactly_the_guarded_set(self):
+        self.assertEqual(len(policy.PROTECTED_ATTRIBUTES), 30)
+        self.assertEqual(len(set(policy.PROTECTED_ATTRIBUTES)), 30)
+        self.assertEqual(set(policy.PROTECTED_ATTRIBUTES), policy.EMAIL_GUARDED_ATTRIBUTES)
+
+    def test_task_detail_keeps_date_completed_after_date_end(self):
+        rows = policy.load_bundle()["layouts"]["Task"]["detail"][0]["rows"]
+        names = [[c.get("name") if isinstance(c, dict) else c for c in r] for r in rows]
+        i = names.index(["dateStart", "dateEnd"])
+        self.assertEqual(names[i + 1], [False, "dateCompleted"])
 
 
 class TestBrokenFixtures(unittest.TestCase):
     def test_every_rule_is_broken_by_some_fixture(self):
         self.assertEqual(set().union(*(r for _, r in BROKEN.values())), set(policy.RULES))
+
+    def test_hook_and_mirror_shrunk_together_is_caught(self):
+        # if the hook and the mirrored list drop an attribute together, hook_body is
+        # satisfied and only the exact-set rule notices
+        bundle = policy.load_bundle()
+        bundle["hook"] = bundle["hook"].replace("        'attachmentsIds',\n", "", 1)
+        original = policy.PROTECTED_ATTRIBUTES
+        try:
+            policy.PROTECTED_ATTRIBUTES = [a for a in original if a != "attachmentsIds"]
+            result = policy.check(bundle)
+        finally:
+            policy.PROTECTED_ATTRIBUTES = original
+        self.assertEqual({r for r, v in result.items() if v}, {"protected_attributes"})
 
     def test_each_fixture_breaks_exactly_its_rules(self):
         base = policy.load_bundle()

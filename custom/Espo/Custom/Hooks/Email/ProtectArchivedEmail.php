@@ -10,11 +10,11 @@ use Espo\ORM\Repository\Option\SaveOptions;
 
 /**
  * CRM-005 (R11): an archived email is read-only history. Once an Email has been
- * saved with status Archived, its subject, body, addresses, dates, message id and
- * status cannot be changed, except by an admin or by the ER Import API user
- * (type api, userName 'er-import', as in config/access/api_users.json).
- * Re-linking the parent (enquiry, firm, contact) and every other attribute stay
- * editable. New records are not guarded: the importer creates them.
+ * saved with status Archived, its subject, body, addresses and address links,
+ * attachments, dates, message ids and status cannot be changed, except by an admin
+ * or by the ER Import API user (type api, userName 'er-import', as in
+ * config/access/api_users.json). Re-linking the parent (enquiry, firm, contact),
+ * assignment, teams, users and every other attribute stay editable. New records are not guarded: the importer creates them.
  * The rule table is mirrored in tests/unit/activity_policy.py (archived_save_allowed).
  *
  * @implements BeforeSave<Entity>
@@ -22,17 +22,42 @@ use Espo\ORM\Repository\Option\SaveOptions;
 class ProtectArchivedEmail implements BeforeSave
 {
     private const PROTECTED_ATTRIBUTES = [
+        // subject and content
         'name',
+        'subject',
         'body',
         'bodyPlain',
         'isHtml',
+        // addresses
         'from',
         'to',
         'cc',
         'bcc',
+        'replyTo',
         'fromString',
+        'replyToString',
+        'fromName',
+        'fromAddress',
+        'replyToName',
+        'replyToAddress',
+        'addressNameMap',
+        // address links
+        'fromEmailAddressId',
+        'toEmailAddressesIds',
+        'ccEmailAddressesIds',
+        'bccEmailAddressesIds',
+        'replyToEmailAddressesIds',
+        // attachments
+        'attachmentsIds',
+        'hasAttachment',
+        // dates
         'dateSent',
+        'deliveryDate',
+        'sendAt',
+        // message ids
         'messageId',
+        'messageIdInternal',
+        // status
         'status',
     ];
 

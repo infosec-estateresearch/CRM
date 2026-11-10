@@ -39,12 +39,35 @@ CORE_FIELDS = {
     "Meeting": {"name", "status", "dateStart", "dateEnd", "isAllDay", "duration", "reminders",
                 "description", "parent", "account", "users", "contacts", "leads",
                 "assignedUser", "teams"},
-    "Task": {"name", "status", "priority", "dateStart", "dateEnd", "reminders", "description",
-             "parent", "account", "contact", "attachments", "assignedUser", "teams"},
+    "Task": {"name", "status", "priority", "dateStart", "dateEnd", "dateCompleted", "reminders",
+             "description", "parent", "account", "contact", "attachments", "assignedUser",
+             "teams"},
 }
-# The archived-email guard: the attributes it protects and the one API user it exempts.
-PROTECTED_ATTRIBUTES = ["name", "body", "bodyPlain", "isHtml", "from", "to", "cc", "bcc",
-                        "fromString", "dateSent", "messageId", "status"]
+# The archived-email guard: every core content, address, link, attachment, date, message
+# id and status attribute of the 10.0.12 Email (verified by the PL), and nothing else, so
+# parent, assignment, teams and users stay editable. The hook list must equal this set.
+EMAIL_GUARDED_ATTRIBUTES = frozenset({
+    "name", "subject", "body", "bodyPlain", "isHtml",
+    "from", "to", "cc", "bcc", "replyTo", "fromString", "replyToString", "fromName",
+    "fromAddress", "replyToName", "replyToAddress", "addressNameMap",
+    "fromEmailAddressId", "toEmailAddressesIds", "ccEmailAddressesIds", "bccEmailAddressesIds",
+    "replyToEmailAddressesIds",
+    "attachmentsIds", "hasAttachment",
+    "dateSent", "deliveryDate", "sendAt",
+    "messageId", "messageIdInternal",
+    "status",
+})
+# The mirrored hook list, in the hook's order.
+PROTECTED_ATTRIBUTES = ["name", "subject", "body", "bodyPlain", "isHtml",
+                        "from", "to", "cc", "bcc", "replyTo", "fromString", "replyToString",
+                        "fromName", "fromAddress", "replyToName", "replyToAddress",
+                        "addressNameMap",
+                        "fromEmailAddressId", "toEmailAddressesIds", "ccEmailAddressesIds",
+                        "bccEmailAddressesIds", "replyToEmailAddressesIds",
+                        "attachmentsIds", "hasAttachment",
+                        "dateSent", "deliveryDate", "sendAt",
+                        "messageId", "messageIdInternal",
+                        "status"]
 IMPORT_ROLE = enquiry_policy.IMPORT_ROLE
 
 
@@ -164,6 +187,9 @@ def rule_layouts(b):
     for name in ("list", "detail"):
         if "meetingType" not in layout_names(meeting.get(name) or []):
             out.append(f"Meeting {name} layout does not show meetingType")
+    # The core Task detail shows dateCompleted; the custom one must keep it.
+    if "dateCompleted" not in layout_names(((layouts.get("Task") or {}).get("detail")) or []):
+        out.append("Task detail layout drops the core dateCompleted")
     for entity, by_name in layouts.items():
         legacy = set(LEGACY[entity])
         known = CORE_FIELDS.get(entity, set()) | set(_fields(b, entity))
@@ -294,6 +320,25 @@ def rule_hook_body(b):
     return out
 
 
+def rule_protected_attributes(b):
+    """The hook's PROTECTED_ATTRIBUTES is exactly EMAIL_GUARDED_ATTRIBUTES, once each."""
+    const = _PROTECTED.search(_php(b.get("hook") or ""))
+    if not const:
+        return ["hook: PROTECTED_ATTRIBUTES constant missing"]
+    listed = re.findall(r"'([^'\\]*)'", const.group("list"))
+    out = []
+    dupes = sorted({a for a in listed if listed.count(a) > 1})
+    if dupes:
+        out.append(f"PROTECTED_ATTRIBUTES repeats {dupes}")
+    missing = sorted(EMAIL_GUARDED_ATTRIBUTES - set(listed))
+    extra = sorted(set(listed) - EMAIL_GUARDED_ATTRIBUTES)
+    if missing:
+        out.append(f"PROTECTED_ATTRIBUTES does not guard {missing}")
+    if extra:
+        out.append(f"PROTECTED_ATTRIBUTES guards attributes outside the set {extra}")
+    return out
+
+
 RULES = {
     "legacy_fields": rule_legacy_fields,
     "unique_indexes": rule_unique_indexes,
@@ -303,6 +348,7 @@ RULES = {
     "dashboard_template": rule_dashboard_template,
     "hook_shape": rule_hook_shape,
     "hook_body": rule_hook_body,
+    "protected_attributes": rule_protected_attributes,
 }
 
 

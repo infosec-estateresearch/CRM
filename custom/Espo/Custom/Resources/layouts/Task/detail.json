@@ -26,6 +26,12 @@
                 }
             ],
             [
+                false,
+                {
+                    "name": "dateCompleted"
+                }
+            ],
+            [
                 {
                     "name": "reminders"
                 },

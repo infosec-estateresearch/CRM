@@ -26,11 +26,21 @@ As in CRM-004 Amendment v1.1, none of these fields is `readOnly`, because that w
 
 `Meeting.meetingType` is an editable enum with the options Meeting (the default), Presentation, Bag Drop, Call, Other, Email and Unspecified (legacy). It is shown on the Meeting list and detail views.
 
-The detail views of Call, Meeting and Task end with a collapsed **Legacy** panel. Admins see `sfId` there; the human roles see the owner and created date. The Email layouts stay core, so the Email legacy fields are reachable only by admins and through the API.
+The detail views of Call, Meeting and Task keep every core field (Task keeps `dateCompleted`, under `dateEnd`) and end with a collapsed **Legacy** panel. Admins see `sfId` there; the human roles see the owner and created date. The Email layouts stay core, so the Email legacy fields are reachable only by admins and through the API.
 
 ## 2. Archived email is read-only history
 
-- **The hook.** `custom/Espo/Custom/Hooks/Email/ProtectArchivedEmail.php` refuses, with `403 Forbidden`, any save of an existing Email whose stored status is `Archived` if it changes the subject (`name`), `body`, `bodyPlain`, `isHtml`, `from`, `to`, `cc`, `bcc`, `fromString`, `dateSent`, `messageId` or `status`. The status is protected too, so an archived email cannot be un-archived and then edited. Re-linking the parent (to an enquiry, firm or contact), assignment and teams stay allowed.
+- **The hook.** `custom/Espo/Custom/Hooks/Email/ProtectArchivedEmail.php` refuses, with `403 Forbidden`, any save of an existing Email whose stored status is `Archived` if it changes any of these core Email attributes of 10.0.12:
+  - subject and content: `name`, `subject`, `body`, `bodyPlain`, `isHtml`;
+  - addresses: `from`, `to`, `cc`, `bcc`, `replyTo`, `fromString`, `replyToString`, `fromName`, `fromAddress`, `replyToName`, `replyToAddress`, `addressNameMap`;
+  - address links: `fromEmailAddressId`, `toEmailAddressesIds`, `ccEmailAddressesIds`, `bccEmailAddressesIds`, `replyToEmailAddressesIds`;
+  - attachments: `attachmentsIds`, `hasAttachment`;
+  - dates: `dateSent`, `deliveryDate`, `sendAt`;
+  - message ids: `messageId`, `messageIdInternal`;
+  - `status`.
+
+  The status is protected too, so an archived email cannot be un-archived and then edited. Re-linking the parent (to an enquiry, firm or contact), assignment, teams and users stay allowed. A static test checks that the hook list is exactly this set.
+- **Emails logged by hand.** Emails logged by hand are archived, and from then on cannot be changed. They can be told apart from imported Salesforce history by `createdBy` and by the empty `sfId`, which only admins can see. (New records are not guarded, so staff can log a historic email by creating it as Archived; that is accepted as legitimate correspondence logging.)
 - **The exemptions** are admins and the `ER Import` API user only: type `api` and userName `er-import`, as in `config/access/api_users.json`. Any other API user is guarded.
 - **Roles.** Email edit is `no` for `ER Staff` and `ER Intake`, so the edit button does not appear for them. `ER Manager` keeps `all`, but the hook still applies to it.
 - **The plain-text body.** The importer writes archived emails with `isHtml = false` and the text in `body` (and `bodyPlain`), so the core Email detail view shows it as plain text. The core Email layouts are not overridden.
