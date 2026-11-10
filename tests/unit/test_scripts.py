@@ -30,9 +30,12 @@ GUARDED = ["backup.sh", "restore.sh", "export.sh", "deploy_custom.sh"]
 REPO_CUSTOM = os.path.join(REPO, "custom", "Espo", "Custom")
 
 FAKE_DOCKER = """#!/usr/bin/env bash
-# Records its arguments; plays mariadb-dump / mariadb inside "crm-db".
+# Records its arguments; plays mariadb-dump / mariadb inside "crm-db", and
+# `compose config --format json` through FAKE_COMPOSE_CONFIG.
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+[ -z "${FAKE_DOCKER_ENV_LOG:-}" ] || env >> "$FAKE_DOCKER_ENV_LOG"
 case "$*" in
+    *" config --format json") exec python3 -I "$FAKE_COMPOSE_CONFIG" "$@" ;;
     *mariadb-dump*) printf -- '-- fake dump\\nCREATE TABLE account (id int);\\n' ;;
     *"exec -T crm-db"*) cat > "$FAKE_DOCKER_STDIN" ;;
     *" ps --status running -q crm-app"*) [ -z "${FAKE_DOCKER_RUNNING:-}" ] || echo 0123abcd ;;
@@ -50,6 +53,67 @@ fi
 exec "$REAL_DATE" "$@"
 """
 REAL_DATE = shutil.which("date")
+
+# A secret value the fake resolved config carries; no script may ever print it.
+FAKE_SECRET = "fake-secret-must-never-be-printed"
+
+# Plays `docker compose ... --env-file F config --format json` the way Compose
+# resolves it: the env file accepts NAME=value and NAME: value (optionally
+# `export`, quotes), the last line wins, and the process environment beats the
+# file. ${VAR:?msg} in deploy/compose.json is substituted; a missing bind-mount
+# variable is an error, any other missing one is filled with FAKE_SECRET.
+# FAKE_CONFIG alters the result: "fail", "garbage", "drop:<svc>:<target>",
+# "source:<svc>:<target>:<path>" or "type:<svc>:<target>:<type>".
+FAKE_COMPOSE_CONFIG = r"""
+import json, os, re, sys
+args = sys.argv[1:]
+compose_file = args[args.index("-f") + 1]
+env_file = args[args.index("--env-file") + 1]
+mode = os.environ.get("FAKE_CONFIG", "")
+if mode == "fail":
+    sys.exit("fake compose: config failed")
+if mode == "garbage":
+    print("not json")
+    sys.exit(0)
+values = {}
+with open(env_file) as fh:
+    for raw in fh:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        line = re.sub(r"^export\s+", "", line)
+        m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*[=:]\s*(.*)$", line)
+        if m:
+            value = m.group(2).strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            values[m.group(1)] = value
+for name in list(values) + ["CRM_DB_DIR", "CRM_DATA_DIR", "CRM_CUSTOM_DIR", "CRM_CLIENT_CUSTOM_DIR"]:
+    if name in os.environ:
+        values[name] = os.environ[name]
+def sub(m):
+    name = m.group(1)
+    if values.get(name):
+        return values[name]
+    if name.endswith("_DIR"):
+        sys.exit(f"fake compose: required variable {name} is missing a value")
+    return FAKE_SECRET
+with open(compose_file) as fh:
+    text = re.sub(r"\$\{([A-Za-z0-9_]+):\?[^}]*\}", sub, fh.read())
+doc = json.loads(text)
+for spec in filter(None, mode.split(";")):
+    kind, svc, target, *rest = spec.split(":")
+    vols = doc["services"][svc]["volumes"]
+    for v in list(vols):
+        if v["target"] == target:
+            if kind == "drop":
+                vols.remove(v)
+            elif kind == "source":
+                v["source"] = rest[0]
+            elif kind == "type":
+                v["type"] = rest[0]
+json.dump(doc, sys.stdout, indent=2)
+""".replace("FAKE_SECRET", repr(FAKE_SECRET))
 
 
 def shell_scripts():
@@ -73,6 +137,9 @@ class ScriptEnv(unittest.TestCase):
         with open(fake_date, "w") as fh:
             fh.write(FAKE_DATE)
         os.chmod(fake_date, stat.S_IRWXU)
+        self.compose_config = os.path.join(base, "fake_compose_config.py")
+        with open(self.compose_config, "w") as fh:
+            fh.write(FAKE_COMPOSE_CONFIG)
         self.log = os.path.join(base, "docker.log")
         self.stdin = os.path.join(base, "docker.stdin")
         self.runtime = os.path.join(base, "runtime", "dev")
@@ -86,7 +153,8 @@ class ScriptEnv(unittest.TestCase):
         self.write_env(self.runtime)
 
     def write_env(self, runtime, **override):
-        values = {"CRM_DATA_DIR": f"{runtime}/data",
+        values = {"CRM_DB_DIR": f"{runtime}/db",
+                  "CRM_DATA_DIR": f"{runtime}/data",
                   "CRM_CUSTOM_DIR": f"{runtime}/custom",
                   "CRM_CLIENT_CUSTOM_DIR": f"{runtime}/client/custom"}
         values.update(override)
@@ -114,18 +182,26 @@ class ScriptEnv(unittest.TestCase):
             "FAKE_DOCKER_STDIN": self.stdin,
             "HOME": self.tmp.name,
             "REAL_DATE": REAL_DATE,
+            "FAKE_COMPOSE_CONFIG": self.compose_config,
         }
         env.update(extra_env or {})
         preexec = (lambda: os.umask(umask)) if umask is not None else None
-        return subprocess.run(["bash", os.path.join(SCRIPTS, name), *args],
-                              capture_output=True, text=True, env=env, timeout=60,
-                              preexec_fn=preexec)
+        res = subprocess.run(["bash", os.path.join(SCRIPTS, name), *args],
+                             capture_output=True, text=True, env=env, timeout=60,
+                             preexec_fn=preexec)
+        self.assertNotIn(FAKE_SECRET, res.stdout + res.stderr, "resolved config printed")
+        return res
 
-    def docker_calls(self):
+    def docker_calls(self, config=False):
+        """docker invocations, without `compose config` unless config=True."""
         if not os.path.exists(self.log):
             return []
         with open(self.log) as fh:
-            return fh.read().splitlines()
+            calls = fh.read().splitlines()
+        return calls if config else [c for c in calls if not c.endswith(" config --format json")]
+
+    def verbs(self, config=False):
+        return [c.split(" --env-file ")[1].split(" ", 1)[1] for c in self.docker_calls(config)]
 
 
 class TestBashSyntax(unittest.TestCase):
@@ -250,7 +326,7 @@ class TestBackupRestore(ScriptEnv):
             self.assertTrue(any("after-backup" in f for _, _, fs in os.walk(kept) for f in fs))
         with open(self.stdin) as fh:
             self.assertIn("fake dump", fh.read())
-        verbs = [c.split(" --env-file ")[1].split(" ", 1)[1] for c in self.docker_calls()]
+        verbs = self.verbs()
         self.assertEqual(verbs[0], "stop crm-daemon crm-app")
         self.assertEqual(verbs[1], "up -d --wait crm-db")
         self.assertTrue(verbs[2].startswith("exec -T crm-db sh -c"))
@@ -350,13 +426,13 @@ class TestDeployCustom(ScriptEnv):
     def test_not_running_skips_rebuild(self):
         res = self.deploy()
         self.assertIn("clear-cache/rebuild skipped", res.stdout)
-        verbs = [c.split(" --env-file ")[1].split(" ", 1)[1] for c in self.docker_calls()]
+        verbs = self.verbs()
         self.assertEqual(verbs, ["ps --status running -q crm-app", "stop crm-daemon crm-app"])
 
     def test_running_app_gets_clear_cache_then_rebuild(self):
         res = self.deploy(extra_env={"FAKE_DOCKER_RUNNING": "1"})
         self.assertIn("clear-cache and rebuild completed", res.stdout)
-        verbs = [c.split(" --env-file ")[1].split(" ", 1)[1] for c in self.docker_calls()]
+        verbs = self.verbs()
         self.assertEqual(verbs, [
             "ps --status running -q crm-app",
             "stop crm-daemon crm-app",
@@ -439,7 +515,7 @@ class TestDeployPathSafety(ScriptEnv):
         # runtime/env-file check in lib/common.sh (runtime dir and custom/).
         self.assertRegex(res.stderr, r"refusing to deploy|not canonical|resolves to")
         self.assertEqual(tree_hash(self.sentinel), before, "symlink target changed")
-        verbs = [c.split(" --env-file ")[1].split(" ", 1)[1] for c in self.docker_calls()]
+        verbs = self.verbs()
         self.assertFalse([v for v in verbs if v.startswith(("up", "exec"))], verbs)
         if at_stop:
             self.assertEqual(verbs, ["ps --status running -q crm-app", "stop crm-daemon crm-app"])
@@ -532,15 +608,20 @@ class TestEnvPathDivergence(ScriptEnv):
     SCRIPTS = [("deploy_custom.sh",), ("backup.sh",), ("restore.sh", "crm-dev-20261110T120000Z")]
     VARS = {"CRM_DATA_DIR": "data", "CRM_CUSTOM_DIR": "custom", "CRM_CLIENT_CUSTOM_DIR": "client/custom"}
 
-    def assert_all_refuse(self, needle):
+    def assert_all_refuse(self, needle, extra_env=None, config_ran=False):
         listing = sorted(os.listdir(self.runtime))
         live = tree_hash(os.path.join(self.runtime, "custom"))
         for args in self.SCRIPTS:
             with self.subTest(script=args[0]):
-                res = self.run_script(args[0], "dev", *args[1:])
+                open(self.log, "w").close()
+                res = self.run_script(args[0], "dev", *args[1:], extra_env=extra_env)
                 self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
                 self.assertIn(needle, res.stderr)
-                self.assertEqual(self.docker_calls(), [])
+                if config_ran:
+                    self.assertEqual(self.verbs(config=True), ["config --format json"],
+                                     "refused after compose config, before any other docker call")
+                else:
+                    self.assertEqual(self.docker_calls(config=True), [])
                 self.assertEqual(sorted(os.listdir(self.runtime)), listing, "nothing written")
                 self.assertEqual(tree_hash(os.path.join(self.runtime, "custom")), live)
 
@@ -586,6 +667,260 @@ class TestEnvPathDivergence(ScriptEnv):
         self.assertEqual(res.returncode, 1)
         self.assertIn("not canonical", res.stderr)
         self.assertEqual(self.docker_calls(), [])
+
+
+class TestEnvOverrideAndResolvedMounts(TestEnvPathDivergence):
+    """CRM-001-C2 round 2: Compose takes the bind-mount variables from the
+    process environment before the env file, and its env-file parser also
+    accepts NAME: value with the last line winning. Both must be refused, and
+    what Compose itself resolves must match the runtime."""
+
+    ALL_VARS = ["CRM_DB_DIR", "CRM_DATA_DIR", "CRM_CUSTOM_DIR", "CRM_CLIENT_CUSTOM_DIR"]
+
+    def write_raw_env(self, *lines):
+        with open(os.path.join(self.runtime, "env"), "w") as fh:
+            fh.write("".join(line + "\n" for line in lines))
+
+    def plain_lines(self, **skip):
+        values = {"CRM_DB_DIR": f"{self.runtime}/db", "CRM_DATA_DIR": f"{self.runtime}/data",
+                  "CRM_CUSTOM_DIR": f"{self.runtime}/custom",
+                  "CRM_CLIENT_CUSTOM_DIR": f"{self.runtime}/client/custom"}
+        return [f"{k}={v}" for k, v in values.items() if k not in skip]
+
+    def test_shell_override_is_refused(self):
+        # The reported case: CRM_CUSTOM_DIR=/etc exported, env file correct.
+        self.assert_all_refuse("CRM_CUSTOM_DIR is set in the environment",
+                               extra_env={"CRM_CUSTOM_DIR": "/etc"})
+        for name in self.ALL_VARS:
+            for value in ("/etc", "", f"{self.runtime}/x"):
+                with self.subTest(var=name, value=value):
+                    self.assert_all_refuse(f"{name} is set in the environment",
+                                           extra_env={name: value})
+
+    def test_colon_form_and_other_second_assignments_are_refused(self):
+        custom = f"{self.runtime}/custom"
+        for extra in ("CRM_CUSTOM_DIR: /etc", "CRM_CUSTOM_DIR:/etc", "  CRM_CUSTOM_DIR : /etc",
+                      "export CRM_CUSTOM_DIR: /etc", "\tCRM_CUSTOM_DIR=/etc",
+                      "CRM_CUSTOM_DIR", f"CRM_CUSTOM_DIR: {custom}"):
+            with self.subTest(extra=extra):
+                self.write_raw_env(*self.plain_lines(), extra)
+                self.assert_all_refuse("must set CRM_CUSTOM_DIR exactly once (found 2)")
+
+    def test_single_non_plain_assignment_is_refused(self):
+        custom = f"{self.runtime}/custom"
+        for only in (f"CRM_CUSTOM_DIR: {custom}", f"export CRM_CUSTOM_DIR={custom}",
+                     f" CRM_CUSTOM_DIR={custom}", f"CRM_CUSTOM_DIR ={custom}"):
+            with self.subTest(line=only):
+                self.write_raw_env(*self.plain_lines(CRM_CUSTOM_DIR=1), only)
+                self.assert_all_refuse("in the plain form CRM_CUSTOM_DIR=<path>")
+
+    def test_longer_names_are_not_counted(self):
+        self.write_raw_env(*self.plain_lines(), "CRM_CUSTOM_DIR_OLD: /etc", "CRM_CUSTOM_DIRS=/etc")
+        res = self.run_script("backup.sh", "dev")
+        self.assertEqual(res.returncode, 0, res.stderr)
+
+    def test_compose_resolved_mounts_must_match(self):
+        cases = {
+            "fail": "compose config failed",
+            "garbage": "compose config failed",
+            "drop:crm-daemon:/var/www/html/custom": "crm-daemon /var/www/html/custom: 0 mounts",
+            "source:crm-app:/var/www/html/custom:/etc": "crm-app /var/www/html/custom: Compose resolves the source to '/etc'",
+            "source:crm-daemon:/var/www/html/data:/etc": "crm-daemon /var/www/html/data: Compose resolves",
+            f"source:crm-app:/var/www/html/client/custom:{self.runtime}/client/custom-old":
+                "crm-app /var/www/html/client/custom: Compose resolves",
+            f"source:crm-app:/var/www/html/data:{self.runtime}/data/../../dev/data/x/..": None,
+            "type:crm-daemon:/var/www/html/data:volume": "crm-daemon /var/www/html/data: Compose resolves",
+        }
+        for mode, needle in cases.items():
+            with self.subTest(fake_config=mode):
+                if needle is None:  # normalises to the right path, still refused: no '..' 
+                    needle = "crm-app /var/www/html/data: Compose resolves"
+                self.assert_all_refuse(needle, extra_env={"FAKE_CONFIG": mode}, config_ran=True)
+
+    def test_resolved_mounts_check_passes_on_a_good_config_and_runs_first(self):
+        res = self.run_script("deploy_custom.sh", "dev")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.verbs(config=True)[:2], ["config --format json",
+                                                       "ps --status running -q crm-app"])
+
+    def test_compose_wrapper_removes_path_variables(self):
+        envlog = os.path.join(self.tmp.name, "docker.env")
+        env = {"PATH": self.bin + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"),
+               "FAKE_DOCKER_LOG": self.log, "FAKE_DOCKER_ENV_LOG": envlog,
+               "FAKE_COMPOSE_CONFIG": self.compose_config, "KEEP_ME": "1",
+               **{name: "/etc" for name in self.ALL_VARS}}
+        script = f". {shlex.quote(os.path.join(SCRIPTS, 'lib', 'common.sh'))}; " \
+                 f"CRM_ENV_FILE={shlex.quote(os.path.join(self.runtime, 'env'))}; compose ps"
+        subprocess.run(["bash", "-c", script], env=env, check=True)
+        with open(envlog) as fh:
+            seen = {line.split("=", 1)[0] for line in fh.read().splitlines() if "=" in line}
+        self.assertIn("KEEP_ME", seen)
+        self.assertFalse(seen & set(self.ALL_VARS), "bind-mount variables reached docker")
+
+
+class TestRemoveTree(unittest.TestCase):
+    """remove_tree() from deploy_custom.sh, run on its own: it refuses a
+    symlink and passes --one-file-system to rm."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = self.tmp.name
+        self.sentinel = os.path.join(self.base, "sentinel")
+        os.makedirs(os.path.join(self.sentinel, "sub"))
+        with open(os.path.join(self.sentinel, "sub", "keep.txt"), "w") as fh:
+            fh.write("keep\n")
+        self.bin = os.path.join(self.base, "bin")
+        os.mkdir(self.bin)
+        self.rm_log = os.path.join(self.base, "rm.log")
+        rm = os.path.join(self.bin, "rm")
+        with open(rm, "w") as fh:
+            fh.write(f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$RM_LOG"\nexec {shutil.which("rm")} "$@"\n')
+        os.chmod(rm, stat.S_IRWXU)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def remove_tree(self, path):
+        script = "eval \"$(sed -n '/^remove_tree() {/,/^}/p' \"$1\")\"; " \
+                 "declare -F remove_tree >/dev/null || exit 99; remove_tree \"$2\""
+        return subprocess.run(["bash", "-c", script, "deploy_custom.sh",
+                               os.path.join(SCRIPTS, "deploy_custom.sh"), path],
+                              capture_output=True, text=True,
+                              env={"PATH": self.bin + os.pathsep + os.environ.get("PATH", ""),
+                                   "RM_LOG": self.rm_log})
+
+    def rm_calls(self):
+        if not os.path.exists(self.rm_log):
+            return []
+        with open(self.rm_log) as fh:
+            return fh.read().splitlines()
+
+    def test_refuses_a_symlink(self):
+        before = tree_hash(self.sentinel)
+        for target in (self.sentinel, os.path.join(self.base, "missing")):
+            with self.subTest(target=target):
+                link = os.path.join(self.base, ".Custom.old-x")
+                os.symlink(target, link)
+                res = self.remove_tree(link)
+                self.assertEqual(res.returncode, 1, res.stderr)
+                self.assertIn("not removing a symlink", res.stderr)
+                self.assertTrue(os.path.islink(link), "the link is left for inspection")
+                self.assertEqual(self.rm_calls(), [], "rm never ran")
+                self.assertEqual(tree_hash(self.sentinel), before)
+                os.remove(link)
+
+    def test_removes_a_real_tree_on_one_filesystem_only(self):
+        tree_dir = os.path.join(self.base, ".Custom.old-x")
+        os.makedirs(os.path.join(tree_dir, "a"))
+        os.symlink(self.sentinel, os.path.join(tree_dir, "a", "link"))
+        before = tree_hash(self.sentinel)
+        res = self.remove_tree(tree_dir)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertFalse(os.path.lexists(tree_dir))
+        self.assertEqual(tree_hash(self.sentinel), before, "links inside are not followed")
+        # A mount point cannot be created without privileges here, so the flag
+        # is checked on the rm invocation itself.
+        self.assertEqual(self.rm_calls(), [f"-rf --one-file-system -- {tree_dir}"])
+
+    def test_missing_path_is_a_no_op(self):
+        res = self.remove_tree(os.path.join(self.base, "absent"))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.rm_calls(), [])
+
+
+class TestDeploySecuresCustomDirs(ScriptEnv):
+    """After the stop, custom/ and custom/Espo are owned by the invoking uid and
+    not group- or world-writable, so a host process with the container's uid
+    cannot swap entries in them. The tests run unprivileged: they cannot create
+    a directory owned by another uid, so the owner part is checked through the
+    chown invocation and the resulting (own) uid; the mode part is checked fully."""
+
+    def setUp(self):
+        super().setUp()
+        self.custom = os.path.join(self.runtime, "custom")
+        self.espo = os.path.join(self.custom, "Espo")
+        self.chown_log = os.path.join(self.tmp.name, "chown.log")
+        chown = os.path.join(self.bin, "chown")
+        with open(chown, "w") as fh:
+            fh.write(f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$CHOWN_LOG"\n'
+                     f'exec {shutil.which("chown")} "$@"\n')
+        os.chmod(chown, stat.S_IRWXU)
+
+    def deploy(self, **env):
+        return self.run_script("deploy_custom.sh", "dev",
+                               extra_env={"FAKE_DOCKER_RUNNING": "1", "CHOWN_LOG": self.chown_log, **env})
+
+    def chown_calls(self):
+        if not os.path.exists(self.chown_log):
+            return []
+        with open(self.chown_log) as fh:
+            return fh.read().splitlines()
+
+    def assert_private(self, path):
+        st = os.lstat(path)
+        self.assertTrue(stat.S_ISDIR(st.st_mode))
+        self.assertEqual(st.st_uid, os.getuid())
+        self.assertEqual(st.st_mode & 0o022, 0, f"{path} mode {st.st_mode & 0o7777:o}")
+
+    def test_writable_dirs_are_made_private_after_the_stop(self):
+        os.chmod(self.custom, 0o777)
+        # the "container" re-opens both while the stack stops
+        on_stop = f"chmod 0777 {shlex.quote(self.custom)} {shlex.quote(self.espo)}"
+        res = self.deploy(FAKE_DOCKER_ON_STOP=on_stop)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assert_private(self.custom)
+        self.assert_private(self.espo)
+        uid = os.getuid()
+        self.assertEqual(self.chown_calls(), [f"-h -- {uid} {self.custom}", f"-h -- {uid} {self.espo}"],
+                         "non-recursive, no-dereference chown of exactly the two directories")
+        self.assertEqual(tree(os.path.join(self.espo, "Custom")), tree(REPO_CUSTOM))
+
+    def test_created_parent_is_private(self):
+        shutil.rmtree(self.espo)
+        res = self.deploy(FAKE_DOCKER_ON_STOP=f"chmod 0777 {shlex.quote(self.custom)}")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assert_private(self.custom)
+        self.assert_private(self.espo)
+
+    def test_check_paths_refuses_if_the_mode_did_not_change(self):
+        # chmod that silently does nothing: the authoritative check must catch it
+        noop = os.path.join(self.bin, "chmod")
+        with open(noop, "w") as fh:
+            fh.write("#!/usr/bin/env bash\nexit 0\n")
+        os.chmod(noop, stat.S_IRWXU)
+        live = os.path.join(self.espo, "Custom")
+        before = tree_hash(live)
+        for path in (self.custom, self.espo):
+            with self.subTest(path=path):
+                os.chmod(self.custom, 0o755)
+                os.chmod(self.espo, 0o755)
+                open(self.log, "w").close()
+                res = self.deploy(FAKE_DOCKER_ON_STOP=f"{shutil.which('chmod')} 0757 {shlex.quote(path)}")
+                self.assertNotEqual(res.returncode, 0)
+                self.assertIn(f"refusing to deploy: group- or world-writable (mode 757): {path}", res.stderr)
+                self.assertIn("left stopped", res.stderr)
+                self.assertEqual(self.verbs(), ["ps --status running -q crm-app", "stop crm-daemon crm-app"])
+                self.assertEqual(tree_hash(live), before)
+
+    def test_check_paths_owned_verifies_custom_and_parent(self):
+        # check_paths from deploy_custom.sh on its own: the first pass accepts a
+        # container-owned (here: writable) custom/, the "owned" pass does not.
+        script = "for f in real_dir absent owned_private check_paths; do " \
+                 "eval \"$(sed -n \"/^$f() {/,/^}/p\" \"$1\")\"; declare -F $f >/dev/null || exit 99; done; " \
+                 "die() { echo \"$*\" >&2; exit 1; }; CRM_RUNTIME_DIR=$2; runtime_custom=$2/custom; " \
+                 "parent=$2/custom/Espo; live=$parent/Custom; staging=$parent/.s; old=$parent/.o; check_paths $3"
+        def check(arg):
+            return subprocess.run(["bash", "-c", script, "check", os.path.join(SCRIPTS, "deploy_custom.sh"),
+                                   self.runtime, arg], capture_output=True, text=True)
+        self.assertEqual(check("owned").returncode, 0, check("owned").stderr)
+        for path in (self.custom, self.espo):
+            with self.subTest(path=path):
+                os.chmod(path, 0o757)
+                self.assertEqual(check("").returncode, 0, "first pass does not require ownership")
+                res = check("owned")
+                self.assertEqual(res.returncode, 1)
+                self.assertIn(f"group- or world-writable (mode 757): {path}", res.stderr)
+                os.chmod(path, 0o755)
 
 
 class FakeListTransport:
