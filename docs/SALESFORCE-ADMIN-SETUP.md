@@ -1,12 +1,39 @@
 # Salesforce administrator setup for the read-only CRM migration
 
 - **For:** Matt, as Salesforce administrator and Product Owner.
-- **Status:** v1.0, 2026-11-10. This goes with CRM-002 v1.1.
+- **Status:** v1.1, 2026-11-10. This goes with CRM-002 v1.2. v1.1 adds § What already exists, from the verified ERiC integration check.
 - **Purpose:** give the `crm-migrate` extractor on DOCKER1 **read-only API access**, so it can build a reconciled copy of the Salesforce data for the new CRM.
 
 There are **no manual exports** in this process: no Data Loader, no Data Export Service, no reports to CSV. You set up access once. After that, every extraction is run by the tool, and only when you have authorised that stage on Issue #9.
 
 > **What this setup does not do.** It authorises nothing on its own. The tool refuses to run unless the WO is approved and you have recorded authorisation for L1, L2 or L3 on Issue #9. You can switch everything off at any time with step 7.
+
+## What already exists, and why two things are still new
+
+This was verified on 2026-11-10 with one authorised login test and one metadata request. No records were read.
+
+| Already in place | Reused for CRM-002? |
+|---|---|
+| The Salesforce org and its My Domain | **Yes.** It's the only origin the tool talks to. |
+| Your administrator login | **Yes.** Use it for the steps below. Never share it. |
+| ERiC's Salesforce login: username and password, using SOAP `login()` | **No.** It can create, edit and delete on 457 objects, including users and profiles, so it is effectively an administrator. It also uses the login method Salesforce retires in Summer '27. CRM-002 must not hold an unrestricted credential. |
+| ERiC's Connected App (key stored on the host, never actually used) | **No.** Leave it alone. ERiC still depends on its configuration, and coupling CRM-002 to it would mean revoking one revokes both. |
+
+**New (2 items):**
+1. One read-only **integration user**, on the free Salesforce Integration licence.
+2. One **External Client App** for CRM-002.
+
+The read-only user is designed to be **reused later** by ERiC and WIP when they move off SOAP `login()`, so the total number of identities stays small. That ERiC/WIP move is separate work, with its own migration and rollback plan, and nothing changes for them now.
+
+**Optional, read-only check of the existing app (5 minutes, helps ERiC's later migration):**
+1. Go to Setup → App Manager.
+2. Find the Connected App whose consumer key matches ERiC's. Rogue can show you the last four characters on DOCKER1 if you need to identify it.
+3. Note, without changing anything:
+   - its name;
+   - whether "Enable Client Credentials Flow" or "Allow OAuth Username-Password Flows" is ticked;
+   - which user, if any, is set as Run As.
+
+Report those to Rogue. Never send the secret.
 
 ## 0. Before you start (10 minutes)
 
@@ -72,7 +99,7 @@ Go to Setup → Users → New User.
 
 ## 3. Create the External Client App, using the client-credentials flow
 
-Use an **External Client App**, which is Salesforce's current model. Only reuse an existing Connected App if creating an External Client App isn't possible. If so, tell Rogue, and L1 records it as the verified fallback. **Don't** reuse ERiC's existing app or credentials.
+Use an **External Client App**, which is Salesforce's current model. Only reuse an existing Connected App if creating an External Client App isn't possible. If so, tell Rogue, and L1 records it as the verified fallback. **Don't** reuse ERiC's existing app or credentials (see § What already exists).
 
 Go to Setup → **External Client App Manager** → **New External Client App**.
 1. **Basic information:**
