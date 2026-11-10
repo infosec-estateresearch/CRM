@@ -523,11 +523,119 @@ class TestRestoretestNetworkAndVolumeSpecs(unittest.TestCase):
 
     def test_broken_fixtures_are_refused(self):
         paths = sorted(glob.glob(os.path.join(FIXTURES, "restoretest_bad_*.json")))
-        self.assertGreaterEqual(len(paths), 8)
+        self.assertGreaterEqual(len(paths), 20)
         for path in paths:
             with self.subTest(fixture=os.path.basename(path)):
                 with open(path) as fh:
                     self.assertNotEqual(ca.check_restoretest_compose(json.load(fh)), [])
+
+
+# CRM-007R r3: each allowlist fixture is refused for its own key.
+RESTORETEST_KEY_FIXTURES = {
+    "top_include": "top-level 'include'", "top_x_extension": "top-level 'x-crm'",
+    "top_version": "top-level 'version'", "top_secrets": "top-level 'secrets'",
+    "top_configs": "top-level 'configs'",
+    "service_depends_on": "key 'depends_on'", "service_security_opt": "key 'security_opt'",
+    "service_userns_mode": "key 'userns_mode'", "service_labels": "key 'labels'",
+    "service_tmpfs": "key 'tmpfs'", "service_extra_hosts": "key 'extra_hosts'",
+    "service_restart": "key 'restart'",
+    "mount_bind_option": "refused: 'bind'", "mount_volume_subpath": "refused: 'volume'",
+}
+
+# Every crm-db key the brief names, plus a few more; none is in the shipped file.
+RESTORETEST_REFUSED_DB_KEYS = (
+    "depends_on", "ports", "expose", "network_mode", "security_opt", "userns_mode", "uts",
+    "cgroup", "cgroup_parent", "pid", "ipc", "privileged", "cap_add", "devices", "tmpfs",
+    "extra_hosts", "external_links", "links", "labels", "sysctls", "runtime", "secrets",
+    "configs", "restart", "command", "entrypoint", "extends", "env_file", "volumes_from",
+    "container_name", "user", "build", "dns", "x-crm", "volume_driver", "storage_opt")
+
+
+class TestRestoretestAllowlist(unittest.TestCase):
+    """CRM-007R r3: the restore-test compose is an allowlist, mirroring beta's."""
+
+    def doc(self):
+        with open(ca.RESTORETEST_COMPOSE_PATH) as fh:
+            return json.load(fh)
+
+    def test_shipped_file_uses_only_allowlisted_keys(self):
+        d = self.doc()
+        self.assertEqual(ca.check_restoretest_compose(d), [])
+        self.assertLessEqual(set(d), ca.RESTORETEST_TOP_KEYS)
+        self.assertEqual(set(d["services"]["crm-db"]), ca.RESTORETEST_DB_KEYS)
+        self.assertEqual(set(d["services"]["crm-db"]["volumes"][0]), ca.RESTORETEST_MOUNT_KEYS)
+
+    def test_key_fixtures_refused_for_their_key(self):
+        for name, needle in RESTORETEST_KEY_FIXTURES.items():
+            with self.subTest(fixture=name):
+                with open(os.path.join(FIXTURES, f"restoretest_bad_{name}.json")) as fh:
+                    errors = ca.check_restoretest_compose(json.load(fh))
+                self.assertTrue(any(needle in e for e in errors), errors)
+
+    def test_top_level_keys(self):
+        for key, value in (("include", ["../compose.json"]), ("include", []), ("x-anything", {}),
+                           ("x-", None), ("version", "3"), ("secrets", {}), ("configs", {}),
+                           ("services2", {}), ("Networks", {})):
+            with self.subTest(key=key, value=value):
+                d = self.doc()
+                d[key] = value
+                errors = ca.check_restoretest_compose(d)
+                self.assertTrue(any(f"top-level {key!r}" in e for e in errors), errors)
+        d = self.doc()
+        del d["name"]  # name is required (the project name), not merely allowed
+        self.assertNotEqual(ca.check_restoretest_compose(d), [])
+
+    def test_refused_service_keys(self):
+        for key in RESTORETEST_REFUSED_DB_KEYS:
+            for value in ("x", [], {}, None, True):
+                with self.subTest(key=key, value=value):
+                    d = self.doc()
+                    d["services"]["crm-db"][key] = value
+                    errors = ca.check_restoretest_compose(d)
+                    self.assertTrue(any(f"crm-db: key {key!r}" in e for e in errors), errors)
+
+    def test_image_must_be_a_pinned_mariadb(self):
+        good = self.doc()["services"]["crm-db"]["image"]
+        for image in (good + "\n", good[:-1], good + "0", good.replace("mariadb:", "mysql:"),
+                      "mariadb@sha256:" + "0" * 64, "x/mariadb:11@sha256:" + "0" * 64,
+                      good.replace("@sha256:", "@sha512:"), good.upper(), None, ["x"], 1):
+            with self.subTest(image=image):
+                d = self.doc()
+                d["services"]["crm-db"]["image"] = image
+                self.assertNotEqual(ca.check_restoretest_compose(d), [])
+
+    def test_mounts_are_plain_named_volumes(self):
+        refused = (
+            {"bind": {"propagation": "rshared"}}, {"bind": {}}, {"volume": {"subpath": "x"}},
+            {"volume": {"nocopy": True}}, {"volume": {}}, {"tmpfs": {"size": 1}},
+            {"propagation": "rshared"}, {"subpath": "x"}, {"read_only": True},
+            {"consistency": "cached"}, {"type": "bind"}, {"type": "tmpfs"},
+            {"type": "npipe"}, {"type": "image"}, {"source": "/srv/CRM/runtime/beta/db"},
+            {"source": ["db"]}, {"source": None}, {"target": "/var/lib/mysql/"})
+        for over in refused:
+            with self.subTest(over=over):
+                d = self.doc()
+                d["services"]["crm-db"]["volumes"][0].update(over)
+                self.assertNotEqual(ca.check_restoretest_compose(d), [])
+        for vols in ("db:/var/lib/mysql", ["db:/var/lib/mysql"], [], None,
+                     [self.doc()["services"]["crm-db"]["volumes"][0]] * 2):
+            with self.subTest(vols=vols):
+                d = self.doc()
+                d["services"]["crm-db"]["volumes"] = vols
+                self.assertNotEqual(ca.check_restoretest_compose(d), [])
+
+    def test_cli_refuses_an_include(self):  # check_access.py restoretest, on a copy of scripts/
+        import tempfile
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        shutil.copytree(os.path.join(REPO, "scripts"), os.path.join(root, "scripts"))
+        os.makedirs(os.path.join(root, "deploy", "beta", "restoretest"))
+        shutil.copy(os.path.join(FIXTURES, "restoretest_bad_top_include.json"),
+                    os.path.join(root, "deploy", "beta", "restoretest", "compose.json"))
+        res = subprocess.run([sys.executable, "-I", os.path.join(root, "scripts", "check_access.py"),
+                              "restoretest"], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 1, res.stderr)
+        self.assertIn("top-level 'include' is not allowed", res.stderr)
 
 
 # --- 6. export bound to its target -----------------------------------------------
@@ -627,6 +735,24 @@ class TestBetaExportBound(ExportMixin, tb.BetaStackEnv):
     def test_too_many_arguments_refused(self):
         self.assert_export_refused(self.export("export-a", "export-b"), "usage")
 
+    def test_forwarded_url_is_the_derived_pinned_url(self):  # CRM-007R r3
+        # export.sh passes export_csv.py the URL check_access.py derives from the
+        # env file. With beta CRM_BASE_URL must equal it, so forwarding
+        # "$CRM_BASE_URL" instead is an equivalent mutant on beta; this pins the
+        # contract (the dev test below is where that mutant differs).
+        self.write_env(CRM_BETA_APP_PORT="8391")
+        environ = {"CRM_TEST_ROOT": os.path.join(self.tmp, "runtime"), "CRM_RUNTIME_DIR": self.runtime}
+        derived, problem = ca.pinned_base_url("beta", environ)
+        self.assertIsNone(problem)
+        self.assertEqual(derived, "http://127.0.0.1:8391")
+        res = self.export("export-u", CRM_BASE_URL=derived)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        [call] = self.exports()
+        argv = call.split(" ")
+        self.assertEqual(argv[1:3], ["beta", "--base-url"])
+        self.assertEqual(argv[3], derived)
+        self.assertEqual(argv[4:], ["--out", os.path.join(self.backups, "export-u")])
+
     def test_other_urls_refused(self):  # routed through check_access.py beta --base-url
         for url in (f"http://{BIND}:8180", "http://127.0.0.1:8180", "http://127.0.0.1:8280/",
                     "http://localhost:8280", "https://127.0.0.1:8280", "http://127.0.0.1:18080", ""):
@@ -676,6 +802,21 @@ class TestDevExportBound(ExportMixin, ts.ScriptEnv):
                     continue
                 self.assert_export_refused(res, "CRM_BASE_URL must be exactly")
                 self.assertNotIn(DEV_BIND, res.stderr, "the bind address is not printed")
+
+    def test_forwarded_url_is_the_derived_pinned_url(self):  # CRM-007R r3
+        environ = {"CRM_RUNTIME_DIR": self.runtime}
+        derived, problem = ca.pinned_base_url("dev", environ)
+        self.assertIsNone(problem)
+        self.assertEqual(derived, self.dev_url)
+        for url in (None, "", derived):  # unset/empty: only the derived URL can be forwarded
+            with self.subTest(url=url):
+                res = self.export("export-u", CRM_BASE_URL=url)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                [call] = self.exports()
+                self.assertEqual(call.split(" ")[1:],
+                                 ["dev", "--base-url", derived, "--out",
+                                  os.path.join(self.backups, "export-u")])
+                shutil.rmtree(self.backups)
 
     def test_dev_env_without_a_valid_bind_ip_refused(self):
         self.write_env(self.runtime, CRM_BIND_IP="127.0.0.1")
@@ -767,6 +908,18 @@ class TestExportCsvBound(unittest.TestCase):
                     self.assert_refused(self.run_main(target, self.url[target], out))
             self.assertEqual(sorted(os.listdir(backups)), ["export-link", "export-old"])
             self.assertEqual(os.listdir(self.out(target, "export-old")), [])
+
+    def test_trailing_newline_in_the_name_refused(self):  # CRM-007R r3: fullmatch, not `$`
+        for target in ("dev", "beta"):
+            for name in ("export-n\n", "export-n\r", "export-n\n\n", "\nexport-n"):
+                with self.subTest(target=target, name=name):
+                    out = self.out(target, name)
+                    problem = ca.export_out_problem(target, out, self.seam[target])
+                    self.assertIn("must be named export-", problem or "")
+                    self.assert_refused(self.run_main(target, self.url[target], out))
+                    self.assertFalse(os.path.lexists(out))
+            self.assertIsNone(ca.export_out_problem(target, self.out(target, "export-n"),
+                                                    self.seam[target]))
 
     def test_symlinked_backup_dir_refused(self):
         dev_backups = os.path.join(self.root, "dev", "backups")

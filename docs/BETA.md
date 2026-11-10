@@ -136,7 +136,7 @@ The base URL (`--base-url` or `CRM_BASE_URL`) is pinned to the target (CRM-007R)
   - **Before anything else** it:
     - verifies `SHA256SUMS` and completeness;
     - refuses unless the throwaway project is `crm-beta-restoretest`, with Compose file `deploy/beta/restoretest/compose.json`;
-    - runs the isolation policy `check_access.py restoretest`: one `crm-db`, no published or exposed port, no bind mount, its own project-scoped volume (driver `local` only) and internal network (only `driver: bridge` and `internal: true`, as for beta), no top-level `secrets` or `configs`;
+    - runs the isolation policy `check_access.py restoretest`: one `crm-db`, no published or exposed port, no bind mount, its own project-scoped volume (driver `local` only) and internal network (only `driver: bridge` and `internal: true`, as for beta). Like beta's it is an allowlist (CRM-007R r3): top level only `name`, `services`, `networks`, `volumes` (so `include`, `x-*`, `secrets`, `configs` are refused); `crm-db` only `image` (`mariadb:<tag>@sha256:<64 hex>`), `environment`, `volumes`, `networks`, `healthcheck`; its one mount only `type: volume`, `source`, `target` (no `bind`/`volume`/`subpath`/`propagation` options);
     - requires the runtime's parent to be exactly `/srv/CRM/runtime` (a test-only override is allowed only under `/tmp`), and refuses if it already exists.
   - **Then** it:
     - unpacks the file archives into that runtime;

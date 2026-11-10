@@ -667,6 +667,17 @@ def check_proxy_conf(text):
 RESTORETEST_PROJECT = "crm-beta-restoretest"
 RESTORETEST_COMPOSE_PATH = os.path.join(REPO, "deploy", "beta", "restoretest", "compose.json")
 RESTORETEST_NETWORK = "restoretest-net"
+# CRM-007R r3: the restore-test compose is an allowlist, as beta's is. Every key
+# the shipped file uses, and nothing else: include, x-*, secrets, configs at top
+# level, and depends_on, ports, network_mode, security_opt, labels, ... (any key
+# not listed here, including restart/command/entrypoint, which the shipped file
+# does not use) on crm-db are refused, so a new Compose feature cannot widen it.
+RESTORETEST_TOP_KEYS = frozenset({"name", "services", "networks", "volumes"})
+RESTORETEST_DB_KEYS = frozenset({"image", "environment", "volumes", "networks", "healthcheck"})
+# A mount is {type: volume, source: <the project volume>, target: /var/lib/mysql}
+# only: no bind/volume/tmpfs option blocks (bind, subpath, propagation, nocopy),
+# no read_only/consistency.
+RESTORETEST_MOUNT_KEYS = frozenset({"type", "source", "target"})
 
 
 def check_restoretest_compose(doc):
@@ -677,13 +688,14 @@ def check_restoretest_compose(doc):
     its own project-scoped named volume and internal network (no `name:` or
     `external`, which could alias another project's resources). CRM-007R: the
     network may set only driver: bridge and internal: true (beta's allowlist),
-    the volume only driver: local, and there are no top-level secrets/configs."""
+    the volume only driver: local. r3: top-level and crm-db keys are allowlisted
+    (RESTORETEST_TOP_KEYS, RESTORETEST_DB_KEYS) and the one mount may carry no
+    options (RESTORETEST_MOUNT_KEYS)."""
     out = []
     if not isinstance(doc, dict):
         return ["restoretest compose is not a mapping"]
-    for key in ("secrets", "configs"):
-        if key in doc:
-            out.append(f"restoretest compose: top-level '{key}' is not allowed")
+    out += [f"restoretest compose: top-level {key!r} is not allowed"
+            for key in sorted(set(doc) - RESTORETEST_TOP_KEYS, key=str)]
     if doc.get("name") != RESTORETEST_PROJECT:
         out.append(f"restoretest compose project name is not {RESTORETEST_PROJECT}")
     services = doc.get("services")
@@ -692,17 +704,23 @@ def check_restoretest_compose(doc):
     db = services["crm-db"]
     if not isinstance(db, dict):
         return out + ["crm-db: not a mapping"]
-    if not str(db.get("image", "")).startswith("mariadb:") or "@sha256:" not in str(db.get("image")):
-        out.append("crm-db must use the digest-pinned mariadb image")
-    for key in ("ports", "expose", "network_mode", "extends", "env_file", "privileged",
-                "cap_add", "devices", "pid", "ipc", "volumes_from", "container_name"):
-        if key in db:
-            out.append(f"crm-db: '{key}' is not allowed in the restore test")
+    out += [f"crm-db: key {key!r} is not allowed in the restore test"
+            for key in sorted(set(db) - RESTORETEST_DB_KEYS, key=str)]
+    image = db.get("image")
+    if not isinstance(image, str) or not image.startswith("mariadb:") \
+            or not PINNED_IMAGE.fullmatch(image):
+        out.append("crm-db must use the digest-pinned mariadb image (mariadb:<tag>@sha256:<64 hex>)")
     vols = db.get("volumes") or []
     if not isinstance(vols, list) or len(vols) != 1 or not isinstance(vols[0], dict) \
-            or vols[0].get("type") != "volume" or vols[0].get("target") != "/var/lib/mysql":
+            or vols[0].get("type") != "volume" or vols[0].get("target") != "/var/lib/mysql" \
+            or not isinstance(vols[0].get("source"), str):
         out.append("crm-db must mount exactly one named volume at /var/lib/mysql (no bind mounts)")
-    vol_name = vols[0].get("source") if vols and isinstance(vols[0], dict) else None
+    elif set(vols[0]) - RESTORETEST_MOUNT_KEYS:
+        out.append("crm-db: the volume mount may set only type, source and target (refused: "
+                   + ", ".join(repr(k) for k in sorted(set(vols[0]) - RESTORETEST_MOUNT_KEYS,
+                                                       key=str)) + ")")
+    vol_name = vols[0].get("source") if isinstance(vols, list) and vols \
+        and isinstance(vols[0], dict) and isinstance(vols[0].get("source"), str) else None
     top_vols = doc.get("volumes")
     if not isinstance(top_vols, dict) or set(top_vols) != {vol_name}:
         out.append("restoretest compose must declare exactly the one volume crm-db mounts")
@@ -842,7 +860,8 @@ def target_runtime(target, environ):
 
 # CRM-007R: an export is a new directory export-<name> directly under the
 # target's constant backup directory $runtime/backups.
-EXPORT_NAME_RE = re.compile(r"^export-[A-Za-z0-9._-]+$")
+# Use fullmatch: `$` alone would also accept a trailing newline ("export-n\n").
+EXPORT_NAME_RE = re.compile(r"export-[A-Za-z0-9._-]+")
 
 
 def export_out_problem(target, out, environ):
@@ -855,7 +874,7 @@ def export_out_problem(target, out, environ):
         return problem
     backups = os.path.join(runtime, "backups")
     name = os.path.basename(out)
-    if not EXPORT_NAME_RE.match(name) or ".." in name:
+    if not EXPORT_NAME_RE.fullmatch(name) or ".." in name:
         return "the export directory must be named export-[A-Za-z0-9._-]+ (no '..')"
     if out != os.path.join(backups, name):
         return f"the export directory must sit directly under {backups} (the {target} backups)"
