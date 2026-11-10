@@ -40,7 +40,7 @@ EXCEPTION_CODES = frozenset({
     "title_unstorable_without_account", "date_completed_not_storable",
     "email_without_recipient_imported_as_task", "owner_from_created_by", "priority_server_default",
     # CRM-008-G
-    "email_kept_as_task",
+    "email_kept_as_task", "date_completed_server_stamped",
 })
 # Codes that refuse the record: it is never sent (CRM-008).
 REFUSING_CODES = frozenset({"owner_required_unresolved", "email_from_invalid"})

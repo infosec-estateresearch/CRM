@@ -52,11 +52,12 @@ The detail views of Call, Meeting and Task keep every core field (Task keeps `da
 Core `Task.dateCompleted` is `readOnly`: the API discards it on create and update. The core hook `Espo\Modules\Crm\Hooks\Task\DateCompleted` sets it whenever the status changes: null for any status other than Completed, and **now** for Completed (the REST API does not set the IMPORT option that would skip this). Without a custom rule, every imported completed Task would show the import time.
 
 - **The field.** The importer sends the Salesforce value in `Task.sfCompletedAt` (a datetime, not `readOnly`, so the API accepts it).
-- **The hook.** `custom/Espo/Custom/Hooks/Task/PreserveSalesforceCompletedDate.php` is a `beforeSave` hook with `$order = 20`, so it runs after the core hook. When the status is `Completed`, `sfCompletedAt` is set, **and** the Task is new or `sfCompletedAt` changed in this save, it sets `dateCompleted = sfCompletedAt`. Every other save is left to core:
+- **The hook.** `custom/Espo/Custom/Hooks/Task/PreserveSalesforceCompletedDate.php` is a `beforeSave` hook with `$order = 20`, so it runs after the core hook. It receives the saving user by constructor injection (`Espo\Entities\User`). When the status is `Completed`, `sfCompletedAt` is set, **and** the Task is new, or `sfCompletedAt` changed in this save, or the status changed in a save by an API user (`User::isApi()`; only ER Import is one), it sets `dateCompleted = sfCompletedAt`. The last case is the importer re-completing a Task that staff reopened (CRM-008-G round 2). Every other save is left to core:
   - an unrelated edit leaves `dateCompleted` unchanged;
   - reopening a Task sets it to null (core);
-  - a staff member re-completing a reopened Task gets core's "now", because `sfCompletedAt` did not change;
-  - a Task that is not Completed keeps a null `dateCompleted`, even with `sfCompletedAt` set.
+  - a staff member re-completing a reopened Task gets core's "now", because `sfCompletedAt` did not change and a person is not an API user;
+  - a Task that is not Completed keeps a null `dateCompleted`, even with `sfCompletedAt` set;
+  - a Completed Task with no `sfCompletedAt` (no source completion date) gets core's "now": **EspoCRM shows the import time** for it. The importer records these as `date_completed_server_stamped` (see [IMPORT.md](IMPORT.md)).
 - **The decision table** is mirrored in `tests/unit/activity_policy.py` (`completed_date_after_save`), checked statically against the hook, and run against the real hook file under `php` with stubs when `php` is installed.
 
 ## 3. No email sending or receiving (D5)

@@ -143,16 +143,27 @@ BROKEN = {
                                   {"completed_hook_shape"}),
     "completed_hook_any_status": (_completed("!== 'Completed'", "=== 'Never'"),
                                   {"completed_hook_body"}),
-    "completed_hook_every_save": (_completed("if (!$entity->isNew() && "
-                                             "!$entity->isAttributeChanged('sfCompletedAt')) {\n"
+    "completed_hook_every_save": (_completed("if (\n            !$entity->isNew() &&\n"
+                                             "            !$entity->isAttributeChanged('sfCompletedAt') &&\n"
+                                             "            !$isImporterRecompletion\n        ) {\n"
                                              "            return;\n        }", ""),
                                   {"completed_hook_body"}),
-    "completed_hook_new_only": (_completed(" && !$entity->isAttributeChanged('sfCompletedAt')", ""),
+    "completed_hook_new_only": (_completed("            !$entity->isAttributeChanged('sfCompletedAt') &&\n", ""),
                                 {"completed_hook_body"}),
     "completed_hook_null_copied": (_completed("if (!$sfCompletedAt) {\n            return;\n        }",
                                               ""), {"completed_hook_body"}),
     "completed_hook_wrong_target": (_completed("set('dateCompleted'", "set('dateEnd'"),
                                     {"completed_hook_body"}),
+    # Round 2: the importer's re-completion (status change by an API user).
+    "completed_hook_no_recompletion": (_completed("            !$entity->isAttributeChanged('sfCompletedAt') &&\n"
+                                                  "            !$isImporterRecompletion\n",
+                                                  "            !$entity->isAttributeChanged('sfCompletedAt')\n"),
+                                       {"completed_hook_body"}),
+    "completed_hook_any_user": (_completed(" && $this->user->isApi()", ""), {"completed_hook_body"}),
+    "completed_hook_admin_not_api": (_completed("$this->user->isApi()", "$this->user->isAdmin()"),
+                                     {"completed_hook_body"}),
+    "completed_hook_no_user": (_completed("    public function __construct(private User $user)\n    {}\n", ""),
+                               {"completed_hook_shape"}),
 }
 
 
@@ -295,16 +306,22 @@ class TestCompletedDateTable(unittest.TestCase):
     """The spec of PreserveSalesforceCompletedDate (WO CRM-008-G item 2)."""
 
     SF, NOW, OLD = "2025-05-05 10:00:00", "2026-11-10 12:00:00", "2026-01-01 09:00:00"
-    # isNew, status, sfCompletedAt, sfCompletedAt changed, core value -> dateCompleted
+    # isNew, status, sfCompletedAt, sfCompletedAt changed, core value, status changed,
+    # saving user is API -> dateCompleted
     TABLE = [
-        (True, "Completed", SF, True, NOW, SF),               # import creates Completed
-        (True, "Not Started", SF, True, None, None),          # not Completed: core null
-        (True, "Completed", None, False, NOW, NOW),           # no Salesforce date: core now
-        (False, "Completed", SF, False, SF, SF),              # unrelated PUT: unchanged
-        (False, "Not Started", SF, False, None, None),        # reopened: core null
-        (False, "Completed", SF, False, NOW, NOW),            # staff re-completes: core now
-        (False, "Completed", SF, True, NOW, SF),              # importer corrects the date
-        (False, "Completed", OLD, True, SF, OLD),
+        (True, "Completed", SF, True, NOW, True, True, SF),          # import creates Completed
+        (True, "Not Started", SF, True, None, True, True, None),     # not Completed: core null
+        (True, "Completed", None, False, NOW, True, True, NOW),      # no Salesforce date: core now
+        (False, "Completed", SF, False, SF, False, False, SF),       # unrelated PUT: unchanged
+        (False, "Not Started", SF, False, None, True, False, None),  # staff reopens: core null
+        (False, "Completed", SF, False, NOW, True, False, NOW),      # staff re-completes: core now
+        (False, "Completed", SF, True, NOW, False, True, SF),        # importer corrects the date
+        (False, "Completed", OLD, True, SF, False, True, OLD),
+        # Round 2: the importer re-completes a Task staff reopened -> the Salesforce date.
+        (False, "Completed", SF, False, NOW, True, True, SF),
+        (False, "Not Started", SF, False, None, True, True, None),   # importer reopens: core null
+        (False, "Completed", SF, False, SF, False, True, SF),        # importer, no status change
+        (False, "Completed", None, False, NOW, True, True, NOW),     # importer, no source date
     ]
 
     def test_rule_table(self):
@@ -316,13 +333,25 @@ class TestCompletedDateTable(unittest.TestCase):
         original = policy.completed_date_after_save
         try:
             # The probe hook without the refinement: every Completed save takes sfCompletedAt.
-            policy.completed_date_after_save = (lambda n, st, sf, ch, core:
+            policy.completed_date_after_save = (lambda n, st, sf, ch, core, sc, api:
                                                 sf if st == "Completed" and sf else core)
             wrong = [args for *args, want in self.TABLE
                      if policy.completed_date_after_save(*args) != want]
+            # Round 1 (no API-user rule): the importer's re-completion keeps core's now.
+            policy.completed_date_after_save = (lambda n, st, sf, ch, core, sc, api:
+                                                sf if st == "Completed" and sf and (n or ch) else core)
+            wrong_round1 = [args for *args, want in self.TABLE
+                            if policy.completed_date_after_save(*args) != want]
+            # Any user's status change: the staff re-completion would take sfCompletedAt.
+            policy.completed_date_after_save = (lambda n, st, sf, ch, core, sc, api:
+                                                sf if st == "Completed" and sf and (n or ch or sc) else core)
+            wrong_any_user = [args for *args, want in self.TABLE
+                              if policy.completed_date_after_save(*args) != want]
         finally:
             policy.completed_date_after_save = original
         self.assertEqual(len(wrong), 1)
+        self.assertEqual(len(wrong_round1), 1)
+        self.assertEqual(len(wrong_any_user), 1)
 
 
 # Minimal stand-ins for Espo\ORM\Entity, SaveOptions and BeforeSave; the hook file runs
@@ -337,6 +366,11 @@ namespace Espo\ORM { class Entity {
     function isAttributeChanged($k) { return in_array($k, $this->changed, true); }
 } }
 namespace Espo\ORM\Repository\Option { class SaveOptions {} }
+namespace Espo\Entities { class User {
+    public $api;
+    function __construct($api) { $this->api = $api; }
+    function isApi() { return $this->api; }
+} }
 namespace Espo\Core\Hook\Hook { interface BeforeSave {
     public function beforeSave(\Espo\ORM\Entity $entity, \Espo\ORM\Repository\Option\SaveOptions $options): void;
 } }
@@ -344,11 +378,12 @@ namespace {
     require $argv[1];
     $rows = json_decode($argv[2], true);
     $cls = 'Espo\Custom\Hooks\Task\PreserveSalesforceCompletedDate';
-    $hook = new $cls();
     $out = [$cls::$order];
-    foreach ($rows as [$new, $status, $sf, $changed, $core]) {
+    foreach ($rows as [$new, $status, $sf, $changed, $core, $statusChanged, $api]) {
+        $hook = new $cls(new \Espo\Entities\User($api));
         $e = new \Espo\ORM\Entity(['status' => $status, 'sfCompletedAt' => $sf, 'dateCompleted' => $core],
-                                    $new, $changed ? ['sfCompletedAt'] : []);
+                                    $new, array_merge($changed ? ['sfCompletedAt'] : [],
+                                                      $statusChanged ? ['status'] : []));
         $hook->beforeSave($e, new \Espo\ORM\Repository\Option\SaveOptions());
         $out[] = $e->get('dateCompleted');
     }
@@ -379,9 +414,31 @@ class TestCompletedHookRuns(unittest.TestCase):
     @unittest.skipUnless(shutil.which("php"), "php not installed")
     def test_harness_detects_the_unrefined_probe_hook(self):
         source = policy.load_bundle()["completedHook"].replace(
-            "!$entity->isNew() && !$entity->isAttributeChanged('sfCompletedAt')", "false", 1)
+            "!$entity->isNew() &&\n            !$entity->isAttributeChanged('sfCompletedAt') &&\n"
+            "            !$isImporterRecompletion", "false", 1)
+        self.assertNotEqual(source, policy.load_bundle()["completedHook"])
         out = self.run_hook(source)
         self.assertNotEqual(out[1:], [want for *_a, want in TestCompletedDateTable.TABLE])
+
+    def mismatches(self, old, new):
+        source = policy.load_bundle()["completedHook"]
+        self.assertIn(old, source)
+        out = self.run_hook(source.replace(old, new, 1))
+        return [args for (*args, want), got in zip(TestCompletedDateTable.TABLE, out[1:]) if got != want]
+
+    @unittest.skipUnless(shutil.which("php"), "php not installed")
+    def test_harness_detects_the_round1_hook(self):
+        # Without the API-user rule, the importer's re-completion keeps core's now.
+        wrong = self.mismatches("$entity->isAttributeChanged('status') && $this->user->isApi()", "false")
+        self.assertEqual(wrong, [[False, "Completed", TestCompletedDateTable.SF, False,
+                                  TestCompletedDateTable.NOW, True, True]])
+
+    @unittest.skipUnless(shutil.which("php"), "php not installed")
+    def test_harness_detects_a_status_change_by_any_user(self):
+        # Without the API check, a staff re-completion would take sfCompletedAt.
+        wrong = self.mismatches(" && $this->user->isApi()", "")
+        self.assertEqual(wrong, [[False, "Completed", TestCompletedDateTable.SF, False,
+                                  TestCompletedDateTable.NOW, True, False]])
 
 
 if __name__ == "__main__":

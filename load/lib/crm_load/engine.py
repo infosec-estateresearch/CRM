@@ -492,6 +492,14 @@ class Loader:
             o["skipped"]["absent_unexplained"] = unexplained
         return cur
 
+    def _server_stamped(self, obj, row, entity, attrs, existed, stored):
+        """CRM-008-G round 2 (PL decision): a Task created Completed with no source completion
+        date (sfCompletedAt null) keeps status Completed, and EspoCRM's core hook stamps the
+        import time as dateCompleted. Recorded (id only) when such a Task was created."""
+        if entity == "Task" and not existed and stored is not None and \
+                attrs.get("status") == "Completed" and attrs.get("sfCompletedAt") is None:
+            self.exception(obj, row["Id"], "date_completed_server_stamped")
+
     def _record_exc(self, obj, row, codes):
         """Record the codes; True when one of them refuses the record (never sent)."""
         for c in codes:
@@ -560,7 +568,9 @@ class Loader:
             entity, attrs, exc = m.task(r, ctx, routed)
             if self._record_exc("Task", r, exc):
                 continue
-            self.upsert("task", "Task", r["Id"], entity, r["Id"], attrs)
+            existed = r["Id"] in self.index[entity]
+            stored = self.upsert("task", "Task", r["Id"], entity, r["Id"], attrs)
+            self._server_stamped("Task", r, entity, attrs, existed, stored)
         for r in self._source("Event"):
             attrs, exc = m.event(r, ctx)
             if self._record_exc("Event", r, exc):
@@ -592,9 +602,11 @@ class Loader:
                 sent_only = [c for c in exc if c in SENT_ONLY_CODES]
                 if self._record_exc("EmailMessage", r, [c for c in exc if c not in SENT_ONLY_CODES]):
                     continue
+                existed = r["Id"] in self.index["Task"]
                 stored = self.upsert("email_message", "EmailMessage", r["Id"], "Task", r["Id"], attrs)
                 if stored is not None:
                     self._record_exc("EmailMessage", r, sent_only)
+                self._server_stamped("EmailMessage", r, "Task", attrs, existed, stored)
                 continue
             if not has_to:
                 # An Email from an earlier run stays an Email; null to would be refused (400).

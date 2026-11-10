@@ -126,11 +126,16 @@ def archived_save_allowed(is_new, fetched_status, is_admin, is_import_user, chan
 
 # --- the Task completion-date rule (mirrors PreserveSalesforceCompletedDate.php) ------
 
-def completed_date_after_save(is_new, status, sf_completed_at, sf_changed, core_value):
+def completed_date_after_save(is_new, status, sf_completed_at, sf_changed, core_value,
+                              status_changed=False, is_api=False):
     """WO CRM-008-G item 2: Task.dateCompleted after the custom hook, given the value the
     core DateCompleted hook left (core_value: null when not Completed, now when the status
-    became Completed, else unchanged). sf_changed means sfCompletedAt changed in this save."""
-    if status == "Completed" and sf_completed_at and (is_new or sf_changed):
+    became Completed, else unchanged). sf_changed means sfCompletedAt changed in this save;
+    status_changed that the status changed in it; is_api that the saving user is an API user
+    (only ER Import is one). Round 2: an API user's change to Completed (the importer
+    re-completing a Task that staff reopened) also takes sfCompletedAt; a staff one keeps now."""
+    if status == "Completed" and sf_completed_at and \
+            (is_new or sf_changed or (status_changed and is_api)):
         return sf_completed_at
     return core_value
 
@@ -362,8 +367,9 @@ _COMPLETED_BODY = re.compile(r"""
 \s*if\s*\(\s*\$entity->get\('status'\)\s*!==\s*'Completed'\s*\)\s*\{\s*return\s*;\s*\}
 \s*\$sfCompletedAt\s*=\s*\$entity->get\('sfCompletedAt'\)\s*;
 \s*if\s*\(\s*!\s*\$sfCompletedAt\s*\)\s*\{\s*return\s*;\s*\}
-\s*if\s*\(\s*!\s*\$entity->isNew\(\)\s*&&\s*!\s*\$entity->isAttributeChanged\('sfCompletedAt'\)\s*\)
-\s*\{\s*return\s*;\s*\}
+\s*\$isImporterRecompletion\s*=\s*\$entity->isAttributeChanged\('status'\)\s*&&\s*\$this->user->isApi\(\)\s*;
+\s*if\s*\(\s*!\s*\$entity->isNew\(\)\s*&&\s*!\s*\$entity->isAttributeChanged\('sfCompletedAt'\)\s*&&
+\s*!\s*\$isImporterRecompletion\s*\)\s*\{\s*return\s*;\s*\}
 \s*\$entity->set\('dateCompleted'\s*,\s*\$sfCompletedAt\s*\)\s*;\s*
 """, re.X)
 
@@ -376,6 +382,10 @@ def rule_completed_hook_shape(b):
             (r"^\s*use\s+Espo\\Core\\Hook\\Hook\\BeforeSave\s*;", "use BeforeSave"),
             (r"^\s*use\s+Espo\\ORM\\Entity\s*;", "use Entity"),
             (r"^\s*use\s+Espo\\ORM\\Repository\\Option\\SaveOptions\s*;", "use SaveOptions"),
+            # Round 2: the saving user, injected as EspoCRM hooks are (constructor injection).
+            (r"^\s*use\s+Espo\\Entities\\User\s*;", "use User"),
+            (r"public\s+function\s+__construct\s*\(\s*private\s+User\s+\$user\s*\)",
+             "constructor injection of User"),
             (r"\bclass\s+PreserveSalesforceCompletedDate\s+implements\s+BeforeSave\b",
              "implements BeforeSave"),
             # After the core DateCompleted hook (default order 9), so its "now" is overridden.

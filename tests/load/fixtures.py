@@ -496,12 +496,29 @@ class FakeEspo:
     # CRM-008-F: phone_list (list rows omit phoneNumberData), title_account (title stored only
     # with an account), email_to (Email.to required).
     # CRM-008-G: date_completed_read_only (API input discarded, fact 1), date_completed_core (the
-    # core DateCompleted hook, fact 2), completed_hook (PreserveSalesforceCompletedDate, fact 3).
+    # core DateCompleted hook, fact 2), completed_hook (PreserveSalesforceCompletedDate, fact 3),
+    # completed_hook_api_recompletion (round 2: the hook also fires on a status change by an API
+    # user, i.e. the importer re-completing a Task staff reopened).
     CHECKS = ("owner", "required", "max_length", "currency", "email",
               "phone_list", "title_account", "email_to",
-              "date_completed_read_only", "date_completed_core", "completed_hook")
+              "date_completed_read_only", "date_completed_core", "completed_hook",
+              "completed_hook_api_recompletion")
     # The server clock the core DateCompleted hook stamps ("now"); never a source value.
     NOW = "2026-11-10 09:00:00"
+
+    # The saving user: every REST call (send) is ER Import, an API user. staff() saves as a
+    # person (not an API user), as the UI would (CRM-008-G round 2).
+    saving_user_is_api = True
+
+    def staff(self, method, path, body=None):
+        """``send`` as a staff (non-API) user; not recorded as an importer request or write."""
+        n, r, h = len(self.writes), len(self.requests), len(self.headers)
+        self.saving_user_is_api = False
+        try:
+            return self.send(method, path, body=body)
+        finally:
+            self.saving_user_is_api = True
+            del self.writes[n:], self.requests[r:], self.headers[h:]
 
     def _checks(self):
         return set(self.CHECKS) - getattr(self, "disabled_checks", set())
@@ -527,8 +544,10 @@ class FakeEspo:
         if "date_completed_core" in checks and (new or rec.get("status") != before.get("status")):
             # Core hook, on a status change: null unless Completed, then now (no IMPORT option).
             rec["dateCompleted"] = self.NOW if rec.get("status") == "Completed" else None
+        api_recompletion = "completed_hook_api_recompletion" in checks and not new and \
+            self.saving_user_is_api and rec.get("status") != before.get("status")
         if "completed_hook" in checks and rec.get("status") == "Completed" and rec.get("sfCompletedAt") and \
-                (new or rec.get("sfCompletedAt") != before.get("sfCompletedAt")):
+                (new or rec.get("sfCompletedAt") != before.get("sfCompletedAt") or api_recompletion):
             # The custom hook, $order 20 (after core).
             rec["dateCompleted"] = rec["sfCompletedAt"]
 

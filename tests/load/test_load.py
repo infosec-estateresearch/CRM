@@ -2431,12 +2431,22 @@ class TestCrm008G(Base):
         self.assertEqual(rec[c["id"]]["dateCompleted"], f.NOW)                # core, no sf date
         f.send("PUT", f"Task/{a['id']}", body={"name": "n", "dateCompleted": "2020-01-01 00:00:00"})
         self.assertEqual(rec[a["id"]]["dateCompleted"], sf)                    # unrelated, readOnly
-        f.send("PUT", f"Task/{a['id']}", body={"status": "Not Started"})
+        f.staff("PUT", f"Task/{a['id']}", body={"status": "Not Started"})
         self.assertIsNone(rec[a["id"]]["dateCompleted"])                      # reopen: core null
-        f.send("PUT", f"Task/{a['id']}", body={"status": "Completed"})
+        f.staff("PUT", f"Task/{a['id']}", body={"status": "Completed"})
         self.assertEqual(rec[a["id"]]["dateCompleted"], f.NOW)                # staff re-completes
         f.send("PUT", f"Task/{a['id']}", body={"sfCompletedAt": "2025-02-02 00:00:00"})
         self.assertEqual(rec[a["id"]]["dateCompleted"], "2025-02-02 00:00:00")   # importer corrects
+        # Round 2: the importer (an API user) re-completes a Task staff reopened.
+        f.staff("PUT", f"Task/{a['id']}", body={"status": "Not Started"})
+        f.send("PUT", f"Task/{a['id']}", body={"status": "Completed"})
+        self.assertEqual(rec[a["id"]]["dateCompleted"], "2025-02-02 00:00:00")
+        # An API save without a status change leaves dateCompleted alone.
+        rec[a["id"]]["dateCompleted"] = f.NOW
+        f.send("PUT", f"Task/{a['id']}", body={"name": "m"})
+        self.assertEqual(rec[a["id"]]["dateCompleted"], f.NOW)
+        self.assertEqual(f.writes[-1], ("PUT", "Task", {"name": "m"}))
+        self.assertNotIn(("PUT", "Task", {"status": "Not Started"}), f.writes)   # staff(): not the importer's
 
     def test_fake_without_the_hook_stamps_now(self):
         f = FakeEspo()
@@ -2483,6 +2493,86 @@ class TestCrm008G(Base):
         writes = self.rerun_writes(snap, espo)
         self.assertEqual(writes, [("PUT", "Task", {"sfCompletedAt": "2025-05-05 10:00:00"})])
         self.assertEqual(rec["dateCompleted"], "2025-05-05 10:00:00")
+
+    # ------------------------------------------------------------ round 2: re-completion
+    def reopen_and_rerun(self, snap, espo, sf_id):
+        rec = espo.by_sf("Task")[sf_id]
+        espo.staff("PUT", f"Task/{rec['id']}", body={"status": "Not Started"})     # staff reopens
+        self.assertIsNone(rec["dateCompleted"])
+        return rec, self.rerun_writes(snap, espo)
+
+    def test_rerun_recompletes_a_reopened_task_with_the_source_date(self):
+        # The reviewer's probe: reopen, then a rerun gives dateCompleted == source.
+        snap, espo = self.load()
+        rec, writes = self.reopen_and_rerun(snap, espo, fx.T[0])
+        self.assertEqual(writes, [("PUT", "Task", {"status": "Completed"})])
+        self.assertEqual((rec["status"], rec["dateCompleted"]), ("Completed", "2025-05-05 10:00:00"))
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+
+    def test_rerun_recompletion_without_the_api_rule_stamps_now(self):
+        # The round-1 hook (no API-user rule): the same probe ends with core's now.
+        snap, espo = self.load()
+        espo.disabled_checks = {"completed_hook_api_recompletion"}
+        rec, writes = self.reopen_and_rerun(snap, espo, fx.T[0])
+        self.assertEqual(writes, [("PUT", "Task", {"status": "Completed"})])
+        self.assertEqual(rec["dateCompleted"], espo.NOW)
+
+    def test_staff_recompletion_keeps_now_and_a_rerun_leaves_it(self):
+        snap, espo = self.load()
+        rec = espo.by_sf("Task")[fx.T[0]]
+        espo.staff("PUT", f"Task/{rec['id']}", body={"status": "Not Started"})
+        espo.staff("PUT", f"Task/{rec['id']}", body={"status": "Completed"})
+        self.assertEqual(rec["dateCompleted"], espo.NOW)                      # core, a person
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+        self.assertEqual(rec["dateCompleted"], espo.NOW)
+
+    # ------------------------------------------------------------ round 2: no source date
+    def test_completed_task_without_a_date_is_server_stamped(self):
+        data = fx.org()
+        data["Task"][0]["CompletedDateTime"] = None
+        snap, espo = self.load(data)
+        t = espo.by_sf("Task")[fx.T[0]]
+        self.assertEqual((t["status"], t["sfCompletedAt"], t["dateCompleted"]), ("Completed", None, espo.NOW))
+        self.assertIn("date_completed_server_stamped", self.codes(fx.T[0]))
+        line = [e for e in self.exceptions() if e["reason"] == "date_completed_server_stamped"]
+        self.assertEqual(line, [{"object": "Task", "sfId": fx.T[0], "reason": "date_completed_server_stamped"}])
+        self.assertEqual(self.report()["exceptions"]["byReason"]["date_completed_server_stamped"], 1)
+        # A Task with a source date gets no code; a re-run creates nothing, so records none.
+        self.assertTrue(any(r.get("Status") == "Completed" and r.get("CompletedDateTime") for r in data["Task"]))
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+        self.assertNotIn("date_completed_server_stamped", self.report()["exceptions"]["byReason"])
+
+    def test_completed_task_with_a_date_is_not_server_stamped(self):
+        self.load()
+        self.assertNotIn("date_completed_server_stamped", self.report()["exceptions"]["byReason"])
+
+    def test_refused_completed_task_without_a_date_gets_no_stamp_code(self):
+        data = fx.org()
+        data["Task"][0]["CompletedDateTime"] = None
+        data["Task"][0]["OwnerId"] = fx.U_MISSING                # refused: never sent
+        self.load(data)
+        self.assertIn("owner_required_unresolved", self.codes(fx.T[0]))
+        self.assertNotIn("date_completed_server_stamped", self.codes(fx.T[0]))
+
+    def test_email_as_task_without_a_message_date_is_server_stamped(self):
+        data = fx.org()
+        data["EmailMessage"][1]["ToAddress"] = None
+        data["EmailMessage"][1]["MessageDate"] = None
+        snap, espo = self.load(data)
+        t = espo.by_sf("Task")[fx.M[1]]
+        self.assertEqual((t["status"], t["sfCompletedAt"], t["dateCompleted"]), ("Completed", None, espo.NOW))
+        self.assertIn("date_completed_server_stamped", self.codes(fx.M[1]))
+        self.assertEqual([e["object"] for e in self.exceptions() if e["reason"] == "date_completed_server_stamped"],
+                         ["EmailMessage"])
+        self.assertEqual(self.rerun_writes(snap, espo), [])
+        self.assertNotIn("date_completed_server_stamped", self.codes(fx.M[1]))
+
+    def test_email_as_task_with_a_message_date_is_not_server_stamped(self):
+        data = fx.org()
+        data["EmailMessage"][1]["ToAddress"] = None
+        self.load(data)
+        self.assertIn("email_without_recipient_imported_as_task", self.codes(fx.M[1]))
+        self.assertNotIn("date_completed_server_stamped", self.codes(fx.M[1]))
 
     def test_email_without_recipient_task_keeps_message_date(self):
         data = fx.org()
