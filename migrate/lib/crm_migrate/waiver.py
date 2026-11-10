@@ -33,20 +33,37 @@ def _fail(detail):
     raise ConfigError("waiver_invalid", detail=detail)
 
 
+class _DuplicateKey(Exception):
+    """Internal marker; never escapes ``parse_waiver``."""
+
+
 def _no_duplicates(pairs):
     keys = [k for k, _ in pairs]
     if len(keys) != len(set(keys)):
-        _fail("waiver repeats a key")
+        raise _DuplicateKey()
     return dict(pairs)
 
 
 def parse_waiver(raw, today):
-    """Validate waiver bytes against the schema; ``today`` is a ``datetime.date`` (UTC)."""
+    """Validate waiver bytes against the schema; ``today`` is a ``datetime.date`` (UTC).
+
+    Every ``ConfigError`` is raised outside an ``except`` block, so none carries a
+    ``__context__`` that holds the file content."""
     if not isinstance(raw, bytes) or len(raw) > MAX_WAIVER_BYTES:
         _fail("waiver missing or too large")
+    doc, parsed, dup = None, False, False
     try:
         doc = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_duplicates)
+        parsed = True
+    except _DuplicateKey:
+        dup = True
     except (UnicodeDecodeError, ValueError):
+        pass
+    finally:
+        raw = None
+    if dup:
+        _fail("waiver repeats a key")
+    if not parsed:
         _fail("waiver is not valid JSON")
     if not isinstance(doc, dict) or tuple(sorted(doc)) != KEYS:
         _fail("waiver must hold exactly authorisation, identity, expires")
@@ -60,6 +77,8 @@ def parse_waiver(raw, today):
     try:
         when = _dt.date.fromisoformat(expires)
     except ValueError:
+        when = None
+    if when is None:
         _fail("expires must be an ISO date YYYY-MM-DD")
     if when < today:
         raise ConfigError("waiver_expired", detail="the waiver has expired")
@@ -70,9 +89,12 @@ def parse_waiver(raw, today):
 
 def load_waiver(path, today=None):
     today = today or _dt.datetime.now(_dt.timezone.utc).date()
+    raw = None
     try:
         with open(path, "rb") as fh:
             raw = fh.read(MAX_WAIVER_BYTES + 1)
     except OSError:
+        raw = None
+    if raw is None:
         _fail("waiver file cannot be read")
     return parse_waiver(raw, today)

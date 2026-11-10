@@ -91,10 +91,14 @@ def load_config(environ):
     return {n: environ[n] for n in ENV_NAMES}
 
 
+class _DuplicateKey(Exception):
+    """Internal marker; never escapes ``read_stdin_credentials``."""
+
+
 def _no_duplicate_keys(pairs):
     keys = [k for k, _ in pairs]
     if len(keys) != len(set(keys)):
-        raise ConfigError("credentials_stdin", detail="credentials JSON repeats a key")
+        raise _DuplicateKey()
     return dict(pairs)
 
 
@@ -117,12 +121,21 @@ def read_stdin_credentials(stream):
         raise ConfigError("credentials_stdin", detail="no credentials on stdin")
     if len(raw) > MAX_STDIN_BYTES:
         raise ConfigError("credentials_stdin", detail="credentials on stdin exceed 4 KiB")
+    doc, parsed, dup = None, False, False
     try:
         doc = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_duplicate_keys)
+        parsed = True
+    except _DuplicateKey:
+        dup = True
     except (UnicodeDecodeError, ValueError):
-        raise ConfigError("credentials_stdin", detail="credentials on stdin are not a JSON object") from None
+        pass
     finally:
         raw = None
+    # Raised outside the except: no __context__ holding the raw stdin (password included).
+    if dup:
+        raise ConfigError("credentials_stdin", detail="credentials JSON repeats a key")
+    if not parsed:
+        raise ConfigError("credentials_stdin", detail="credentials on stdin are not a JSON object")
     if not isinstance(doc, dict) or sorted(doc) != ["password", "username"]:
         raise ConfigError("credentials_stdin", detail="credentials JSON must hold exactly username and password")
     for key in ("username", "password"):

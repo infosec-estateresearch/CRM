@@ -154,7 +154,9 @@ def _decode_strict_utf8(body):
     try:
         text = body.decode("utf-8", "strict")
     except UnicodeDecodeError:
-        raise ProtocolError("soap_encoding_refused", detail="SOAP document is not UTF-8") from None
+        text = None                               # raised below, outside the except: no chained body
+    if text is None:
+        raise ProtocolError("soap_encoding_refused", detail="SOAP document is not UTF-8")
     if "\x00" in text or text.startswith("﻿"):
         raise ProtocolError("soap_encoding_refused", detail="SOAP document is not UTF-8")
     decl = _XML_DECL_RE.match(text)
@@ -205,8 +207,11 @@ class _HardenedXMLParser:
     def parse(self, data):
         try:
             self.parser.Parse(data, True)
+            ok = True
         except pyexpat.ExpatError:
-            raise ET.ParseError("not well-formed") from None
+            ok = False
+        if not ok:                                # raised outside the except: no chained error
+            raise ET.ParseError("not well-formed")
         return self._builder.close()
 
 
@@ -226,9 +231,12 @@ def parse_xml(body, max_bytes=MAX_SOAP_RESPONSE):
     if _DTD_TEXT_RE.search(text):                     # layer 2
         raise ProtocolError("soap_dtd_refused", detail="DOCTYPE or ENTITY in SOAP document")
     try:
-        return _hardened_parser().parse(text.encode("utf-8"))
+        root = _hardened_parser().parse(text.encode("utf-8"))
     except ET.ParseError:
-        raise ProtocolError("soap_response", detail="SOAP document is not well-formed") from None
+        root = None                               # raised below, outside the except: no chained body
+    if root is None:
+        raise ProtocolError("soap_response", detail="SOAP document is not well-formed")
+    return root
 
 
 def _body_child(root):
@@ -245,7 +253,9 @@ def check_login_body(body):
     try:
         root = parse_xml(body)
     except ProtocolError:
-        raise RefusedRequest(detail="SOAP request body refused") from None
+        root = None                               # raised below, outside the except
+    if root is None:
+        raise RefusedRequest(detail="SOAP request body refused")
     op = _body_child(root)
     if op.tag != f"{{{NS_PARTNER}}}login":
         raise RefusedRequest("soap_operation_refused", detail="only SOAP login and logout are permitted")
@@ -254,7 +264,9 @@ def check_login_body(body):
     try:
         expected = render_login_body(username, password)
     except ConfigError:
-        raise RefusedRequest(detail="SOAP login body refused") from None
+        expected = None                           # raised below, outside the except
+    if expected is None:
+        raise RefusedRequest(detail="SOAP login body refused")
     if expected != body:
         raise RefusedRequest(detail="SOAP login body is not the fixed template")
 
@@ -322,7 +334,9 @@ def origin_of_server_url(server_url, version, sandbox=False):
         parts = urlsplit(server_url)
         port = parts.port
     except ValueError:
-        raise OriginError("server_url_refused", detail="serverUrl is malformed") from None
+        parts = None                              # raised below, outside the except
+    if parts is None:
+        raise OriginError("server_url_refused", detail="serverUrl is malformed")
     if parts.scheme != "https" or port is not None or parts.username or parts.password \
             or parts.query or parts.fragment or server_url.endswith(("?", "#")):
         raise OriginError("server_url_refused", detail="serverUrl must be https origin plus path")

@@ -93,7 +93,8 @@ class SalesforceClient:
         try:
             return json.loads(resp.body.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
-            raise ProtocolError("response_not_json", status=resp.status) from None
+            pass                                  # raised below, outside the except: no chained body
+        raise ProtocolError("response_not_json", status=resp.status)
 
     def authenticate(self, client_id, client_secret):
         resp = self._send(build_token_request(self.origin, client_id, client_secret))

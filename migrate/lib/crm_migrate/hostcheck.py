@@ -165,6 +165,40 @@ def _first_unclosed_quote_line(text):
     return None
 
 
+def _first_cr_line(text):
+    """Line number of the first line holding a CR character (any position), else ``None``."""
+    pos = text.find("\r")
+    return None if pos < 0 else text.count("\n", 0, pos) + 1
+
+
+def _first_continuation_line(text):
+    """Line number of the first non-blank, non-comment line that ends with an unescaped
+    backslash outside single quotes (a shell line continuation), else ``None``."""
+    for number, line in enumerate(text.split("\n"), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        quote, i = None, 0
+        while i < len(line):
+            ch = line[i]
+            if quote == "'":
+                if ch == "'":
+                    quote = None
+            elif ch == "\\":
+                if i == len(line) - 1:
+                    return number                     # escapes the newline: continuation
+                i += 1                                # skip the escaped character
+            elif quote == '"':
+                if ch == '"':
+                    quote = None
+            elif ch in "'\"":
+                quote = ch
+            elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+                break                                 # trailing comment outside quotes
+            i += 1
+    return None
+
+
 def parse_legacy_env(text):
     """Pure strict parser for the ELT env file: returns ``(creds or None, errors)``.
 
@@ -173,12 +207,20 @@ def parse_legacy_env(text):
     The two values may be unquoted (no whitespace, quotes, backslash, backtick or any of
     ``;&|<>()$``), double-quoted (no ``"``, backslash, backtick or ``$`` inside) or
     single-quoted; a quoted value must be closed, with nothing after the closing quote. If
-    any line opens a quote it does not close on that line, the whole file is refused. A
+    any line opens a quote it does not close on that line, or any non-comment line ends with
+    an unescaped backslash outside single quotes, or the file holds any CR character, the
+    whole file is refused. A
     duplicate, missing, empty or ambiguous value is refused. Errors carry line numbers and
     names only, never a value."""
     found, errors = {}, []
     if not isinstance(text, str):
         return None, ["legacy env file is not text"]
+    cr = _first_cr_line(text)
+    if cr is not None:                                # CR is ambiguous between parsers: fail closed
+        return None, [f"legacy env file line {cr} holds a carriage return; file refused"]
+    continued = _first_continuation_line(text)
+    if continued is not None:                         # a value may span lines: ambiguous, fail closed
+        return None, [f"legacy env file line {continued} ends with a line continuation; file refused"]
     unclosed = _first_unclosed_quote_line(text)
     if unclosed is not None:                          # a value may span lines: ambiguous, fail closed
         return None, [f"legacy env file line {unclosed} opens a quote it does not close; file refused"]

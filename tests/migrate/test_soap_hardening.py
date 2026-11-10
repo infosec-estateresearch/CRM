@@ -332,12 +332,12 @@ class AnchorTrailingNewlineTest(unittest.TestCase):
             log = CountsLog(logger)
             log.allow("Word\n")
             log.event("evt\n", code="bad\n", sf_error="BAD\n", **{"key\n": 1}, error="good_code")
-            log.event("evt", code="fine", sf_error="FINE", text="Word\n")
+            log.event("evt", code="fine", sf_error="INVALID_LOGIN", text="Word\n")
             lines = handler.lines
         finally:
             logger.removeHandler(handler)
-        self.assertEqual(lines[0], "crm-migrate event=invalid_event code=<redacted> error=good_code sf_error=<redacted>")
-        self.assertEqual(lines[1], "crm-migrate event=evt code=fine sf_error=FINE text=<redacted>")
+        self.assertEqual(lines[0], "crm-migrate event=invalid_event code=<redacted> error=good_code sf_error=UNKNOWN")
+        self.assertEqual(lines[1], "crm-migrate event=evt code=fine sf_error=INVALID_LOGIN text=<redacted>")
 
     def test_extract(self):
         self.assertIsNone(extract_mod.parse_sf_datetime("2026-11-10T09:00:00.000Z\n"))

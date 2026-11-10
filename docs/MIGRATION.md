@@ -238,7 +238,11 @@ origin `serverUrl` gives). Each is matched on host, path, `SOAPAction`, and a bo
 byte-identical to a fixed template. No other SOAP operation can be expressed. The
 `serverUrl` origin must equal `CRM_SF_ORIGIN` exactly, otherwise the run aborts before any
 REST call. The session id is used only as the Bearer token for that origin and is held only
-in memory. SOAP faults are reduced to `faultcode` and the first `exceptionCode` token.
+in memory. SOAP faults are reduced to `faultcode` and the first `exceptionCode` token, each
+from a fixed set: a `faultcode` outside `auth_soap.FAULTCODES` is reported as `unrecognised`,
+and an `exceptionCode` (or REST `errorCode`) outside `errors.SF_ERROR_CODES` as `UNKNOWN`.
+`CountsLog` re-checks `sf_error` against `errors.SF_ERROR_CODES` before writing a log line
+and writes `UNKNOWN` for anything else.
 SOAP responses must be strict UTF-8 (no UTF-16/UTF-32, with or without BOM, and no other
 declared `encoding`). Any `<!DOCTYPE` or `<!ENTITY` in the decoded text is refused, and the
 expat parser itself raises on any DTD, entity declaration or external entity. A failed
@@ -266,7 +270,9 @@ exit code.
    existing ELT env file. It opens the file read-only, never follows a symlink, and parses it
    strictly (`hostcheck.parse_legacy_env`: unquoted values must not contain whitespace,
    quotes, backslash or any of ``;&|<>()$` ``, and quoted values must be closed with nothing
-   after them). It pipes them as JSON on stdin to
+   after them). The whole file is refused, with only the line number in the error, if any
+   line leaves a quote open, any non-comment line ends with an unescaped backslash outside
+   single quotes (a line continuation), or the file holds any CR character. It pipes them as JSON on stdin to
    `docker compose run -T --rm crm-migrate … --auth soap-legacy --credentials-stdin`. The
    values are never written under `/srv/CRM/runtime/migrate`, into arguments or into the
    environment. The script records the file's sha256 and mtime before and after the run, and

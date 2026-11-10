@@ -93,12 +93,13 @@ def evaluate_gate(contract, describes, write_waiver=None):
                 if rep[flag] is True and (spec.name, flag) in waivers:
                     rep["waived"].append(flag)
                     continue
+                # An identity waiver may pass the gate, but the User finding still reaches the report.
+                if spec.name == "User" and flag == "updateable" and rep[flag] is True:
+                    findings.append("User updateable: L1 finding for Architect decision, not waived")
                 if rep[flag] is True and write_waiver is not None:
                     rep["waived"].append(flag + ":identity")
                     continue
                 rep["ok"] = False
-                if spec.name == "User" and flag == "updateable" and rep[flag] is True:
-                    findings.append("User updateable: L1 finding for Architect decision, not waived")
         fields = _field_map(doc)
         available = []
         for fspec in spec.fields:

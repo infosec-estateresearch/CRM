@@ -4,11 +4,14 @@ Every line is ``crm-migrate event=<name> key=value ...``. Values are numbers,
 booleans, ``None`` or strings from an explicit vocabulary (mode names, statuses,
 error codes, and the object and field names of the contract). Anything else is
 written as ``<redacted>``, so a record value can never reach a log line even if a
-caller passes one by mistake.
+caller passes one by mistake. ``sf_error`` is rendered only if it is in
+``errors.SF_ERROR_CODES``; any other value is written as ``UNKNOWN``.
 """
 
 import logging
 import re
+
+from .errors import SF_ERROR_CODES
 
 LOGGER_NAME = "crm_migrate"
 
@@ -44,6 +47,9 @@ class CountsLog:
                 self.allow(fld.name)
 
     def _render(self, key, value):
+        if key == "sf_error" and value is not None:   # re-checked here: only the fixed set, else UNKNOWN
+            ok = isinstance(value, str) and _SF_ERROR_RE.fullmatch(value) and value in SF_ERROR_CODES
+            return value if ok else "UNKNOWN"
         if value is None or isinstance(value, bool):
             return str(value).lower()
         if isinstance(value, (int, float)):
@@ -52,8 +58,6 @@ class CountsLog:
             if value in self._vocab:
                 return value
             if key in ("code", "error") and _CODE_RE.fullmatch(value):
-                return value
-            if key == "sf_error" and _SF_ERROR_RE.fullmatch(value):
                 return value
         return "<redacted>"
 
