@@ -4,6 +4,7 @@
     crm-load users  <snapshot> --role-map FILE --out NEWDIR
     crm-load load   <snapshot> --target dev|beta --out NEWDIR [--accept-drift URL]
                     [--reconciliation RECONCILE-RUN-DIR] [--resume PREVIOUS-OUT-DIR]
+                    [--phone-refusals PREVIOUS-OUT-DIR/phone-refusals.json]
 
 ``<snapshot>`` is the ``<id>`` directory in either layout (see ``snapshot.locate``).
 ``--out`` is always a new directory. It gets ``run.json`` (the snapshot manifest sha256 and
@@ -20,6 +21,15 @@ under a sealed, verified ``mode`` ``selftest`` parent (``snapshot.synthetic_orig
 directory, and refuses (``synthetic_content_in_beta``) a snapshot in which any Account
 ``Name`` contains the synthetic marker ``SENTINEL-7f3a``. Output is
 counts and codes only; record content never reaches stdout, stderr or the report.
+
+Before any write, ``load`` reads ``GET Settings``: ``--target beta`` refuses
+(``phone_international_enabled``, exit 3) unless ``phoneNumberInternational`` is exactly
+``false`` (a refused read counts as not confirmed); dev reports the value and continues.
+``phone-refusals.json`` in the output holds the sha256 of (sfId, field, number) of every
+phone the server refused (number trimmed, as stored); given back with ``--phone-refusals``,
+those numbers are not retried. That file is opened with O_NOFOLLOW and must be a regular file
+owned by the running user (root under load.sh), mode 0600; the report's ``phoneRefusals``
+says whether one was supplied.
 
 Exit codes: 0 ok, 2 usage/config, 3 gate refused, 4 transport, 5 load finished with
 write failures.
@@ -84,6 +94,7 @@ def _parser():
     ld.add_argument("--accept-drift")
     ld.add_argument("--resume")
     ld.add_argument("--reconciliation")
+    ld.add_argument("--phone-refusals")
     ld.add_argument("--target", required=True, choices=TARGETS)
     return p
 
@@ -139,6 +150,59 @@ def _resume_dir(path, snapshot, target):
     return os.path.join(path, PROGRESS_FILE)
 
 
+REFUSALS_FILE = "phone-refusals.json"
+_HEX64 = frozenset("0123456789abcdef")
+
+
+def _refusals_owner():
+    """The uid a phone-refusals file must be owned by: the running user (root under load.sh)."""
+    return os.geteuid()
+
+
+def _read_refusals(path):
+    """A list of sha256 hex digests (content-free); anything else is refused.
+
+    Opened without following a symlink, then checked on the open descriptor (no race): a
+    regular file, owned by the running user (root under load.sh), mode exactly 0600."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        raise LoadError("phone_refusals_unreadable") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != _refusals_owner() or stat.S_IMODE(st.st_mode) != 0o600:
+            raise LoadError("phone_refusals_not_sealed")
+        with os.fdopen(fd, "rb") as fh:
+            fd = None
+            doc = json.loads(fh.read().decode("utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        raise LoadError("phone_refusals_unreadable") from None
+    finally:
+        if fd is not None:
+            os.close(fd)
+    if not isinstance(doc, list) or not all(isinstance(h, str) and len(h) == 64 and set(h) <= _HEX64
+                                            for h in doc):
+        raise LoadError("phone_refusals_invalid")
+    return frozenset(doc)
+
+
+def _write_refusals(out, hashes):
+    fd = os.open(os.path.join(out, REFUSALS_FILE), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(sorted(hashes)) + "\n")
+
+
+def check_phone_setting(client, target, log):
+    """beta: phoneNumberInternational must be exactly false. dev: reported, never refused."""
+    value = client.setting("phoneNumberInternational")
+    log.event("settings", phoneNumberInternational=("unknown" if value is _UNKNOWN else value))
+    if target == "beta" and value is not False:
+        raise LoadError("phone_international_enabled", exit_code=3)
+
+
+_UNKNOWN = object()
+
+
 def _env_transport(environ):
     host = environ.get("CRM_LOAD_HOST")
     port = environ.get("CRM_LOAD_PORT")
@@ -159,8 +223,9 @@ def run_load(args, transport, log, contract_dir=None, sleep=time.sleep, fail_aft
         raise LoadError("mapping_contract_mismatch")
     mapper = Mapper(mapping, load_json("lead_source_map.json", contract_dir),
                     NameParser(load_json("name_patterns.json", contract_dir)["patterns"]), snapshot.as_of,
-                    snapshot.t_start)
+                    snapshot.t_start, synthetic=snapshot.synthetic is True)
     previous = _resume_dir(args.resume, snapshot, args.target) if args.resume is not None else None
+    refused = _read_refusals(args.phone_refusals) if args.phone_refusals is not None else frozenset()
     out = _new_dir(args.out)
     _write_run(out, snapshot, args.target)
     log.event("run", resumed=previous is not None, reconciliation=args.reconciliation is not None)
@@ -168,11 +233,21 @@ def run_load(args, transport, log, contract_dir=None, sleep=time.sleep, fail_aft
     if fail_after is not None:
         client = fail_after(client)
     progress = Progress(os.path.join(out, PROGRESS_FILE), previous)
-    loader = Loader(snapshot, mapper, client, log, progress, mapping)
+    try:
+        # Before any write: the phone rule beta depends on (refused unless exactly false).
+        check_phone_setting(EspoClient(transport, sleep=sleep, unknown=_UNKNOWN), args.target, log)
+    except LoadError:
+        progress.close()
+        raise
+    loader = Loader(snapshot, mapper, client, log, progress, mapping, refused)
+    loader.refusals_supplied = args.phone_refusals is not None
+    log.event("phone_refusals", supplied=loader.refusals_supplied, remembered=len(refused))
     try:
         loader.run()
     finally:
         progress.close()
+    # Only a completed run writes it: an interrupted output stays resumable (run.json + progress).
+    _write_refusals(out, loader.refused)
     report = build_report(loader, snapshot.manifest["status"], args.accept_drift)
     write_outputs(out, report, loader.exceptions)
     failed = sum(t.get("failed", 0) for o in loader.objects.values() for t in o["targets"].values())

@@ -12,12 +12,14 @@
   the report equals that of an uninterrupted run.
 """
 
+import hashlib
 import json
 import os
 
 from .api import WriteRejected
 from .errors import LoadError
 from .mapping import EXCEPTION_CODES, check_shape
+from .users import is_human
 
 ENTITIES = ("User", "ServiceType", "Account", "Contact", "Opportunity", "Task", "Call", "Meeting", "Email")
 SF_TO_ENTITY = {"Account": "Account", "Contact": "Contact", "Opportunity": "Opportunity"}
@@ -41,16 +43,22 @@ PHONE_ATTRS = ("phoneNumberData", "phoneNumber")
 NUMERIC_ATTRS = ("amount",)
 
 
+def _phone_text(number):
+    """A phone as EspoCRM stores it with phoneNumberInternational=false: trimmed."""
+    return number.strip() if isinstance(number, str) else number
+
+
 def _phone_set(value):
     """phoneNumberData compared on (phoneNumber, type, primary) only, order-insensitive.
 
-    EspoCRM reads it back with extra keys (optOut, invalid) that the importer never sends."""
+    EspoCRM reads it back with extra keys (optOut, invalid) that the importer never sends,
+    and stores each number trimmed (like the phoneNumber attribute)."""
     if not isinstance(value, list):
         return None
     out = set()
     for p in value:
         if isinstance(p, dict):
-            out.add((p.get("phoneNumber"), p.get("type"), p.get("primary") is True))
+            out.add((_phone_text(p.get("phoneNumber")), p.get("type"), p.get("primary") is True))
     return frozenset(out) or None
 
 
@@ -67,12 +75,33 @@ def _number(value):
     return _norm(value)
 
 
-def same_value(attr, new, old):
+def as_stored(value, text=False):
+    """A value as EspoCRM stores it: varchar strings are trimmed (core StringTrim), text verbatim."""
+    if isinstance(value, str) and not text:
+        return value.strip()
+    return value
+
+
+def same_value(attr, new, old, text=False, entity=None):
     if attr == "phoneNumberData":
         return _phone_set(new) == _phone_set(old)
     if attr in NUMERIC_ATTRS:
         return _number(_norm(new)) == _number(_norm(old))
-    return _norm(new) == _norm(old)
+    if entity == "Call" and attr == "duration" and _norm(new) is None and old in (0, None):
+        # A null duration is stored as 0 (derived from dateEnd - dateStart): equal to blank.
+        return True
+    return _norm(as_stored(new, text)) == _norm(as_stored(old, text))
+
+
+def refusal_hash(sf_id, field, value):
+    """Content-free memory of a server-refused phone: sha256 of (sfId, field, value as stored,
+    i.e. trimmed), so a number differing only in surrounding blanks is the same refusal."""
+    value = _phone_text(value)
+    return hashlib.sha256(json.dumps([sf_id, field, value], separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _primaries(data):
+    return [dict(p, primary=(i == 0)) for i, p in enumerate(data)]
 
 
 class EspoContext:
@@ -161,7 +190,11 @@ class Progress:
 
 
 class Loader:
-    def __init__(self, snapshot, mapper, client, log, progress, mapping):
+    def __init__(self, snapshot, mapper, client, log, progress, mapping, refused=frozenset()):
+        self.refused_before = frozenset(refused)    # refusal hashes from earlier runs (read only)
+        self.refused = set()                        # refusal hashes this run holds
+        self.text_attrs = {e: set(v) for e, v in mapping.get("textAttributes", {}).items() if e != "note"}
+        self.no_blank = set(mapping.get("enumNoBlank", {}).get("attributes", []))
         self.s = snapshot
         self.mapper = mapper
         self.client = client
@@ -173,7 +206,8 @@ class Loader:
         self.objects = {o: {"source_rows": 0, "source_current": 0,
                             "skipped": {"soft_deleted": 0, "absent_unexplained": 0, "out_of_scope": 0,
                                         "represented_by_email_message": 0, "parent_soft_deleted": 0,
-                                        "user_not_human": 0, "value_shape": 0},
+                                        "user_not_human": 0, "value_shape": 0,
+                                        "enum_blank_unrepresentable": 0},
                             "targets": {}, "exceptions": {}} for o in SOURCE_OBJECTS}
         self.flagged = {}
 
@@ -215,20 +249,32 @@ class Loader:
 
     # ---------------------------------------------------------------- upsert
     def upsert(self, phase, obj, sf_id, entity, key, attrs, create=True):
+        blank_enum = [a for a in attrs if f"{entity}.{a}" in self.no_blank and _norm(attrs[a]) is None]
+        if blank_enum:
+            # No "" option: null and "" are refused (400 valid) and omitting stores the default.
+            self.exception(obj, sf_id, "enum_blank_unrepresentable")
+            self.objects[obj]["skipped"]["enum_blank_unrepresentable"] += 1
+            return None
+        attrs = self._known_refusals(obj, sf_id, attrs)
         existing = self.index[entity].get(key)
+        text = self.text_attrs.get(entity, set())
         action = "unchanged"
         try:
             if existing is None:
                 if not create:
                     self.exception(obj, sf_id, "opportunity_unresolved")
                     return None
-                body = {a: v for a, v in attrs.items() if _norm(v) is not None}
+                # Every mapped attribute is sent, a blank one as explicit null: an omitted one
+                # would be stored as the entityDefs default (a manufactured value).
+                body = {a: (None if _norm(v) is None and not _is_multi(a) else v) for a, v in attrs.items()}
                 try:
                     new_id = self.client.create(entity, body)
+                    self.index[entity][key] = dict(body, id=new_id)
                 except WriteRejected as exc:
-                    body = self._without_phones(obj, sf_id, exc, body)
-                    new_id = self.client.create(entity, body)
-                self.index[entity][key] = dict(body, id=new_id)
+                    base, phones = self._split_phones(exc, body)
+                    new_id = self.client.create(entity, base)
+                    self.index[entity][key] = dict(base, id=new_id)
+                    self._probe_phones(obj, sf_id, entity, self.index[entity][key], phones)
                 action = "created"
             else:
                 diff = {}
@@ -244,21 +290,26 @@ class Loader:
                             merged.update(v or {})
                             if merged != (old or {}):
                                 diff[a] = merged
-                    elif not same_value(a, v, old):
-                        diff[a] = v
+                    elif not same_value(a, v, old, a in text, entity):
+                        diff[a] = None if _norm(v) is None else v
                 if diff:
                     for a in [a for a in diff if a.endswith("Columns")]:
                         ids = a[:-len("Columns")] + "Ids"
                         if ids not in diff:
                             diff[ids] = list(existing.get(ids) or [])
+                    wrote = True
                     try:
                         self.client.update(entity, existing["id"], diff)
-                    except WriteRejected as exc:
-                        diff = self._without_phones(obj, sf_id, exc, diff)
-                        if diff:
-                            self.client.update(entity, existing["id"], diff)
-                    if diff:
                         existing.update(diff)
+                    except WriteRejected as exc:
+                        base, phones = self._split_phones(exc, diff)
+                        if base:
+                            self.client.update(entity, existing["id"], base)
+                            existing.update(base)
+                        accepted = self._probe_phones(obj, sf_id, entity, existing, phones)
+                        # Nothing stored (every phone probe refused, no other change): unchanged.
+                        wrote = bool(base) or accepted > 0
+                    if wrote:
                         action = "updated"
         except WriteRejected as exc:
             if exc.status == 409:
@@ -277,12 +328,70 @@ class Loader:
         self._count(obj, entity, action)
         return self.index[entity].get(key)
 
-    def _without_phones(self, obj, sf_id, exc, attrs):
-        """A 400 on the field phoneNumber: retry once without the phone (never invented)."""
-        if exc.status != 400 or exc.field != "phoneNumber" or not any(a in attrs for a in PHONE_ATTRS):
+    # ---------------------------------------------------------------- phones
+    def _known_refusals(self, obj, sf_id, attrs):
+        """Drop numbers the server refused before (same sfId, field and value): never retried."""
+        memory = self.refused_before | self.refused
+        if not memory:
+            return attrs
+        attrs = dict(attrs)
+        if isinstance(attrs.get("phoneNumber"), str) and \
+                refusal_hash(sf_id, "phoneNumber", attrs["phoneNumber"]) in memory:
+            self.refused.add(refusal_hash(sf_id, "phoneNumber", attrs["phoneNumber"]))
+            self.exception(obj, sf_id, "phone_refused")
+            attrs["phoneNumber"] = None
+        if isinstance(attrs.get("phoneNumberData"), list):
+            keep = []
+            for p in attrs["phoneNumberData"]:
+                h = refusal_hash(sf_id, "phoneNumberData", p.get("phoneNumber"))
+                if h in memory:
+                    self.refused.add(h)
+                    self.exception(obj, sf_id, "phone_refused")
+                else:
+                    keep.append(p)
+            attrs["phoneNumberData"] = _primaries(keep) or None
+        return attrs
+
+    @staticmethod
+    def _split_phones(exc, attrs):
+        """A 400 on the field phoneNumber: the write without the phones, and the phones to probe."""
+        if exc.status != 400 or exc.field != "phoneNumber" or not any(attrs.get(a) for a in PHONE_ATTRS):
             raise exc
-        self.exception(obj, sf_id, "phone_rejected")
-        return {a: v for a, v in attrs.items() if a not in PHONE_ATTRS}
+        base = {a: v for a, v in attrs.items() if a not in PHONE_ATTRS}
+        phones = {a: attrs[a] for a in PHONE_ATTRS if attrs.get(a)}
+        return base, phones
+
+    def _probe_phones(self, obj, sf_id, entity, record, phones):
+        """One write per number (bounded by the numbers on the record): the valid ones are kept,
+        each refused one is remembered by hash and reported as phone_refused (record id only).
+        Returns the number of accepted (stored) probe writes."""
+        accepted = 0
+        if phones.get("phoneNumber"):
+            value = phones["phoneNumber"]
+            try:
+                self.client.update(entity, record["id"], {"phoneNumber": value})
+                record["phoneNumber"] = value
+                accepted += 1
+            except WriteRejected as exc:
+                if exc.status != 400 or exc.field != "phoneNumber":
+                    raise
+                self.refused.add(refusal_hash(sf_id, "phoneNumber", value))
+                self.exception(obj, sf_id, "phone_refused")
+        if phones.get("phoneNumberData"):
+            kept = []
+            for p in phones["phoneNumberData"]:
+                trial = _primaries(kept + [p])
+                try:
+                    self.client.update(entity, record["id"], {"phoneNumberData": trial})
+                    kept.append(p)
+                    record["phoneNumberData"] = trial
+                    accepted += 1
+                except WriteRejected as exc:
+                    if exc.status != 400 or exc.field != "phoneNumber":
+                        raise
+                    self.refused.add(refusal_hash(sf_id, "phoneNumberData", p.get("phoneNumber")))
+                    self.exception(obj, sf_id, "phone_refused")
+        return accepted
 
     # ---------------------------------------------------------------- phases
     def _source(self, obj):
@@ -317,14 +426,16 @@ class Loader:
         self.build_index()
         users = self._source("User")
         self.objects["User"]["skipped"]["user_not_human"] = sum(
-            1 for r in users if r.get("UserType") != "Standard")
+            1 for r in users if not is_human(r, self.s.synthetic is True))
         # ServiceType: distinct Opportunity_Service__c values, by name with sfValue.
         opps = self._source("Opportunity")
-        values = sorted({r["Opportunity_Service__c"] for r in opps
+        # Keyed on the value as stored (trimmed, like every varchar): a padded value is the same type.
+        values = sorted({r["Opportunity_Service__c"].strip() for r in opps
                          if isinstance(r.get("Opportunity_Service__c"), str) and r["Opportunity_Service__c"].strip()})
         first = {}
         for r in opps:
-            first.setdefault(r.get("Opportunity_Service__c"), r["Id"])
+            if isinstance(r.get("Opportunity_Service__c"), str):
+                first.setdefault(r["Opportunity_Service__c"].strip(), r["Id"])
         for v in values:
             # The value is content: progress and exceptions carry the first Opportunity Id instead.
             self.upsert("service_type", "Opportunity", first[v], "ServiceType", v, {"name": v, "sfValue": v})

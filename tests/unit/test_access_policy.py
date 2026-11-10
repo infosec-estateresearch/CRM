@@ -363,7 +363,7 @@ class TestMetadataConsistency(unittest.TestCase):
     def test_crm001_account_definitions_preserved(self):
         fields = self.defs["Account"]["fields"]
         self.assertEqual(fields["learningPlatformAccess"]["options"],
-                         ["No", "TLP", "Full Access", "E-Course"])
+                         ["", "No", "TLP", "Full Access", "E-Course"])
         self.assertEqual(fields["parent"]["type"], "link")
         self.assertEqual(self.defs["Account"]["links"]["branches"]["foreign"], "parent")
         self.assertIn("billingAddressPostalCode",

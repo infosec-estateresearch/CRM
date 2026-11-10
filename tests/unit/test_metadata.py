@@ -90,7 +90,8 @@ class TestAccountDefs(unittest.TestCase):
         self.assertEqual([o for o in self.fields["industry"]["options"] if o], [
             "Solicitor", "Other Legal Service", "Barrister", "Accountant", "Other"])
         self.assertEqual(self.fields["learningPlatformAccess"]["options"],
-                         ["No", "TLP", "Full Access", "E-Course"])
+                         ["", "No", "TLP", "Full Access", "E-Course"])
+        self.assertEqual(self.fields["learningPlatformAccess"]["default"], "No")
         self.assertEqual(self.fields["learningPlatformAccess"]["type"], "enum")
         self.assertEqual(self.fields["practiceManagementSystem"]["type"], "varchar")
 
@@ -99,7 +100,7 @@ class TestAccountDefs(unittest.TestCase):
         self.assertEqual(seeder.INDUSTRIES,
                          [o for o in self.fields["industry"]["options"] if o])
         self.assertEqual(seeder.LEARNING_PLATFORM_ACCESS,
-                         self.fields["learningPlatformAccess"]["options"])
+                         [o for o in self.fields["learningPlatformAccess"]["options"] if o])
 
     def test_self_link_parent_and_branches(self):
         parent, branches = self.links["parent"], self.links["branches"]

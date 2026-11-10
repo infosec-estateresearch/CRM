@@ -2,7 +2,7 @@
 # Load one sealed Salesforce snapshot into EspoCRM through crm-load (CRM-006).
 # Usage (root only):
 #   scripts/load.sh [--accept-drift URL] [--resume PREVIOUS-OUT-DIR] [--reconciliation RECONCILE-RUN-DIR]
-#                   <dev|beta> <snapshot-dir> <new-output-dir>
+#                   [--phone-refusals PREVIOUS-OUT-DIR/phone-refusals.json] <dev|beta> <snapshot-dir> <new-output-dir>
 #
 #   dev   accepts only a synthetic snapshot: <snapshot-dir> is
 #         $SNAPSHOT_BASE/<name>-selftest/run-1 or /run-2, and the sealed and canonical
@@ -18,6 +18,8 @@
 #                        it for a RECONCILED one.
 #   --resume DIR         an earlier, interrupted output of the same snapshot sha and target;
 #                        crm-load checks the sha. It is only read; the new output is separate.
+#   --phone-refusals FILE the previous run's <out>/phone-refusals.json; pass it on every re-run
+#                        (see docs/IMPORT.md), otherwise refused phones are probed again.
 #   --reconciliation DIR the sealed *-reconcile run (<id>-reconcile/report/manifest.json) whose
 #                        report/reconciliation.json supplies the absent_unexplained counts;
 #                        crm-load checks it names this snapshot. Required for beta, optional
@@ -37,6 +39,9 @@
 #     way directly under $SNAPSHOT_BASE;
 #   * the resume directory, when given, is a canonical root-owned 0700 directory holding only
 #     root-owned 0600 regular files, under a root-owned 0700 parent;
+#   * the phone refusals file, when given, is a canonical root-owned 0600 regular file (no
+#     symlink) under a root-owned 0700 parent (the --resume rule); crm-load re-checks it on
+#     the open descriptor (O_NOFOLLOW + fstat);
 #   * the output directory does not exist, is not under $SNAPSHOT_BASE, and its parent is
 #     a root-owned 0700 directory; crm-load creates it 0700 and its files 0600;
 #   * $RUNTIME_BASE/<target>/load.env is a root-owned 0600 regular file holding exactly
@@ -60,11 +65,13 @@ die() {
     exit 2
 }
 
-USAGE="usage: $PROG [--accept-drift URL] [--resume DIR] [--reconciliation DIR] <dev|beta> <snapshot-dir> <new-output-dir>"
+USAGE="usage: $PROG [--accept-drift URL] [--resume DIR] [--reconciliation DIR] [--phone-refusals FILE] <dev|beta> <snapshot-dir> <new-output-dir>"
 DRIFT_RE='^https://github\.com/infosec-estateresearch/CRM/issues/9#issuecomment-[0-9]{1,20}$'
 accept_drift=
 resume=
 reconciliation=
+refusals=
+have_refusals=0
 have_drift=0
 have_resume=0
 have_rec=0
@@ -82,6 +89,10 @@ while [ "$#" -gt 0 ]; do
             [ "$have_rec" -eq 0 ] || die "--reconciliation given twice"
             [ "$#" -ge 2 ] || die "$USAGE"
             have_rec=1; reconciliation=$2; shift 2 ;;
+        --phone-refusals)
+            [ "$have_refusals" -eq 0 ] || die "--phone-refusals given twice"
+            [ "$#" -ge 2 ] || die "$USAGE"
+            have_refusals=1; refusals=$2; shift 2 ;;
         --) shift; break ;;
         -*) die "unknown option" ;;
         *) break ;;
@@ -225,6 +236,23 @@ if [ "$have_resume" -eq 1 ]; then
         "$SNAPSHOT_BASE"/*) die "resume directory must not be under $SNAPSHOT_BASE" ;;
     esac
     extra+=(--resume "$resume")
+fi
+
+# --- phone refusals (optional): a previous output's phone-refusals.json -----------------
+if [ "$have_refusals" -eq 1 ]; then
+    case "$refusals" in
+        /*) ;;
+        *) die "phone refusals file must be absolute" ;;
+    esac
+    [ -f "$refusals" ] && [ ! -L "$refusals" ] || die "phone refusals file is not a regular file"
+    [ "$(realpath -e -- "$refusals")" = "$refusals" ] || die "phone refusals path is not canonical"
+    [ "$(owner_mode "$refusals")" = "$REQUIRED_UID 600" ] || die "phone refusals file is not root-owned 0600"
+    [ "$(owner_mode "$(dirname -- "$refusals")")" = "$REQUIRED_UID 700" ] \
+        || die "phone refusals parent must be root-owned 0700"
+    case "$refusals" in
+        "$SNAPSHOT_BASE"/*) die "phone refusals file must not be under $SNAPSHOT_BASE" ;;
+    esac
+    extra+=(--phone-refusals "$refusals")
 fi
 
 # --- runtime env --------------------------------------------------------------------

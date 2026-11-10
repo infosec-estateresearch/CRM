@@ -31,6 +31,8 @@ EXCEPTION_CODES = frozenset({
     "date_start_from_activity_date", "date_start_from_created",
     "value_shape",
     "parent_soft_deleted_in_sf",
+    "enum_blank_unrepresentable", "call_duration_unknown", "phone_refused",
+    "synthetic_enum_mapped",
 })
 
 # Every source field a mapping function reads, per object (besides those named in
@@ -124,8 +126,10 @@ def addresses(value):
 
 
 class Mapper:
-    def __init__(self, mapping, lead_map, name_parser, as_of, t_start=None):
+    def __init__(self, mapping, lead_map, name_parser, as_of, t_start=None, synthetic=False):
         self.m = mapping
+        # Selftest only: a real snapshot never consults syntheticEnumMap.
+        self.synthetic_map = mapping.get("syntheticEnumMap", {}) if synthetic is True else {}
         self.lead_map = lead_map.get("map", {}) if isinstance(lead_map, dict) else {}
         self.names = name_parser
         self.as_of = as_of
@@ -140,6 +144,15 @@ class Mapper:
             return value
         exc.append("enum_unmapped")
         return None
+
+    def _synthetic(self, key, value, exc=None):
+        """The selftest-only target for a synthetic picklist value, or None (always None for a
+        real snapshot). A use is recorded as synthetic_enum_mapped when ``exc`` is given."""
+        table = self.synthetic_map.get(key)
+        target = table.get(value) if isinstance(table, dict) and isinstance(value, str) else None
+        if target is not None and exc is not None:
+            exc.append("synthetic_enum_mapped")
+        return target
 
     def _dt(self, value, exc):
         try:
@@ -278,6 +291,8 @@ class Mapper:
         raw_stage = row.get("StageName")
         stage = self.m["stageMap"].get(raw_stage) if isinstance(raw_stage, str) else None
         if stage is None:
+            stage = self._synthetic("Opportunity.StageName", raw_stage, exc)
+        if stage is None:
             exc.append("stage_unmapped")
         attrs["stage"] = stage
         close = attrs["closeDate"]
@@ -286,7 +301,7 @@ class Mapper:
         attrs["lossReasonLegacyMissing"] = bool(stage == self.m["lostStage"] and attrs["lossReason"] is None)
         attrs["accountId"] = self.ref("Account", row.get("AccountId"), ctx, exc, "account_unresolved")
         service = row.get("Opportunity_Service__c")
-        attrs["serviceTypeId"] = None if blank(service) else ctx.service_type_id(service)
+        attrs["serviceTypeId"] = None if blank(service) else ctx.service_type_id(service.strip())
         lead = self.lead_map.get(row.get("LeadSource")) if isinstance(row.get("LeadSource"), str) else None
         attrs["introducedById"] = None
         attrs["channel"] = None
@@ -302,12 +317,16 @@ class Mapper:
             attrs[g] = text(parsed.get(g))
         return attrs, exc
 
-    def task_entity(self, row):
-        return self.m["taskSubtypeEntity"].get(row.get("TaskSubtype"), "Task")
+    def task_entity(self, row, exc=None):
+        sub = row.get("TaskSubtype")
+        entity = self.m["taskSubtypeEntity"].get(sub) if isinstance(sub, str) else None
+        if entity is None:
+            entity = self._synthetic("Task.TaskSubtype", sub, exc)
+        return entity or "Task"
 
     def task(self, row, ctx):
         exc = []
-        entity = self.task_entity(row)
+        entity = self.task_entity(row, exc)
         attrs = self._legacy(row, ctx, exc)
         attrs["name"] = text(row.get("Subject"))
         ptype, pid = self._parent(row, ctx, exc)
@@ -316,10 +335,14 @@ class Mapper:
         if entity == "Task":
             status = row.get("Status")
             attrs["status"] = self.m["taskStatusMap"].get(status) if isinstance(status, str) else None
+            if attrs["status"] is None:
+                attrs["status"] = self._synthetic("Task.Status", status, exc)
             if not blank(status) and attrs["status"] is None:
                 exc.append("status_unmapped")
             prio = row.get("Priority")
             attrs["priority"] = self.m["taskPriorityMap"].get(prio) if isinstance(prio, str) else None
+            if attrs["priority"] is None:
+                attrs["priority"] = self._synthetic("Task.Priority", prio, exc)
             if not blank(prio) and attrs["priority"] is None:
                 exc.append("enum_unmapped")
             attrs["dateEndDate"] = self._date(row.get("ActivityDate"), exc)
@@ -329,18 +352,25 @@ class Mapper:
             attrs["status"] = self.m["callStatus"]
             # direction is sent only when known: EspoCRM shows its core default (Outbound)
             # otherwise, so the attribute is left out, never sent empty, never invented.
+            # A blank and an unmapped CallType are treated alike (call_direction_unknown).
             ctype = row.get("CallType")
             if blank(ctype):
                 exc.append("call_direction_unknown")
             else:
                 direction = self.m["callDirectionMap"].get(ctype) if isinstance(ctype, str) else None
                 if direction is None:
+                    direction = self._synthetic("Task.CallType", ctype, exc)
+                if direction is None:
                     exc.append("enum_unmapped")
+                    exc.append("call_direction_unknown")
                 else:
                     attrs["direction"] = direction
             attrs["dateStart"] = self._required_start(completed, row.get("ActivityDate"), attrs, exc)
             dur = row.get("CallDurationInSeconds")
             attrs["duration"] = dur if type(dur) is int and dur >= 0 else None
+            if attrs["duration"] is None:
+                # Sent as explicit null; EspoCRM shows 0 (derived from dateEnd - dateStart).
+                exc.append("call_duration_unknown")
             attrs["description"] = text(row.get("Description"))
             attrs["contactsIds"] = self._who_contacts(row, ctx)
         else:

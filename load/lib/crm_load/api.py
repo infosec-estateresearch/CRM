@@ -22,7 +22,8 @@ def _field(status, doc):
 
 
 class EspoClient:
-    def __init__(self, transport, retries=5, backoff=1.0, sleep=time.sleep):
+    def __init__(self, transport, retries=5, backoff=1.0, sleep=time.sleep, unknown=None):
+        self.unknown = unknown
         self.t = transport
         self.retries = retries
         self.backoff = backoff
@@ -57,6 +58,14 @@ class EspoClient:
             offset += len(doc["list"])
             if not doc["list"] or offset >= int(doc.get("total", 0)):
                 return out
+
+    def setting(self, name):
+        """One application setting from ``GET Settings``; ``unknown`` if the read is refused."""
+        self.reads += 1
+        status, doc = self._send("GET", "Settings")
+        if status != 200 or not isinstance(doc, dict) or name not in doc:
+            return self.unknown
+        return doc[name]
 
     def create(self, entity, attrs):
         self.writes += 1

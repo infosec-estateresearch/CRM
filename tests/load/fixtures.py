@@ -338,8 +338,25 @@ class FakeEspo:
 
     ENTITIES = ("User", "ServiceType", "Account", "Contact", "Opportunity", "Task", "Call", "Meeting", "Email")
 
-    def __init__(self, users=(U1, U2, U_INACTIVE, U_SHARED), hidden_sfids=(), phone_international=False):
+    # entityDefs defaults the server stores when an attribute is omitted on create (10.0.12 + custom).
+    DEFAULTS = {"Account": {"learningPlatformAccess": "No"}, "Opportunity": {"stage": "Enquiry"},
+                "Call": {"duration": 300, "direction": "Outbound"},
+                "Task": {"status": "Not Started", "priority": "Normal"}}
+    # Enums without "" in their options: null and "" are refused (400 valid). The custom one is
+    # read from the entityDefs, so removing its "" option makes this fake refuse a blank again.
+    CORE_NO_BLANK = {"Opportunity": {"stage"}, "Task": {"status", "priority"}, "Call": {"direction"}}
+    # Core enums validated on save (PL-verified on crm-dev): a value outside the options is 400 valid.
+    CORE_OPTIONS = {"Contact": {"salutationName": ("", "Mr.", "Ms.", "Mrs.", "Dr.")}}
+    # text/wysiwyg attributes are stored verbatim; every other string is trimmed (StringTrim).
+    TEXT = {"description", "body", "bodyPlain", "keyInformation"}
+    SETTINGS_REFUSED = object()
+    NULL_ACCEPTED = {("Meeting", "meetingType")}     # PL-verified: explicit null accepted, reads back null
+
+    def __init__(self, users=(U1, U2, U_INACTIVE, U_SHARED), hidden_sfids=(), phone_international=False,
+                 settings=None):
         self.phone_international = phone_international
+        # GET Settings: by default it reports phoneNumberInternational as the phone rule above.
+        self.settings = {"phoneNumberInternational": phone_international} if settings is None else settings
         self.headers = []
         self.db = {e: {} for e in self.ENTITIES}
         self.writes = []
@@ -363,6 +380,10 @@ class FakeEspo:
             return self.fail_next.pop(0), None
         parts = path.split("/")
         entity = parts[0]
+        if entity == "Settings" and method == "GET":
+            if self.settings is self.SETTINGS_REFUSED:
+                return 403, None
+            return 200, json.loads(json.dumps(self.settings))
         if entity not in self.db:
             return 404, None
         if method == "GET":
@@ -389,14 +410,17 @@ class FakeEspo:
                 return 400, None
             if entity in ("Call", "Meeting") and not body.get("dateStart"):
                 return 400, {"field": "dateStart", "type": "required"}
+            refused = self._enum_refused(entity, body)
+            if refused:
+                return 400, {"field": refused, "type": "valid"}
             stored, bad = self._server_side(entity, body)
             if bad:
                 return 400, {"field": "phoneNumber", "type": "valid"}
+            for attr, default in self.DEFAULTS.get(entity, {}).items():
+                stored.setdefault(attr, default)               # omitted: the entityDefs default
             rid = self._insert(entity, stored)
             if entity == "Email":
                 self.db[entity][rid]["messageId"] = f"dummy:{rid}"     # always replaced
-            if entity == "Call":
-                self.db[entity][rid].setdefault("direction", "Outbound")   # core default
             return 200, {"id": rid}
         if method == "PUT":
             self.writes.append((method, entity, json.loads(json.dumps(body))))
@@ -405,6 +429,9 @@ class FakeEspo:
                 return 404, None
             if entity == "Opportunity" and not self._roles_valid(body):
                 return 400, None
+            refused = self._enum_refused(entity, body)
+            if refused:
+                return 400, {"field": refused, "type": "valid"}
             stored, bad = self._server_side(entity, body)
             if bad:
                 return 400, {"field": "phoneNumber", "type": "valid"}
@@ -412,6 +439,27 @@ class FakeEspo:
             rec.update(stored)
             return 200, dict(rec)
         return 405, None
+
+    def _no_blank(self, entity):
+        fields = set(self.CORE_NO_BLANK.get(entity, ()))
+        path = os.path.join(ROOT, "custom", "Espo", "Custom", "Resources", "metadata", "entityDefs",
+                            f"{entity}.json")
+        if os.path.exists(path):
+            with open(path) as fh:
+                for name, f in json.load(fh).get("fields", {}).items():
+                    if f.get("type") == "enum" and "" not in f.get("options", [""]) and \
+                            (entity, name) not in self.NULL_ACCEPTED:
+                        fields.add(name)
+        return fields
+
+    def _enum_refused(self, entity, body):
+        for attr in self._no_blank(entity):
+            if attr in body and body[attr] in (None, ""):
+                return attr
+        for attr, options in self.CORE_OPTIONS.get(entity, {}).items():
+            if body.get(attr) is not None and body[attr] not in options:
+                return attr
+        return None
 
     def _phone(self, number):
         """(stored value, refused) as EspoCRM 10.0.12 with the phoneNumberInternational setting."""
@@ -424,7 +472,7 @@ class FakeEspo:
             return "+" + digits, not digits
         if not any(c.isdigit() for c in number) or any(c.isalpha() or c == "/" for c in number):
             return number, True                          # junk such as n/a
-        return number, False                             # stored verbatim
+        return number.strip(), False                     # stored trimmed (PL-verified on crm-dev)
 
     def _server_side(self, entity, body):
         """What the server stores for ``body``, and whether a phone was refused."""
@@ -440,6 +488,11 @@ class FakeEspo:
                 bad = bad or refused
                 data.append(dict(p, phoneNumber=number, optOut=False, invalid=False))
             stored["phoneNumberData"] = data
+        for attr, value in stored.items():
+            if isinstance(value, str) and attr not in self.TEXT and attr not in ("phoneNumber",):
+                stored[attr] = value.strip()                 # StringTrim on varchar
+        if entity == "Call" and "duration" in stored and stored["duration"] is None:
+            stored["duration"] = 0                           # derived from dateEnd - dateStart
         if entity == "Email" and isinstance(stored.get("from"), str) and "<" in stored["from"]:
             stored["from"] = None                        # a display name in from is dropped
         if entity == "Email":
