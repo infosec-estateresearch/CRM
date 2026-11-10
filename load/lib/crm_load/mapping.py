@@ -31,6 +31,7 @@ EXCEPTION_CODES = frozenset({
     "date_start_from_activity_date", "date_start_from_created",
     "value_shape",
     "parent_soft_deleted_in_sf",
+    "enum_blank_unrepresentable", "call_duration_unknown", "phone_refused",
 })
 
 # Every source field a mapping function reads, per object (besides those named in
@@ -286,7 +287,7 @@ class Mapper:
         attrs["lossReasonLegacyMissing"] = bool(stage == self.m["lostStage"] and attrs["lossReason"] is None)
         attrs["accountId"] = self.ref("Account", row.get("AccountId"), ctx, exc, "account_unresolved")
         service = row.get("Opportunity_Service__c")
-        attrs["serviceTypeId"] = None if blank(service) else ctx.service_type_id(service)
+        attrs["serviceTypeId"] = None if blank(service) else ctx.service_type_id(service.strip())
         lead = self.lead_map.get(row.get("LeadSource")) if isinstance(row.get("LeadSource"), str) else None
         attrs["introducedById"] = None
         attrs["channel"] = None
@@ -341,6 +342,9 @@ class Mapper:
             attrs["dateStart"] = self._required_start(completed, row.get("ActivityDate"), attrs, exc)
             dur = row.get("CallDurationInSeconds")
             attrs["duration"] = dur if type(dur) is int and dur >= 0 else None
+            if attrs["duration"] is None:
+                # Sent as explicit null; EspoCRM shows 0 (derived from dateEnd - dateStart).
+                exc.append("call_duration_unknown")
             attrs["description"] = text(row.get("Description"))
             attrs["contactsIds"] = self._who_contacts(row, ctx)
         else:

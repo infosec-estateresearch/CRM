@@ -434,6 +434,28 @@ class TestLoadShOptions(LoadShBase):
         self.assertIn("resumed=true", res.stderr)
         self.assertTrue(os.path.isdir(self.out("second")))
 
+    def test_phone_refusals_passes_through_and_is_guarded(self):
+        good = self.out("refusals.json")
+        with open(good, "w") as fh:
+            fh.write("[]\n")
+        os.chmod(good, 0o600)
+        res = self.run_sh("--phone-refusals", good, "dev", self.synthetic, self.out("p1"))
+        self.assertEqual(res.returncode, 4, res.stderr)              # reached crm-load (no server here)
+        bad = self.out("bad.json")
+        with open(bad, "w") as fh:
+            fh.write('["not-a-hash"]\n')
+        os.chmod(bad, 0o600)
+        res = self.run_sh("--phone-refusals", bad, "dev", self.synthetic, self.out("p2"))
+        self.assertEqual(res.returncode, 2, res.stderr)
+        self.assertIn("code=phone_refusals_invalid", res.stderr)
+        os.chmod(good, 0o644)
+        for path, frag in (("relative.json", "absolute"), (self.out("none.json"), "not a regular file"),
+                           (good, "0600")):
+            with self.subTest(path=path):
+                res = self.run_sh("--phone-refusals", path, "dev", self.synthetic, self.out("p3"))
+                self.assertNotEqual(res.returncode, 0)
+                self.assertIn(frag, res.stderr)
+
     def test_resume_requires_same_snapshot_sha(self):
         first = self._interrupted_output()
         other = self.snapshot("synth2", synthetic=True, extra={"t_start": "2026-11-02T00:00:00Z"})

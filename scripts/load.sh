@@ -60,11 +60,13 @@ die() {
     exit 2
 }
 
-USAGE="usage: $PROG [--accept-drift URL] [--resume DIR] [--reconciliation DIR] <dev|beta> <snapshot-dir> <new-output-dir>"
+USAGE="usage: $PROG [--accept-drift URL] [--resume DIR] [--reconciliation DIR] [--phone-refusals FILE] <dev|beta> <snapshot-dir> <new-output-dir>"
 DRIFT_RE='^https://github\.com/infosec-estateresearch/CRM/issues/9#issuecomment-[0-9]{1,20}$'
 accept_drift=
 resume=
 reconciliation=
+refusals=
+have_refusals=0
 have_drift=0
 have_resume=0
 have_rec=0
@@ -82,6 +84,10 @@ while [ "$#" -gt 0 ]; do
             [ "$have_rec" -eq 0 ] || die "--reconciliation given twice"
             [ "$#" -ge 2 ] || die "$USAGE"
             have_rec=1; reconciliation=$2; shift 2 ;;
+        --phone-refusals)
+            [ "$have_refusals" -eq 0 ] || die "--phone-refusals given twice"
+            [ "$#" -ge 2 ] || die "$USAGE"
+            have_refusals=1; refusals=$2; shift 2 ;;
         --) shift; break ;;
         -*) die "unknown option" ;;
         *) break ;;
@@ -225,6 +231,21 @@ if [ "$have_resume" -eq 1 ]; then
         "$SNAPSHOT_BASE"/*) die "resume directory must not be under $SNAPSHOT_BASE" ;;
     esac
     extra+=(--resume "$resume")
+fi
+
+# --- phone refusals (optional): a previous output's phone-refusals.json -----------------
+if [ "$have_refusals" -eq 1 ]; then
+    case "$refusals" in
+        /*) ;;
+        *) die "phone refusals file must be absolute" ;;
+    esac
+    [ -f "$refusals" ] && [ ! -L "$refusals" ] || die "phone refusals file is not a regular file"
+    [ "$(realpath -e -- "$refusals")" = "$refusals" ] || die "phone refusals path is not canonical"
+    [ "$(owner_mode "$refusals")" = "$REQUIRED_UID 600" ] || die "phone refusals file is not root-owned 0600"
+    case "$refusals" in
+        "$SNAPSHOT_BASE"/*) die "phone refusals file must not be under $SNAPSHOT_BASE" ;;
+    esac
+    extra+=(--phone-refusals "$refusals")
 fi
 
 # --- runtime env --------------------------------------------------------------------

@@ -10,6 +10,7 @@
         "Contact Phone (Office, primary) and MobilePhone (Mobile) go to phoneNumberData.",
         "Meeting attendees: the owner only (EventRelation is not in the contract). Meeting status: Held if EndDateTime is before the manifest t_start, else Planned.",
         "OpportunityContactRole.Role: null -> \"\"; a value outside Contact.opportunityRole options -> \"\" with exception role_unmapped.",
+        "Blank source values are sent as explicit null on create and update (never omitted, so the server never stores an entityDefs default), except Call.direction (see below). Call.duration: a blank CallDurationInSeconds is sent as null; EspoCRM stores 0 (derived from dateEnd - dateStart), which compares equal to blank (exception call_duration_unknown).",
         "Call.direction: CallType Inbound/Outbound map exactly; a blank CallType sends no direction (exception call_direction_unknown; EspoCRM shows its core default Outbound).",
         "Call.dateStart and Meeting.dateStart are required in core: CompletedDateTime (Call) or StartDateTime/ActivityDateTime (Meeting), else ActivityDate 00:00:00 (exception date_start_from_activity_date), else CreatedDate (exception date_start_from_created). Email.dateSent is never derived from CreatedDate.",
         "Email from is the bare FromAddress; fromString is 'FromName <FromAddress>' or the address alone.",
@@ -61,6 +62,7 @@
             "Other"
         ],
         "Account.learningPlatformAccess": [
+            "",
             "No",
             "TLP",
             "Full Access",
@@ -328,6 +330,26 @@
         "ListEmail": "Email"
     },
     "callStatus": "Held",
+    "enumNoBlank": {
+        "note": "Mapped enum targets whose options have no \"\" (EspoCRM refuses null and \"\" with 400 valid). A blank or unmapped source value refuses the record (exception enum_blank_unrepresentable); it is never defaulted. Call.direction stays the CRM-006R rule: a blank CallType omits direction (call_direction_unknown).",
+        "attributes": [
+            "Opportunity.stage",
+            "Task.status",
+            "Task.priority"
+        ],
+        "nullAccepted": [
+            "Meeting.meetingType"
+        ]
+    },
+    "textAttributes": {
+        "note": "Attributes of type text/wysiwyg: stored verbatim. Every other string attribute is varchar-like and trimmed on save (core StringTrim), so it is compared trimmed.",
+        "Account": ["description"],
+        "Opportunity": ["description"],
+        "Task": ["description"],
+        "Call": ["description"],
+        "Meeting": ["description"],
+        "Email": ["body", "bodyPlain"]
+    },
     "emailMessageStatus": {
         "note": "Every EmailMessage (Status 3 outgoing, 1 incoming) becomes Email status Archived."
     },

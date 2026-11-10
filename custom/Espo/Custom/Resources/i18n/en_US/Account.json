@@ -33,6 +33,7 @@
             "Other": "Other"
         },
         "learningPlatformAccess": {
+            "": "",
             "No": "No",
             "TLP": "TLP",
             "Full Access": "Full Access",

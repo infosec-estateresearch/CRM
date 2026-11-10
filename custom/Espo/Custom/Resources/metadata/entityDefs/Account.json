@@ -27,7 +27,7 @@
         },
         "learningPlatformAccess": {
             "type": "enum",
-            "options": ["No", "TLP", "Full Access", "E-Course"],
+            "options": ["", "No", "TLP", "Full Access", "E-Course"],
             "default": "No",
             "isSorted": false,
             "audited": true,

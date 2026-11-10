@@ -16,6 +16,17 @@ USER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,49}$")
 SF_ID = re.compile(r"^[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?$")
 
 
+# ``crm-migrate selftest`` fills every picklist, UserType included, with "Value A|B|C".
+SYNTHETIC_USER_TYPES = frozenset({"Value A", "Value B", "Value C"})
+
+
+def is_human(row, synthetic):
+    """UserType Standard; in a synthetic (selftest) snapshot also its synthetic picklist values,
+    so the dev owner path runs end to end. A real snapshot accepts Standard only."""
+    utype = row.get("UserType")
+    return utype == "Standard" or (synthetic is True and utype in SYNTHETIC_USER_TYPES)
+
+
 def load_role_map(path):
     try:
         with open(path, "rb") as fh:
@@ -52,6 +63,7 @@ def build_users(snapshot, role_map):
     Only UserType ``Standard`` is exported; the others (integration, automated, CsnOnly)
     are counted as skipped (``user_not_human``). Records they own resolve to an
     unresolved-owner exception at load time."""
+    synthetic = snapshot.synthetic is True
     profiles = {r["Id"]: r.get("Name") for r in snapshot.rows("Profile")}
     roles = {r["Id"]: r.get("Name") for r in snapshot.rows("UserRole")}
     shared = role_map.get("legacyShared", {})
@@ -61,11 +73,11 @@ def build_users(snapshot, role_map):
     # neither is exported (user_not_exportable), neither is guessed.
     counts = {}
     for row in snapshot.rows("User"):
-        if row.get("UserType") == "Standard" and _user_name(row) is not None:
+        if is_human(row, synthetic) and _user_name(row) is not None:
             key = _user_name(row).lower()
             counts[key] = counts.get(key, 0) + 1
     for row in snapshot.rows("User"):
-        if row.get("UserType") != "Standard":
+        if not is_human(row, synthetic):
             skipped += 1
             continue
         sf_id = row.get("Id")
