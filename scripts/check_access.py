@@ -8,7 +8,9 @@ crm-beta edge settings (CRM-007), standard library only.
 beta validates CRM_BETA_* and CRM_SITE_URL in /srv/CRM/runtime/beta/env, the
 beta compose bind policy, the crm-app HTTPS policy (crm-proxy.conf) and the
 rendered edge configuration (see the beta section below); --render then writes
-it to <runtime>/edge/haproxy.cfg. restoretest checks only the isolation policy
+it to <runtime>/edge/haproxy.cfg. Without --render, beta also refuses unless
+the on-disk <runtime>/edge/haproxy.cfg is byte for byte the rendered one
+(scripts/up.sh beta re-renders it and recreates the edge). restoretest checks only the isolation policy
 of deploy/beta/restoretest/compose.json (restore.sh beta --restoretest).
 The rest of this docstring describes dev.
 
@@ -391,9 +393,39 @@ def _beta_resources_errors(doc, services):
     return out
 
 
+# The allowlist (CRM-007 r4): every key deploy/beta/compose.json may use. Any
+# other key (volumes_from, pid, ipc, env_file, extends, include, external_links,
+# secrets, configs, container_name, devices, privileged, cap_add, build,
+# x-*, ...) is refused, so a new Compose feature cannot widen the policy.
+BETA_TOP_KEYS = frozenset({"name", "services", "networks"})
+BETA_SERVICE_KEYS = frozenset({"image", "environment", "healthcheck", "networks", "ports",
+                               "restart", "volumes", "depends_on", "entrypoint", "command"})
+BETA_EDGE_KEYS = BETA_SERVICE_KEYS | {"cap_drop", "read_only", "security_opt", "user",
+                                      "network_mode"}
+# name[:tag]@sha256:<64 hex>: every image is pinned by digest.
+PINNED_IMAGE = re.compile(r"^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
+                          r"(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*"
+                          r"(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?@sha256:[0-9a-f]{64}$")
+
+
+def _beta_allowlist_errors(doc, services):
+    out = [f"beta compose top-level key {key!r} is not allowed"
+           for key in sorted(set(doc) - BETA_TOP_KEYS)]
+    for name, svc in services.items():
+        if not isinstance(svc, dict):
+            continue
+        allowed = BETA_EDGE_KEYS if name == EDGE_SERVICE else BETA_SERVICE_KEYS
+        out += [f"{name}: key {key!r} is not allowed" for key in sorted(set(svc) - allowed)]
+        image = svc.get("image")
+        if not isinstance(image, str) or not PINNED_IMAGE.match(image):
+            out.append(f"{name}: image must be pinned as name@sha256:<64 hex>")
+    return out
+
+
 def check_beta_compose(doc):
-    """The beta bind policy, on deploy/beta/compose.json: crm-app publishes
-    exactly 127.0.0.1:${CRM_BETA_APP_PORT}:80, the edge runs hardened on the host
+    """The beta bind policy, on deploy/beta/compose.json: only allowlisted keys,
+    every image pinned by digest, crm-app publishes exactly
+    127.0.0.1:${CRM_BETA_APP_PORT}:80, the edge runs hardened on the host
     network and publishes nothing, and no other service publishes a port."""
     out = []
     services = doc.get("services") if isinstance(doc, dict) else None
@@ -401,6 +433,7 @@ def check_beta_compose(doc):
         return ["beta compose has no services"]
     if doc.get("name") != "crm-beta":
         out.append("beta compose project name is not crm-beta")
+    out += _beta_allowlist_errors(doc, services)
     for name, svc in services.items():
         if not isinstance(svc, dict):
             out.append(f"{name}: not a mapping")
@@ -736,6 +769,44 @@ def write_edge_config(runtime, rendered):
     return target
 
 
+TEST_ROOT_PARENT = "/tmp/"
+
+
+def beta_runtime(environ):
+    """(runtime, None) or (None, why). beta's runtime is the constant
+    BETA_DEFAULT_RUNTIME; the only seam, for tests, is CRM_TEST_ROOT, honoured
+    only when it is a canonical existing directory under /tmp (runtime
+    $CRM_TEST_ROOT/beta). A CRM_RUNTIME_DIR naming anything else is refused."""
+    want = BETA_DEFAULT_RUNTIME
+    root = environ.get("CRM_TEST_ROOT") or ""
+    if root:
+        if not root.startswith(TEST_ROOT_PARENT) or root == TEST_ROOT_PARENT:
+            return None, f"CRM_TEST_ROOT must be under /tmp: {root}"
+        if not os.path.isdir(root) or os.path.realpath(root) != root:
+            return None, f"CRM_TEST_ROOT must be an existing canonical directory: {root}"
+        want = os.path.join(root, "beta")
+    given = environ.get("CRM_RUNTIME_DIR") or ""
+    if given and given != want:
+        return None, f"the beta runtime is {want} (CRM_RUNTIME_DIR is {given})"
+    return want, None
+
+
+def edge_config_problem(runtime, rendered):
+    """None if $runtime/edge/haproxy.cfg is byte for byte what render_edge()
+    gives for the checked env file; otherwise why not (fail closed: missing,
+    a symlink, unreadable or different)."""
+    path = os.path.join(runtime, EDGE_CFG_REL)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as fh:
+            on_disk = fh.read()
+    except OSError as err:
+        return f"the edge configuration {path} is not readable ({type(err).__name__})"
+    if on_disk != rendered.encode("utf-8"):
+        return f"the edge configuration {path} differs from the one rendered from the env file"
+    return None
+
+
 def main(argv=None, environ=None):
     argv = sys.argv[1:] if argv is None else argv
     environ = os.environ if environ is None else environ
@@ -755,8 +826,13 @@ def main(argv=None, environ=None):
         print(f"{prog()}: refusing to run: target environment must be 'dev' or 'beta' "
               f"(got '{target or '<none>'}')", file=sys.stderr)
         return 2
-    runtime = environ.get("CRM_RUNTIME_DIR") or (DEFAULT_RUNTIME if target == "dev"
-                                                 else BETA_DEFAULT_RUNTIME)
+    if target == "beta":
+        runtime, problem = beta_runtime(environ)
+        if problem:
+            print(f"{prog()}: refusing to run: {problem}", file=sys.stderr)
+            return 2
+    else:
+        runtime = environ.get("CRM_RUNTIME_DIR") or DEFAULT_RUNTIME
     if os.path.basename(runtime) != target:
         print(f"{prog()}: refusing to run: runtime directory is not a {target} runtime: {runtime}",
               file=sys.stderr)
@@ -786,6 +862,12 @@ def main(argv=None, environ=None):
                       file=sys.stderr)
                 return 1
             print(f"{prog()}: edge configuration rendered to {os.path.join(runtime, EDGE_CFG_REL)}")
+        else:
+            problem = edge_config_problem(runtime, rendered)
+            if problem:
+                print(f"{prog()}: refused: {problem}; run scripts/up.sh beta to re-render it "
+                      "and recreate the edge", file=sys.stderr)
+                return 1
         count = len(read_env_values(text, BETA_NAMES)[0]["CRM_BETA_UPSTREAM_SOURCES"].split())
         print(f"{prog()}: beta access settings OK: CRM_BETA_BIND_IP, CRM_BETA_PORT, "
               f"{count} upstream source(s), CRM_BETA_HOSTNAME, CRM_BETA_APP_PORT, CRM_SITE_URL, "

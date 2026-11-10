@@ -16,7 +16,7 @@ sha256sum <outdir>/crm-release-<short>.tar.gz
   - the commit;
   - the image digests from the commit's `security/EXTERNAL_CODE_REGISTER.yaml`;
   - the sha256 of every file;
-  - the latest commit of each CRM-002 to CRM-006 delivery record (`.forge/<WO>*/REPORT.md`), or `null` where none exists;
+  - the latest commit of each CRM-002 to CRM-006 delivery record (`.forge/<WO>*/REPORT.md`), or `null` where none exists. `"CRM-002": null` is expected: CRM-002 has no ForgeV2 REPORT in `.forge/` (PL decision, CRM-007 r4);
   - `excluded`: `[".forge/"]`.
 - The build is reproducible:
   - members are sorted and owned by `0:0`, with the commit time;
@@ -39,7 +39,7 @@ It refuses:
 - a bundle sha256 that differs from `--sha256`;
 - `RELEASE.json` without `"excluded": [".forge/"]`, or any member under `.forge/`.
 
-`python3 scripts/release.py verify-tree <dir> <bundle> --sha256 <hex>` re-verifies the anchored bundle and then refuses unless `<dir>` holds exactly its files: every file listed in `RELEASE.json` plus `RELEASE.json` itself, byte for byte, with no extra, missing or changed file, no extra directory and no link or special file.
+`python3 scripts/release.py verify-tree <dir> <bundle> --sha256 <hex>` re-verifies the anchored bundle and then refuses unless `<dir>` holds exactly its files: every file listed in `RELEASE.json` plus `RELEASE.json` itself, byte for byte, with no extra, missing or changed file, no extra directory and no link or special file. Like `verify` for tar members, it also refuses any file or directory that is setuid, setgid or sticky, or writable by group or others.
 
 ## Deploy
 

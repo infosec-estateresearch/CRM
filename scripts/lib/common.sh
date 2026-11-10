@@ -48,6 +48,9 @@ require_target() {
             exit 2
             ;;
     esac
+    if [ "$CRM_TARGET" = beta ]; then
+        pin_beta_runtime
+    fi
     CRM_RUNTIME_DIR=${CRM_RUNTIME_DIR:-/srv/CRM/runtime/$CRM_TARGET}
     if [ "$(basename "$CRM_RUNTIME_DIR")" != "$CRM_TARGET" ]; then
         echo "$(basename "$0"): refusing to run: runtime directory is not a $CRM_TARGET runtime: $CRM_RUNTIME_DIR" >&2
@@ -60,13 +63,30 @@ require_target() {
     fi
 }
 
-# The CRM-001 dev-only guard, kept for callers that serve dev only.
-require_dev() {
-    if [ "${1:-}" != "dev" ]; then
-        echo "$(basename "$0"): refusing to run: target environment must be 'dev' (got '${1:-<none>}')" >&2
+# beta's runtime is the constant /srv/CRM/runtime/beta (it holds customer
+# data). The only seam is for tests: CRM_TEST_ROOT, honoured only when it is a
+# canonical existing directory under /tmp, makes it $CRM_TEST_ROOT/beta.
+# A CRM_RUNTIME_DIR naming anything else is refused.
+CRM_BETA_RUNTIME=/srv/CRM/runtime/beta
+pin_beta_runtime() {
+    local want=$CRM_BETA_RUNTIME
+    if [ -n "${CRM_TEST_ROOT:-}" ]; then
+        case "$CRM_TEST_ROOT" in
+            /tmp/?*) ;;
+            *) echo "$(basename "$0"): refusing to run: CRM_TEST_ROOT must be under /tmp: $CRM_TEST_ROOT" >&2
+               exit 2 ;;
+        esac
+        if [ "$(realpath -e -- "$CRM_TEST_ROOT" 2>/dev/null)" != "$CRM_TEST_ROOT" ]; then
+            echo "$(basename "$0"): refusing to run: CRM_TEST_ROOT must be an existing canonical directory: $CRM_TEST_ROOT" >&2
+            exit 2
+        fi
+        want=$CRM_TEST_ROOT/beta
+    fi
+    if [ -n "${CRM_RUNTIME_DIR:-}" ] && [ "$CRM_RUNTIME_DIR" != "$want" ]; then
+        echo "$(basename "$0"): refusing to run: the beta runtime is $want (CRM_RUNTIME_DIR is $CRM_RUNTIME_DIR)" >&2
         exit 2
     fi
-    require_target dev
+    CRM_RUNTIME_DIR=$want
 }
 
 # beta: the runtime directory (and its backups directory, if present) must be
@@ -119,11 +139,21 @@ require_env_names() {
 
 # Fail closed unless the LAN access settings in the env file pass
 # scripts/check_access.py (CRM-D019). Every script that can start or recreate
-# a service runs this before anything touches the stack.
+# a service runs this before anything touches the stack. For beta it also
+# refuses an on-disk edge configuration that differs from the rendered one;
+# up.sh beta passes --render to re-render it instead.
 require_access() {
     CRM_RUNTIME_DIR=$CRM_RUNTIME_DIR CRM_ENV_FILE=$CRM_ENV_FILE \
-        python3 -I "$CRM_REPO_DIR/scripts/check_access.py" "$CRM_TARGET" \
+        python3 -I "$CRM_REPO_DIR/scripts/check_access.py" "$CRM_TARGET" "$@" \
         || die "refusing to run: the LAN access settings in $CRM_ENV_FILE failed scripts/check_access.py"
+}
+
+# The SHA-256 of the beta edge configuration, or nothing if it is missing.
+edge_config_digest() {
+    local cfg=$CRM_RUNTIME_DIR/edge/haproxy.cfg
+    if [ -f "$cfg" ] && [ ! -L "$cfg" ]; then
+        sha256sum -- "$cfg" | cut -d' ' -f1
+    fi
 }
 
 # Fail closed unless $CRM_RUNTIME_DIR is an absolute path with no symlink in it

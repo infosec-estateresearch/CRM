@@ -157,6 +157,63 @@ class TestBetaBindPolicy(unittest.TestCase):
                 mutate(d)
                 self.assertNotEqual(ca.check_beta_compose(d), [])
 
+    def test_allowlist_refuses_each_unlisted_key(self):
+        """CRM-007 r4: one subtest per refused key, on a service and on the edge,
+        each a single-key change to the shipped compose that alone must fail."""
+        service_keys = {
+            "volumes_from": ["crm-db"], "pid": "host", "ipc": "host",
+            "env_file": ["/etc/passwd"], "extends": {"service": "crm-db"},
+            "external_links": ["crm-dev-crm-db-1:db"], "secrets": ["s"], "configs": ["c"],
+            "container_name": "crm-db", "devices": ["/dev/sda:/dev/sda"], "privileged": True,
+            "cap_add": ["SYS_ADMIN"], "build": ".", "x-extra": 1, "labels": {"a": "b"},
+            "network_mode": "container:crm-dev-crm-db-1",
+        }
+        for svc in ("crm-app", ca.EDGE_SERVICE):
+            for key, value in service_keys.items():
+                if svc == ca.EDGE_SERVICE and key == "network_mode":
+                    value = "container:crm-dev-crm-db-1"
+                with self.subTest(service=svc, key=key):
+                    d = self.doc()
+                    d["services"][svc][key] = value
+                    errors = ca.check_beta_compose(d)
+                    self.assertNotEqual(errors, [])
+                    if key != "network_mode" or svc != ca.EDGE_SERVICE:
+                        self.assertIn(f"{svc}: key {key!r} is not allowed", errors)
+        for key in ("cap_drop", "read_only", "security_opt", "user", "network_mode"):
+            with self.subTest(service="crm-db", edge_only_key=key):
+                d = self.doc()
+                d["services"]["crm-db"][key] = d["services"][ca.EDGE_SERVICE][key]
+                self.assertIn(f"crm-db: key {key!r} is not allowed", ca.check_beta_compose(d))
+        for key, value in {"include": ["other.yml"], "secrets": {"s": {"file": "/etc/shadow"}},
+                           "configs": {"c": {"file": "/etc/shadow"}}, "x-anchor": {},
+                           "version": "3.9"}.items():
+            with self.subTest(top_level=key):
+                d = self.doc()
+                d[key] = value
+                self.assertIn(f"beta compose top-level key {key!r} is not allowed",
+                              ca.check_beta_compose(d))
+
+    def test_image_must_be_pinned_by_digest(self):
+        digest = "0" * 64
+        bad = {"tag only": "mariadb:11.4.13", "latest": "haproxy:latest", "no image": None,
+               "short digest": "haproxy@sha256:" + "0" * 63, "upper hex": "haproxy@sha256:" + "A" * 64,
+               "other algorithm": "haproxy@sha512:" + digest, "digest then junk":
+               "haproxy@sha256:" + digest + "x", "not a string": ["haproxy"]}
+        for svc in ("crm-db", "crm-app", "crm-daemon", ca.EDGE_SERVICE):
+            for label, image in bad.items():
+                with self.subTest(service=svc, image=label):
+                    d = self.doc()
+                    if image is None:
+                        d["services"][svc].pop("image")
+                    else:
+                        d["services"][svc]["image"] = image
+                    self.assertIn(f"{svc}: image must be pinned as name@sha256:<64 hex>",
+                                  ca.check_beta_compose(d))
+        for image in ("haproxy@sha256:" + digest, "docker.io/library/mariadb:11.4@sha256:" + digest):
+            d = self.doc()
+            d["services"]["crm-db"]["image"] = image
+            self.assertEqual(ca.check_beta_compose(d), [], image)
+
     def test_beta_shares_nothing_with_dev_and_pins_registered_images(self):
         doc = self.doc()
         self.assertEqual(set(doc["networks"]), {"crm-beta-net"})
@@ -268,7 +325,7 @@ class TestEdgePolicy(unittest.TestCase):
             os.mkdir(runtime)
             with open(os.path.join(runtime, "env"), "w") as fh:
                 fh.write(env_text())
-            env = {"PATH": os.environ["PATH"], "CRM_RUNTIME_DIR": runtime}
+            env = {"PATH": os.environ["PATH"], "CRM_RUNTIME_DIR": runtime, "CRM_TEST_ROOT": tmp}
             res = subprocess.run([sys.executable, "-I", os.path.join(SCRIPTS, "check_access.py"),
                                   "beta", "--render"], capture_output=True, text=True, env=env)
             self.assertEqual(res.returncode, 0, res.stderr)
@@ -323,6 +380,7 @@ class ShellEnv(unittest.TestCase):
     def run_sh(self, script, *args, root=True, runtime=None, extra=None):
         env = {"PATH": self.bin + os.pathsep + os.environ["PATH"],
                "CRM_RUNTIME_DIR": runtime or self.runtime, "HOME": self.tmp,
+               "CRM_TEST_ROOT": os.path.join(self.tmp, "runtime"),
                "REAL_STAT": shutil.which("stat"), "REAL_ID": shutil.which("id"),
                "FAKE_DOCKER_LOG": self.log,
                "FAKE_ROOT_DIR": os.path.join(self.tmp, "runtime") if root else "/nonexistent",
@@ -354,7 +412,7 @@ class TestTargetGuards(ShellEnv):
             with self.subTest(script=script, case="dev runtime"):
                 res = self.run_sh(script, "beta", runtime=dev)
                 self.assertEqual(res.returncode, 2)
-                self.assertIn("not a beta runtime", res.stderr)
+                self.assertIn("the beta runtime is " + self.runtime, res.stderr)
             with self.subTest(script=script, case="not root"):
                 res = self.run_sh(script, "beta", root=False)
                 self.assertEqual(res.returncode, 2)
@@ -375,6 +433,7 @@ class TestTargetGuards(ShellEnv):
         code = (f". {SCRIPTS}/lib/common.sh; require_target beta; "
                 'echo "$CRM_PROJECT $CRM_COMPOSE_FILE ${CRM_ENV_NAMES[*]}"')
         env = {"PATH": self.bin + os.pathsep + os.environ["PATH"], "CRM_RUNTIME_DIR": self.runtime,
+               "CRM_TEST_ROOT": os.path.join(self.tmp, "runtime"),
                "REAL_STAT": shutil.which("stat"), "FAKE_ROOT_DIR": os.path.join(self.tmp, "runtime")}
         res = subprocess.run(["bash", "-c", code], capture_output=True, text=True, env=env)
         self.assertEqual(res.returncode, 0, res.stderr)
@@ -418,6 +477,7 @@ class TestDbDirPerTarget(ShellEnv):
         code = (f"set -euo pipefail; . {SCRIPTS}/lib/common.sh; require_target {target}; "
                 "require_runtime_paths; echo PATHS-OK")
         env = {"PATH": self.bin + os.pathsep + os.environ["PATH"], "CRM_RUNTIME_DIR": runtime,
+               "CRM_TEST_ROOT": os.path.join(self.tmp, "runtime"),
                "REAL_STAT": shutil.which("stat"), "FAKE_ROOT_DIR": os.path.join(self.tmp, "runtime"),
                "FAKE_DOCKER_LOG": self.log, "FAKE_COMPOSE_CONFIG": self.cfg,
                "FAKE_CONFIG": fake_config}
@@ -464,6 +524,244 @@ class TestDbDirPerTarget(ShellEnv):
                     self.assertEqual(res.returncode, 1, res.stderr)
                     self.assertIn("crm-db /var/lib/mysql", res.stderr)
                     self.assertNotIn("PATHS-OK", res.stdout)
+
+
+class TestBetaRuntimePinned(ShellEnv):
+    """CRM-007 r4: beta's runtime is the constant /srv/CRM/runtime/beta; the only
+    seam is CRM_TEST_ROOT under /tmp. Dev is unchanged."""
+
+    def test_python_guard(self):
+        root = os.path.join(self.tmp, "runtime")
+        self.assertEqual(ca.beta_runtime({}), (ca.BETA_DEFAULT_RUNTIME, None))
+        self.assertEqual(ca.beta_runtime({"CRM_RUNTIME_DIR": ca.BETA_DEFAULT_RUNTIME}),
+                         (ca.BETA_DEFAULT_RUNTIME, None))
+        self.assertEqual(ca.beta_runtime({"CRM_TEST_ROOT": root}), (self.runtime, None))
+        self.assertEqual(ca.beta_runtime({"CRM_TEST_ROOT": root, "CRM_RUNTIME_DIR": self.runtime}),
+                         (self.runtime, None))
+        refused = {
+            "other runtime": {"CRM_RUNTIME_DIR": "/srv/CRM/other/beta"},
+            "tmp runtime without seam": {"CRM_RUNTIME_DIR": self.runtime},
+            "seam outside /tmp": {"CRM_TEST_ROOT": "/srv/CRM/runtime"},
+            "seam is /tmp itself": {"CRM_TEST_ROOT": "/tmp/"},
+            "seam with ..": {"CRM_TEST_ROOT": root + "/../../../../srv/CRM/runtime"},
+            "seam missing": {"CRM_TEST_ROOT": root + "/nope"},
+            "seam and other runtime": {"CRM_TEST_ROOT": root,
+                                       "CRM_RUNTIME_DIR": ca.BETA_DEFAULT_RUNTIME},
+        }
+        link = os.path.join(self.tmp, "link")
+        os.symlink(root, link)
+        refused["seam via symlink"] = {"CRM_TEST_ROOT": link}
+        for label, environ in refused.items():
+            with self.subTest(case=label):
+                runtime, problem = ca.beta_runtime(environ)
+                self.assertIsNone(runtime)
+                self.assertTrue(problem)
+                err = io.StringIO()
+                with unittest.mock.patch("sys.stderr", err):
+                    self.assertEqual(ca.main(["beta"], environ), 2)
+                self.assertIn("refusing to run", err.getvalue())
+
+    def shell(self, target, environ):
+        code = (f"set -euo pipefail; . {SCRIPTS}/lib/common.sh; require_target {target}; "
+                'echo "RUNTIME=$CRM_RUNTIME_DIR"')
+        env = {"PATH": self.bin + os.pathsep + os.environ["PATH"], "REAL_STAT": shutil.which("stat"),
+               "FAKE_ROOT_DIR": os.path.join(self.tmp, "runtime"), **environ}
+        return subprocess.run(["bash", "-c", code], capture_output=True, text=True, env=env)
+
+    def test_shell_guard(self):
+        root = os.path.join(self.tmp, "runtime")
+        res = self.shell("beta", {"CRM_TEST_ROOT": root})
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn(f"RUNTIME={self.runtime}", res.stdout)
+        # No seam: the constant (absent in the sandbox, so the private-runtime guard names it).
+        res = self.shell("beta", {})
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("/srv/CRM/runtime/beta", res.stderr)
+        for label, environ in {
+                "tmp runtime without seam": {"CRM_RUNTIME_DIR": self.runtime},
+                "other runtime": {"CRM_RUNTIME_DIR": "/srv/CRM/other/beta"},
+                "seam outside /tmp": {"CRM_TEST_ROOT": "/srv/CRM/runtime"},
+                "seam with ..": {"CRM_TEST_ROOT": root + "/../../../../srv/CRM/runtime"},
+                "seam missing": {"CRM_TEST_ROOT": root + "/nope"}}.items():
+            with self.subTest(case=label):
+                res = self.shell("beta", environ)
+                self.assertEqual(res.returncode, 2, res.stdout)
+                self.assertIn("refusing to run", res.stderr)
+                self.assertNotIn("RUNTIME=", res.stdout)
+        # dev is unchanged: CRM_RUNTIME_DIR is honoured without any seam.
+        dev = os.path.join(self.tmp, "elsewhere", "dev")
+        res = self.shell("dev", {"CRM_RUNTIME_DIR": dev})
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn(f"RUNTIME={dev}", res.stdout)
+
+
+class BetaStackEnv(ShellEnv):
+    """A full beta runtime (env file with paths and edge values) and the fake
+    docker from test_scripts, so up.sh beta runs to `compose up`."""
+
+    def setUp(self):
+        super().setUp()
+        import test_scripts
+        with open(os.path.join(self.bin, "docker"), "w") as fh:
+            fh.write(test_scripts.FAKE_DOCKER)
+        self.cfg_script = os.path.join(self.tmp, "fake_compose_config.py")
+        with open(self.cfg_script, "w") as fh:
+            fh.write(test_scripts.FAKE_COMPOSE_CONFIG)
+        self.write_env()
+        self.edge_cfg = os.path.join(self.runtime, "edge", "haproxy.cfg")
+
+    def write_env(self, **over):
+        rt = self.runtime
+        with open(os.path.join(rt, "env"), "w") as fh:
+            fh.write(f"CRM_DB_DIR={rt}/db\nCRM_DATA_DIR={rt}/data\nCRM_CUSTOM_DIR={rt}/custom\n"
+                     f"CRM_CLIENT_CUSTOM_DIR={rt}/client/custom\n" + env_text(**over))
+        os.chmod(os.path.join(rt, "env"), 0o600)
+
+    def run_beta(self, script, *args, extra=None):
+        return self.run_sh(script, "beta", *args,
+                           extra={"FAKE_COMPOSE_CONFIG": self.cfg_script, **(extra or {})})
+
+    def check(self):
+        err = io.StringIO()
+        environ = {"CRM_TEST_ROOT": os.path.join(self.tmp, "runtime"), "CRM_RUNTIME_DIR": self.runtime}
+        with unittest.mock.patch("sys.stderr", err), unittest.mock.patch("sys.stdout", io.StringIO()):
+            code = ca.main(["beta"], environ)
+        return code, err.getvalue()
+
+
+class TestEdgeRevalidation(BetaStackEnv):
+    def recreates(self):
+        return [c for c in self.docker_calls() if "--force-recreate" in c]
+
+    def test_check_without_render_compares_byte_for_byte(self):
+        code, err = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("is not readable", err)  # missing: fail closed
+        os.makedirs(os.path.dirname(self.edge_cfg))
+        with open(self.edge_cfg, "w") as fh:
+            fh.write(rendered())
+        self.assertEqual(self.check(), (0, ""))
+        good = read(self.edge_cfg)
+        for label, text in {"one byte more": good + "\n", "one byte less": good[:-1],
+                            "comment added": "# hi\n" + good, "empty": "",
+                            "CRLF": good.replace("\n", "\r\n")}.items():
+            with self.subTest(case=label):
+                with open(self.edge_cfg, "w", newline="") as fh:
+                    fh.write(text)
+                code, err = self.check()
+                self.assertEqual(code, 1)
+                self.assertIn("differs from the one rendered", err)
+        with open(self.edge_cfg, "w") as fh:
+            fh.write(good)
+        self.write_env(CRM_BETA_PORT="8444")  # env changed, edge not re-rendered
+        code, err = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("differs from the one rendered", err)
+        os.unlink(self.edge_cfg)
+        elsewhere = os.path.join(self.tmp, "copy.cfg")
+        with open(elsewhere, "w") as fh:
+            fh.write(rendered(CRM_BETA_PORT="8444"))
+        os.symlink(elsewhere, self.edge_cfg)  # right bytes, but a symlink
+        code, err = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("is not readable", err)
+
+    def test_other_scripts_refuse_a_stale_edge_config(self):
+        os.makedirs(os.path.dirname(self.edge_cfg))
+        with open(self.edge_cfg, "w") as fh:
+            fh.write(rendered(CRM_BETA_PORT="9443"))
+        res = self.run_beta("deploy_custom.sh")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("differs from the one rendered", res.stderr)
+        self.assertFalse([c for c in self.docker_calls() if " up " in f" {c} "])
+
+    def test_up_rerenders_and_recreates_the_edge_only_on_change(self):
+        res = self.run_beta("up.sh")  # first run: rendered from nothing
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(read(self.edge_cfg), rendered())
+        calls = self.docker_calls()
+        ups = [i for i, c in enumerate(calls) if c.endswith(" up -d --wait")]
+        recreate = [i for i, c in enumerate(calls)
+                    if c.endswith(" up -d --wait --force-recreate --no-deps crm-beta-edge")]
+        self.assertEqual(len(ups), 1, calls)
+        self.assertEqual(len(recreate), 1, calls)
+        self.assertLess(ups[0], recreate[0])
+        self.assertIn("-p crm-beta", calls[recreate[0]])
+        self.assertEqual(self.check(), (0, ""))
+
+        os.unlink(self.log)  # unchanged: no recreate
+        res = self.run_beta("up.sh")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.recreates(), [])
+
+        os.unlink(self.log)  # env changed: re-rendered and recreated
+        self.write_env(CRM_BETA_PORT="8444")
+        res = self.run_beta("up.sh")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(read(self.edge_cfg), rendered(CRM_BETA_PORT="8444"))
+        self.assertEqual(len(self.recreates()), 1)
+
+        os.unlink(self.log)  # tampered on disk: re-rendered and recreated
+        with open(self.edge_cfg, "a") as fh:
+            fh.write("listen evil\n")
+        res = self.run_beta("up.sh")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(read(self.edge_cfg), rendered(CRM_BETA_PORT="8444"))
+        self.assertEqual(len(self.recreates()), 1)
+
+    def test_up_with_invalid_edge_values_neither_renders_nor_starts(self):
+        self.write_env(CRM_BETA_UPSTREAM_SOURCES="0.0.0.0/0")
+        res = self.run_beta("up.sh")
+        self.assertEqual(res.returncode, 1)
+        self.assertFalse(os.path.exists(self.edge_cfg))
+        self.assertFalse([c for c in self.docker_calls() if " up " in f" {c} "])
+
+
+class TestExportBetaBaseUrl(BetaStackEnv):
+    def export(self, url, out="out"):
+        extra = {"CRM_ADMIN_USERNAME": "u", "CRM_ADMIN_PASSWORD": "p"}
+        if url is not None:
+            extra["CRM_BASE_URL"] = url
+        fake_py = os.path.join(self.bin, "python3")
+        with open(fake_py, "w") as fh:  # stands in for export_csv.py: records its arguments
+            fh.write('#!/usr/bin/env bash\necho "EXPORT $*"\n')
+        os.chmod(fake_py, 0o700)
+        return self.run_beta("export.sh", os.path.join(self.tmp, out), extra=extra)
+
+    def test_base_url_must_be_the_env_files_app_port(self):
+        res = self.export("http://127.0.0.1:8280")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("--base-url http://127.0.0.1:8280", res.stdout)
+        for url in (None, "", "http://127.0.0.1:8180", "http://127.0.0.1:8280/",
+                    "https://127.0.0.1:8280", "http://localhost:8280", f"http://{BIND}:8280",
+                    "http://127.0.0.1:8443", "http://127.0.0.1:08280"):
+            with self.subTest(url=url):
+                res = self.export(url)
+                self.assertEqual(res.returncode, 1, res.stdout)
+                self.assertIn("CRM_BASE_URL", res.stderr)
+                self.assertNotIn("EXPORT", res.stdout)
+
+    def test_app_port_must_be_set_once_in_plain_form(self):
+        env = os.path.join(self.runtime, "env")
+        base = read(env)
+        for label, text in {
+                "missing": base.replace("CRM_BETA_APP_PORT=8280\n", ""),
+                "twice": base + "CRM_BETA_APP_PORT=8280\n",
+                "exported": base.replace("CRM_BETA_APP_PORT=8280", "export CRM_BETA_APP_PORT=8280"),
+                "quoted": base.replace("CRM_BETA_APP_PORT=8280", 'CRM_BETA_APP_PORT="8280"'),
+                "low port": base.replace("CRM_BETA_APP_PORT=8280", "CRM_BETA_APP_PORT=80")}.items():
+            with self.subTest(case=label):
+                with open(env, "w") as fh:
+                    fh.write(text)
+                port = "80" if label == "low port" else "8280"
+                res = self.export(f"http://127.0.0.1:{port}")
+                self.assertEqual(res.returncode, 1, res.stdout)
+                self.assertIn("CRM_BETA_APP_PORT", res.stderr)
+                self.assertNotIn("EXPORT", res.stdout)
+        os.unlink(env)
+        res = self.export("http://127.0.0.1:8280")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("env file not readable", res.stderr)
 
 
 class TestSeedingRefusesBeta(unittest.TestCase):
@@ -563,6 +861,39 @@ class TestReleaseBundle(unittest.TestCase):
         out = os.path.join(self.tmp, sub)
         os.makedirs(out, exist_ok=True)
         return release.build(self.repo, commit or self.commit, out)
+
+    def test_verify_tree_refuses_setuid_setgid_and_writable_modes(self):
+        """CRM-007 r4: verify-tree refuses on disk what verify refuses in the tar."""
+        path, _ = self.build("vt")
+        with open(path, "rb") as fh:
+            sha = release.sha256(fh.read())
+        tree = os.path.join(self.tmp, "tree")
+        os.mkdir(tree)
+        with tarfile.open(path) as tar:
+            tar.extractall(tree, filter="data")
+        (top,) = os.listdir(tree)
+        root = os.path.join(tree, top)
+        release.verify_tree(root, path, sha)  # control: clean modes pass
+        target = os.path.join(root, "scripts", "release.py")
+        subdir = os.path.join(root, "scripts")
+        for label, where, mode in (("setuid file", target, 0o4644), ("setgid file", target, 0o2644),
+                                   ("world-writable file", target, 0o646),
+                                   ("group-writable file", target, 0o664),
+                                   ("sticky file", target, 0o1644),
+                                   ("world-writable dir", subdir, 0o777),
+                                   ("setgid dir", subdir, 0o2755)):
+            with self.subTest(case=label):
+                original = stat.S_IMODE(os.stat(where).st_mode)
+                os.chmod(where, mode)
+                try:
+                    if stat.S_IMODE(os.stat(where).st_mode) != mode:
+                        self.skipTest(f"the filesystem would not set {oct(mode)}")
+                    with self.assertRaises(release.ReleaseError) as cm:
+                        release.verify_tree(root, path, sha)
+                    self.assertIn("setuid/setgid/sticky or writable-by-others", str(cm.exception))
+                finally:
+                    os.chmod(where, original)
+        release.verify_tree(root, path, sha)
 
     def test_reproducible_byte_for_byte_and_verifies(self):
         a, manifest = self.build("a")
@@ -1268,6 +1599,7 @@ class TestRestoretest(ShellEnv):
         script = (f"set -euo pipefail; . {SCRIPTS}/lib/common.sh; require_target beta; "
                   f". {SCRIPTS}/lib/restoretest.sh; {code}")
         env = {"PATH": self.bin + os.pathsep + os.environ["PATH"], "CRM_RUNTIME_DIR": self.runtime,
+               "CRM_TEST_ROOT": os.path.join(self.tmp, "runtime"),
                "REAL_STAT": shutil.which("stat"), "FAKE_ROOT_DIR": os.path.join(self.tmp, "runtime"),
                "FAKE_DOCKER_LOG": self.log, "CRM_RESTORETEST_DIR": self.rt}
         return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env)
@@ -1381,6 +1713,7 @@ class TestDeploySteps(ShellEnv):
                   'CRM_BETA_ENV_NAMES=("${CRM_ENV_NAMES[@]}"); export CRM_RUNTIME_DIR; '
                   f"{stubs}\n{code}")
         env = {"PATH": self.bin + os.pathsep + os.environ["PATH"], "CRM_RUNTIME_DIR": self.runtime,
+               "CRM_TEST_ROOT": os.path.join(self.tmp, "runtime"),
                "REAL_STAT": shutil.which("stat"), "FAKE_ROOT_DIR": os.path.join(self.tmp, "runtime"),
                "FAKE_DOCKER_LOG": self.log, "HOME": self.tmp, "TMPDIR": self.tmp}
         env.update(extra or {})

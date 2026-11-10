@@ -38,7 +38,6 @@ import crm_api  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CONFIG_DIR = os.path.join(REPO, "config", "access")
-TARGET_ENV = "dev"
 TARGET_ENVS = ("dev", "beta")  # CRM-007: beta is provisioned the same way
 
 # Role attributes managed from config/access/roles.json (EspoCRM 10.0.12 Role fields).

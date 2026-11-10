@@ -241,7 +241,7 @@ main() {
     [[ "$sha" =~ ^[0-9a-f]{64}$ ]] \
         || die "refusing to deploy: --sha256 HEX (64 lower-case hex digits, from the release record) is required"
     [ "$(id -u)" = 0 ] || die "refusing to run: deploy_release.sh must run as root"
-    CRM_RUNTIME_DIR=${CRM_RUNTIME_DIR:-/srv/CRM/runtime/beta}
+    pin_beta_runtime  # /srv/CRM/runtime/beta (lib/common.sh)
     [ "$(basename "$CRM_RUNTIME_DIR")" = beta ] || {
         echo "$(basename "$0"): refusing to run: runtime directory is not a beta runtime: $CRM_RUNTIME_DIR" >&2
         exit 2

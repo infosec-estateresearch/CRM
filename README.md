@@ -2,7 +2,7 @@
 
 Estate Research's self-hosted replacement for Salesforce. It is delivered incrementally under [FOUNDRY](https://github.com/maff0000/foundry) governance, starting with law firms (head office and branches) and their contacts.
 
-**Status: in delivery.** The crm-dev stack (EspoCRM 10.0.12, synthetic data only) runs on the development host. crm-beta, the first environment with customer data, is installed only from a verified release bundle (CRM-007). EspoCRM is the build candidate (CRM-D010).
+**Status: initiation.** Nothing is installed or released. EspoCRM is the leading candidate and has not been selected.
 
 | Record | Purpose |
 |---|---|
@@ -32,7 +32,8 @@ The CRM-001 dev stack is EspoCRM 10.0.12 plus MariaDB 11.4.13, both pinned by di
 - The connection is plain HTTP. TLS is mandatory before any real data.
 - Operator steps, including moving the existing install: [docs/BUILD.md §7.6](docs/BUILD.md#76-lan-access-crm-d019).
 
-### Runtime and operations
+### Usage
+
 
 - EspoCRM's persistent directories (`data/`, `custom/`, `client/custom/`) are bind-mounted individually and read-write from `/srv/CRM/runtime/dev`. `/var/www/html` itself is never mounted.
 - Git is authoritative for the customisation. `scripts/deploy_custom.sh dev` deploys `custom/Espo/Custom/` into the runtime, before the first start and after every change. It stops `crm-app` and `crm-daemon` for the swap and refuses to run if any path it works on is a symlink or diverges from the env file. If the app was running, it then starts it again, clears the cache and rebuilds. Admin-UI changes to custom metadata are overwritten by the next deploy.

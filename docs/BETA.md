@@ -16,7 +16,7 @@ crm-app  (EspoCRM; publishes only 127.0.0.1:CRM_BETA_APP_PORT)  ── crm-beta-
 
 - **Compose project `crm-beta`** (`deploy/beta/compose.json`) is separate from `crm-dev`:
   - its own network `crm-beta-net`;
-  - runtime `/srv/CRM/runtime/beta` (root, `0700`);
+  - runtime `/srv/CRM/runtime/beta` (root, `0700`). It is a constant: a `CRM_RUNTIME_DIR` naming any other directory is refused. The only seam is for the unit tests: `CRM_TEST_ROOT`, honoured only when it is an existing canonical directory under `/tmp`, makes it `$CRM_TEST_ROOT/beta`. Dev is unchanged;
   - env file `/srv/CRM/runtime/beta/env` (root, `0600`). The names are in `deploy/beta/env.example`, which has no values.
 - **crm-app** publishes only `127.0.0.1:${CRM_BETA_APP_PORT}`. `crm-db` and `crm-daemon` publish nothing.
 - **crm-beta-edge** is HAProxy, pinned by digest (`haproxy@sha256:1c3568e5…`, registered in `security/EXTERNAL_CODE_REGISTER.yaml`).
@@ -29,6 +29,9 @@ crm-app  (EspoCRM; publishes only 127.0.0.1:CRM_BETA_APP_PORT)  ── crm-beta-
   - the hostname is a strict DNS name;
   - `CRM_SITE_URL` is exactly `https://<CRM_BETA_HOSTNAME>`;
   - the rendered text passes the edge policy.
+
+  `scripts/check_access.py beta` without `--render` (run by every script that can start or recreate a service) also refuses unless the on-disk `haproxy.cfg` is byte for byte the one rendered from the env file. A missing, symlinked or different file fails closed. `scripts/up.sh beta` re-renders it instead, and if it changed, force-recreates `crm-beta-edge` after `up` (the edge bind-mounts that single file, so a running edge would keep the old one).
+- **Compose allowlist.** `check_access.py beta` refuses any key in `deploy/beta/compose.json` that the shipped file does not use. Services may have `image`, `environment`, `healthcheck`, `networks`, `ports`, `restart`, `volumes`, `depends_on`, `entrypoint` and `command`. `crm-beta-edge` may also have `cap_drop`, `read_only`, `security_opt`, `user` and `network_mode` (`host` only). The top level may have `name`, `services` and `networks`. Every `image` must be `name[:tag]@sha256:<64 hex>`.
 
 ### HTTPS and the trust boundary
 
@@ -122,6 +125,7 @@ Named users and roles are provisioned by `scripts/provision_access.py beta` and 
 ## Backup and restore
 
 - **Backup.** `scripts/backup.sh beta` writes `/srv/CRM/runtime/beta/backups/crm-beta-<stamp>/` with umask 077 (directories `0700`, files `0600`). Each backup holds a database dump, `data/`, `custom/`, `client/custom/` and `SHA256SUMS`.
+- **Export.** `scripts/export.sh beta` needs `CRM_BASE_URL` set to exactly `http://127.0.0.1:<CRM_BETA_APP_PORT>`, with the port read from `/srv/CRM/runtime/beta/env`. That file must set `CRM_BETA_APP_PORT` exactly once, in the plain form.
 - **Restore.** `scripts/restore.sh beta <name>` restores into crm-beta. The current directories are moved aside to `<dir>.replaced-<stamp>`, not deleted.
 - **Restore test.** `scripts/restore.sh beta --restoretest <name>` proves a backup restores without touching crm-beta:
   - **Before anything else** it:

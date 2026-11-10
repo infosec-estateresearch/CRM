@@ -23,7 +23,9 @@ deploy_release.sh always requires --sha256.
 
 verify-tree: refuses (exit 1) unless <dir> holds exactly the files of the
 anchored bundle (every file of RELEASE.json plus RELEASE.json itself, byte for
-byte), only regular files and the directories that hold them, nothing else.
+byte), only regular files and the directories that hold them, nothing else,
+and none of them setuid, setgid, sticky or writable by group or others (as
+verify refuses for tar members).
 """
 
 import argparse
@@ -252,6 +254,8 @@ def verify_tree(directory, bundle, expected_sha256):
             path = os.path.join(root, name)
             if os.path.islink(path) or not (os.path.isdir(path) or os.path.isfile(path)):
                 problems.append(f"not a regular file or directory: {rel}")
+            elif os.lstat(path).st_mode & 0o7022:  # as _verify for tar members
+                problems.append(f"setuid/setgid/sticky or writable-by-others mode: {rel}")
             elif os.path.isfile(path):
                 with open(path, "rb") as fh:
                     found[rel] = sha256(fh.read())
