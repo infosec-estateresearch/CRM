@@ -563,9 +563,10 @@ def _mount_fields(vol):
 
 
 def _beta_proxy_mount_errors(services):
-    """crm-app mounts exactly the runtime scheme policy file, read-only, at
-    PROXY_TARGET; nothing else mounts anything into /etc/apache2 or mounts an
-    apache file from anywhere else."""
+    """crm-app mounts exactly the scheme policy file for CRM_BETA_MODE
+    (PROXY_MOUNT_SOURCE), read-only, directly from the release directory (it
+    is never copied anywhere), at PROXY_TARGET; nothing else mounts anything
+    into /etc/apache2 or mounts an apache file from anywhere else."""
     out, found = [], []
     for name, svc in services.items():
         if not isinstance(svc, dict):
@@ -770,9 +771,51 @@ def check_edge_config(text, mode="production"):
             r"127\.0\.0\.1:[0-9]{4,5}", servers[0][2]) \
             or validate_port("edge server port", servers[0][2].rsplit(":", 1)[1]):
         out.append("edge must forward to exactly one server on 127.0.0.1:<CRM_BETA_APP_PORT>")
-    if any("0.0.0.0" in l or re.search(r"(^|\s)\*:", l) or "::" in l for l in lines):
+    if any(_wildcard_token(t) for l in lines for t in l.split()):
         out.append("edge configuration names an unspecified address or a wildcard")
     return out
+
+
+def _address_candidates(token):
+    """The address-like parts of one config token: the token itself and, for
+    comma lists, [addr]:port, addr:port, addr/N and ipv4@/ipv6@ forms, the
+    address alone."""
+    out = []
+    for part in token.split(","):
+        for prefix in ("ipv4@", "ipv6@"):
+            if part.lower().startswith(prefix):
+                part = part[len(prefix):]
+        out.append(part)
+        bracket = re.fullmatch(r"\[([^\]]*)\](?::[0-9]*)?", part)
+        if bracket:
+            out.append(bracket.group(1))
+        host, sep, port = part.rpartition(":")
+        if sep and re.fullmatch(r"[0-9]*", port):
+            out.append(host)  # "0.0.0.0:8443" -> "0.0.0.0", ":::8443" -> "::"
+        for cand in list(out):
+            if "/" in cand:
+                out.append(cand.split("/", 1)[0])
+    return out
+
+
+def _wildcard_token(token):
+    """True if token names the unspecified address (0.0.0.0 or ::, in any
+    spelling ipaddress accepts, with or without /N or :port) or the * wildcard.
+    Parsed, never a substring match: a 10/8 network whose text contains
+    "0.0.0.0" is not a wildcard."""
+    for cand in _address_candidates(token):
+        if cand == "*":
+            return True
+        try:
+            addr = ipaddress.ip_address(cand)
+        except ValueError:
+            continue
+        if addr.is_unspecified:
+            return True
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None \
+                and addr.ipv4_mapped.is_unspecified:
+            return True
+    return False
 
 
 PROXY_CONF_PATH = os.path.join(REPO, "deploy", "beta", "apache", "crm-proxy.conf")
@@ -795,8 +838,11 @@ def proxy_conf_for(text):
     return mode, PROXY_CONFS[mode]
 
 
-def proxy_copy_errors(original=PROXY_CONF_PATH, copy=PROXY_PRODUCTION_COPY_PATH):
-    """crm-proxy-production.conf must be byte for byte crm-proxy.conf."""
+def proxy_copy_errors(original=None, copy=None):
+    """crm-proxy-production.conf must be byte for byte crm-proxy.conf (the
+    paths default to the module constants, read at call time)."""
+    original = PROXY_CONF_PATH if original is None else original
+    copy = PROXY_PRODUCTION_COPY_PATH if copy is None else copy
     try:
         with open(original, "rb") as a, open(copy, "rb") as b:
             same = a.read() == b.read()

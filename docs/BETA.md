@@ -65,7 +65,7 @@ TLS ends at the PO's HAProxy. EspoCRM must still generate `https://` links, so `
 
 ## Operator steps (as root)
 
-1. **Prepare a clean runtime.** "Clean" means the runtime holds only the operator's env file, owned by root with mode `0600`. `deploy_release.sh` refuses any other entry unless `--upgrade` is given.
+1. **Prepare a clean runtime.** "Clean" means the runtime holds only the operator's env file, owned by root with mode `0600`. `deploy_release.sh` refuses any other entry unless `--upgrade` is given. Files the scripts create after a deploy, such as `service_identities.json` (UAT mode, `provision_users.py --service-identity`), are such entries; they are never created before the first deploy.
    ```sh
    install -d -m 0700 -o root -g root /srv/CRM/runtime/beta
    install -m 0600 -o root -g root /dev/null /srv/CRM/runtime/beta/env
@@ -172,9 +172,10 @@ crm-beta is a temporary, internal, single-tester UAT environment. With `CRM_BETA
 What changes in UAT mode:
 - `CRM_BETA_HOSTNAME` must be empty or absent.
 - `CRM_SITE_URL` must be exactly `http://<CRM_BETA_BIND_IP>:<CRM_BETA_PORT>` (an optional trailing `/`).
-- `CRM_BETA_UPSTREAM_SOURCES` holds 1-4 space-separated RFC 1918 **networks** `a.b.c.d/N`, N from 16 to 32, with no host bits set: the authorised LAN sources. For example `10.20.0.0/16 192.168.30.0/24` (illustrative values only). No entry may overlap **172.16.0.0/12** (Docker's default bridge pool, which holds the crm-beta network, whose subnet Docker assigns) or any subnet in `deploy/compose.json` (crm-dev). The edge runs on the host network, so a source overlapping a bridge would admit traffic from containers. Documentation addresses such as 192.0.2.0/24 are not RFC 1918 and are refused. Docker can also take bridge subnets from 192.168.0.0/16 once its 172 pool is exhausted; check `docker network ls` and `docker network inspect` on the host before choosing a 192.168 source.
+- `CRM_BETA_UPSTREAM_SOURCES` holds 1-4 space-separated RFC 1918 **networks** `a.b.c.d/N`, N from 16 to 32, with no host bits set: the authorised LAN sources. For example `<lan-network>/<N> <second-lan-network>/<N>` (placeholders: use the LAN's real networks only in the env file, never in the repository). No entry may overlap **172.16.0.0/12** (Docker's default bridge pool, which holds the crm-beta network, whose subnet Docker assigns) or any subnet in `deploy/compose.json` (crm-dev). The edge runs on the host network, so a source overlapping a bridge would admit traffic from containers. Documentation addresses such as 192.0.2.0/24 are not RFC 1918 and are refused. Docker can also take bridge subnets from 192.168.0.0/16 once its 172 pool is exhausted; check `docker network ls` and `docker network inspect` on the host before choosing a 192.168 source.
 - crm-app's Apache does **not** set `HTTPS on`, so EspoCRM builds `http://` redirects and non-secure cookies. It still removes `X-Forwarded-Proto` before EspoCRM sees it, so no client can choose the scheme. The file is `deploy/beta/apache/crm-proxy-uat.conf`.
 - `deploy_release.sh` prints the mode (never an address), and the beta-safe suite expects an `http://<LAN address>:<port>` siteUrl instead of https.
+- The success line of `check_access.py beta` names the mode in both modes, for example `beta access settings OK (production mode): ...` or `... (uat mode): ...`. In production this is the only visible difference from before CRM-009 (accepted by the PL); the checks themselves are unchanged.
 
 What does not change: the bind IP rules (one RFC 1918 unicast address, never 0.0.0.0), the ports, crm-app publishing only `127.0.0.1:<CRM_BETA_APP_PORT>`, the edge template and its policy (every other source gets 403 in both modes), siteUrl set from `CRM_SITE_URL` on every deploy, the env-file name checks and every other guard.
 
@@ -183,6 +184,7 @@ How the scheme policy file is chosen (fail closed). `deploy/beta/compose.json` m
 Risks accepted by the PO for UAT:
 - **Plain HTTP on the LAN.** Logins, session cookies and record data cross the LAN unencrypted and can be read by anyone who can capture traffic on the allowed networks.
 - **A common temporary password.** `provision_users.py beta --common-password-file` gives every new active staff account the same password ([ACCESS.md](ACCESS.md)). Anyone who knows it can sign in as any of those users until they change it. It is kept apart from the admin and integration credentials, is never in argv, logs, the password CSV or reports, and service identities, legacy shared identities and inactive users never get it.
+- **Service identities are sticky.** Every `provision_users.py --service-identity <sfId>` is recorded in `/srv/CRM/runtime/beta/service_identities.json` (outside Git: sfIds are never in the repository; root, `0600`, a regular file, never followed through a symlink), and every later run keeps those users inactive with no usable password and refuses `--reset` for them, whatever the flags say ([ACCESS.md](ACCESS.md)). There is no flag to remove one: removing one is a manual edit of that file by root. The file is created only after a deploy (only in a runtime holding the `db` directory `deploy_release.sh` makes), so it never makes a fresh runtime unclean; once it exists, a later `deploy_release.sh` needs `--upgrade`, like every other runtime entry.
 - **UAT records.** Records created during UAT have an empty `sfId`. `python3 scripts/uat_records.py beta [--list-ids NEW_FILE]` (read-only, admin credentials from the environment, pinned base URL) prints their counts per entity (Account, Contact, Opportunity, Task, Call, Meeting, Email) and optionally writes their ids to a new `0600` file. They must be removed before the production migration.
 
 ### Returning to production mode

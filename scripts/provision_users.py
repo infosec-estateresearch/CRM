@@ -36,6 +36,17 @@ isActive, teams[], roles[]}. Team and role names must exist in config/access.
   non-person Salesforce login (an integration user, a shared mailbox) kept so
   that its records have an owner. Always inactive, with a random password
   that is never recorded; its names are kept; --reset is refused for it.
+  Service identities are sticky (CRM-009 r2): every --service-identity sfId
+  (on --input and --reset runs) is added to <target runtime>/service_identities.json
+  (outside Git; the runtime found as for the pinned base URL), and every
+  --input and --reset run uses the union of that file and the flags, whatever
+  the flags say. The file must be a regular file (opened with O_NOFOLLOW),
+  owned by root, mode 0600; it is created on first use, and only in a deployed
+  runtime (one holding the db directory deploy_release.sh makes), so it never
+  makes a runtime unclean before a first deploy. A user that is active when it
+  becomes a service identity is deactivated and given a new random password
+  that is never recorded. There is no flag to remove one: that is a manual
+  root edit of the file.
 - --common-password-file FILE (CRM-009, target beta only, with --input): every
   NEW ACTIVE user that is neither legacy shared nor a service identity gets the
   one common UAT password in FILE instead of a generated one, and nothing is
@@ -150,6 +161,116 @@ class NoPasswordFile:
 
     def close(self):
         pass
+
+
+# CRM-009 r2: the sticky service identities, kept outside Git (sfIds must never
+# be in the repository) in <target runtime>/service_identities.json.
+SERVICE_IDENTITIES_FILE = "service_identities.json"
+SERVICE_IDENTITIES_KEY = "serviceIdentities"
+SERVICE_IDENTITIES_OWNER_UID = 0  # root; tests patch it to their own uid
+SERVICE_IDENTITIES_MAX_BYTES = 1024 * 1024
+# The file is created only in a deployed runtime: deploy_release.sh's
+# make_runtime creates <runtime>/db, and the clean-runtime check runs before it.
+DEPLOYED_MARKER = "db"
+
+
+def service_identities_path(target, environ):
+    """<target runtime>/service_identities.json, the runtime found as for the
+    pinned base URL (check_access.target_runtime). Raise ProvisionError if the
+    runtime cannot be determined or is not a real directory."""
+    runtime, problem = check_access.target_runtime(target, environ)
+    if problem:
+        raise ProvisionError(f"cannot determine the {target} runtime: {problem}")
+    if os.path.islink(runtime) or not os.path.isdir(runtime):
+        raise ProvisionError(f"the {target} runtime is not a real directory: {runtime}")
+    return os.path.join(runtime, SERVICE_IDENTITIES_FILE)
+
+
+def _check_store_fd(fd, path):
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
+        raise ProvisionError(f"{path} must be a regular file")
+    if st.st_uid != SERVICE_IDENTITIES_OWNER_UID:
+        raise ProvisionError(f"{path} must be owned by root")
+    if stat.S_IMODE(st.st_mode) != 0o600:
+        raise ProvisionError(f"{path} must have mode 0600")
+
+
+def load_service_identities(path):
+    """The stored service identities (a set; empty if the file does not exist
+    yet). Raise ProvisionError unless the file, when present, is a regular
+    file (opened with O_NOFOLLOW) owned by root, mode 0600, holding
+    {"serviceIdentities": [sfId, ...]}."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+    except FileNotFoundError:
+        if os.path.lexists(path):  # a dangling symlink
+            raise ProvisionError(f"{path} cannot be opened without following a symlink") from None
+        return set()
+    except OSError as err:
+        raise ProvisionError(f"{path} cannot be opened without following a symlink "
+                             f"({type(err).__name__})") from None
+    try:
+        _check_store_fd(fd, path)
+        raw = os.read(fd, SERVICE_IDENTITIES_MAX_BYTES + 1)
+    finally:
+        os.close(fd)
+    if len(raw) > SERVICE_IDENTITIES_MAX_BYTES:
+        raise ProvisionError(f"{path} is too large")
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise ProvisionError(f"{path} is not valid JSON") from None
+    ids = doc.get(SERVICE_IDENTITIES_KEY) if isinstance(doc, dict) and \
+        set(doc) == {SERVICE_IDENTITIES_KEY} else None
+    if not isinstance(ids, list) or not all(isinstance(i, str) and SF_ID.match(i) for i in ids):
+        raise ProvisionError(f"{path}: must be exactly {{\"{SERVICE_IDENTITIES_KEY}\": "
+                             "[sfId, ...]}")
+    return set(ids)
+
+
+def store_service_identities(path, ids):
+    """Atomically write ids (sorted) to path: a new 0600 file opened with
+    O_CREAT|O_EXCL|O_NOFOLLOW, then renamed over path. Refused in a runtime
+    that has not been deployed (no <runtime>/DEPLOYED_MARKER directory)."""
+    runtime = os.path.dirname(path)
+    marker = os.path.join(runtime, DEPLOYED_MARKER)
+    if os.path.islink(marker) or not os.path.isdir(marker):
+        raise ProvisionError(f"refusing to create {path}: {runtime} has not been deployed "
+                             f"(no {DEPLOYED_MARKER} directory)")
+    tmp = path + ".tmp"
+    if os.path.lexists(tmp):
+        raise ProvisionError(f"{tmp} exists (an interrupted run?); inspect and remove it")
+    body = json.dumps({SERVICE_IDENTITIES_KEY: sorted(ids)}, indent=2) + "\n"
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except OSError as err:
+        raise ProvisionError(f"cannot create {tmp} ({type(err).__name__})") from None
+    try:
+        os.fchmod(fd, 0o600)
+        _check_store_fd(fd, tmp)
+        os.write(fd, body.encode("utf-8"))
+        os.fsync(fd)
+    except BaseException:
+        os.close(fd)
+        os.unlink(tmp)
+        raise
+    os.close(fd)
+    os.replace(tmp, path)
+
+
+def sticky_service_identities(target, environ, flagged):
+    """The union of the stored service identities and flagged (the
+    --service-identity sfIds). New flagged sfIds are added to the store, which
+    is created on first use. There is no way to remove one here: that is a
+    manual root edit of the file (docs/ACCESS.md)."""
+    path = service_identities_path(target, environ)
+    stored = load_service_identities(path)
+    union = stored | set(flagged)
+    if union != stored:
+        store_service_identities(path, union)
+        log(f"{len(union - stored)} service identit(y/ies) added to {path}")
+    return union
 
 
 def generate_password(length=PASSWORD_LENGTH):
@@ -346,6 +467,12 @@ def provision_users(client, users, config, passwords, legacy_shared=(), service_
             log(f"user {current.get('userName')}: input userName differs ({user_name}); "
                 "userName is not changed")
         changes = _user_changes(current, desired)
+        if sf_id in service_ids and current.get("isActive"):
+            # CRM-009 r2: a user that becomes a service identity loses any
+            # password it was given while active; the new one is never recorded.
+            password = unusable_password()
+            changes = dict(changes, password=password, passwordConfirm=password)
+            password = None
         if changes:
             access.update(client, "User", found["id"], changes)
             counter.add("user", "updated")
@@ -443,7 +570,7 @@ def main(argv=None, transport=None, environ=None):
             raise ProvisionError("--password-file is required with --input and --reset")
         if not all(SF_ID.match(i) for i in args.service_identity):
             raise ProvisionError("--service-identity needs an sfId (15 or 18 letters and digits)")
-        services = set(args.service_identity)
+        flagged = set(args.service_identity)
         if args.password_file:
             access.check_new_private_path(args.password_file)
         config = access.load_config(args.config_dir)
@@ -452,6 +579,7 @@ def main(argv=None, transport=None, environ=None):
         if args.reset:
             if not SF_ID.match(args.reset):
                 raise ProvisionError("--reset needs an sfId (15 or 18 letters and digits)")
+            services = sticky_service_identities(args.target, environ, flagged)
             client = access.client_from_env(args.base_url, environ, transport)
             counts = reset_password(client, args.reset, passwords,
                                     sticky | set(args.legacy_shared), services)
@@ -461,8 +589,9 @@ def main(argv=None, transport=None, environ=None):
             unknown = set(args.legacy_shared) - {u["sfId"] for u in users}
             if unknown:
                 raise ProvisionError("--legacy-shared names an sfId that is not in the input")
-            if services - {u["sfId"] for u in users}:
+            if flagged - {u["sfId"] for u in users}:
                 raise ProvisionError("--service-identity names an sfId that is not in the input")
+            services = sticky_service_identities(args.target, environ, flagged)
             client = access.client_from_env(args.base_url, environ, transport)
             counts = provision_users(client, users, config, passwords,
                                      sticky | set(args.legacy_shared), services, common_password)

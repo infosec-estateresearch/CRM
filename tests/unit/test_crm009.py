@@ -124,6 +124,77 @@ class TestUatValues(unittest.TestCase):
                     self.assertIsNone(cfg)
 
 
+MAPPED_UNSPECIFIED = str(__import__("ipaddress").IPv6Address(0xFFFF << 32))
+LINK_LOCAL_V6 = str(__import__("ipaddress").IPv6Address((0xFE80 << 112) | 1))
+WILDCARD = "edge configuration names an unspecified address or a wildcard"
+TEN_16 = private(TEN, 0, prefix=16)   # the first /16 of 10/8: its text contains "0.0.0.0"
+
+
+class TestEdgeWildcard(unittest.TestCase):
+    """Auditor uat-10-0-0-0-refused: the wildcard check parses addresses."""
+
+    def rendered(self, mode):
+        errors, cfg = ca.check_beta(env(UAT if mode == "uat" else PROD), {})
+        self.assertEqual(errors, [])
+        return cfg
+
+    def test_ten_zero_network_passes_in_uat(self):
+        for sources in (TEN_16, f"{LAN_A} {TEN_16}"):
+            with self.subTest(sources=sources):
+                errors, cfg = ca.check_beta(env(UAT, CRM_BETA_UPSTREAM_SOURCES=sources), {})
+                self.assertEqual(errors, [])
+                self.assertIn(f"acl trusted_upstream src {sources}", cfg)
+                self.assertEqual(ca.check_edge_config(cfg, "uat"), [])
+
+    def test_unspecified_and_star_refused_in_both_modes(self):
+        for mode in ("production", "uat"):
+            good = self.rendered(mode)
+            src = next(l for l in good.splitlines() if "acl trusted_upstream src" in l)
+            bind = next(l for l in good.splitlines() if l.strip().startswith("bind "))
+            port = bind.rsplit(":", 1)[1]
+            cases = {
+                "src 0.0.0.0/0": good.replace(src, "    acl trusted_upstream src 0.0.0.0/0"),
+                "src 0.0.0.0": good.replace(src, "    acl trusted_upstream src 0.0.0.0"),
+                "src *": good.replace(src, "    acl trusted_upstream src *"),
+                "src ::": good.replace(src, "    acl trusted_upstream src ::"),
+                "src ::/0": good.replace(src, "    acl trusted_upstream src ::/0"),
+                "bind 0.0.0.0": good.replace(bind, f"    bind 0.0.0.0:{port}"),
+                "bind *": good.replace(bind, f"    bind *:{port}"),
+                "bind [::]": good.replace(bind, f"    bind [::]:{port}"),
+                "bind :::": good.replace(bind, f"    bind :::{port}"),
+            }
+            for name, text in cases.items():
+                with self.subTest(mode=mode, case=name):
+                    self.assertNotEqual(text, good)
+                    self.assertIn(WILDCARD, ca.check_edge_config(text, mode))
+            self.assertNotIn(WILDCARD, ca.check_edge_config(good, mode))
+
+    def test_token_parser(self):
+        for tok in ("0.0.0.0", "0.0.0.0/0", "0.0.0.0/8", "0.0.0.0:8443", "*", "*:8443",
+                    "::", "::/0", "[::]:8443", ":::8443", "0::0", MAPPED_UNSPECIFIED,
+                    "ipv4@0.0.0.0:8443", f"{LAN_A},0.0.0.0/0"):
+            with self.subTest(token=tok):
+                self.assertTrue(ca._wildcard_token(tok))
+        for tok in (TEN_16, str(TEN), private(TEN, 1, prefix=16), "127.0.0.1:8280", "src",
+                    "trusted_upstream", "!trusted_upstream", "10s", "403", UAT_BIND,
+                    f"{UAT_BIND}:8443", LINK_LOCAL_V6):
+            with self.subTest(token=tok):
+                self.assertFalse(ca._wildcard_token(tok))
+
+
+class TestUatPrefixMinimum(unittest.TestCase):
+    def test_slash_15_refused_by_the_prefix_minimum_alone(self):
+        wide = private(TEN, 10, prefix=15)   # an exact RFC 1918 /15, no bridge overlap
+        halves = [str(n) for n in __import__("ipaddress").ip_network(wide).subnets(1)]
+        self.assertEqual(ca.validate_uat_sources(" ".join(halves), ca._dev_subnets()), [])
+        problems = ca.validate_uat_sources(wide, ca._dev_subnets())
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("16", problems[0])
+        errors, cfg = ca.check_beta(env(UAT, CRM_BETA_UPSTREAM_SOURCES=f"{LAN_A} {wide}"), {})
+        self.assertEqual(errors, [problems[0].replace("entry 1", "entry 2")])
+        self.assertIsNone(cfg)
+
+
 class TestProxyPerMode(unittest.TestCase):
     def test_each_mode_checks_its_own_file(self):
         prod, uat = read(ca.PROXY_CONF_PATH), read(ca.PROXY_UAT_CONF_PATH)
@@ -179,6 +250,21 @@ class TestProxyPerMode(unittest.TestCase):
                 fh.write(read(ca.PROXY_CONF_PATH) + "\n")
             self.assertNotEqual(ca.proxy_copy_errors(copy=copy_path), [])
             self.assertEqual(ca.proxy_copy_errors(), [])
+
+    def test_check_beta_refuses_a_production_copy_that_differs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            copy_path = os.path.join(tmp, "crm-proxy-production.conf")
+            with open(copy_path, "w") as fh:  # still passes the policy, but differs
+                fh.write(read(ca.PROXY_CONF_PATH) + "# drift\n")
+            self.assertEqual(ca.check_proxy_conf(read(copy_path), "production"), [])
+            with mock.patch.object(ca, "PROXY_PRODUCTION_COPY_PATH", copy_path):
+                for text in (env(PROD, CRM_BETA_MODE="production"), env(PROD), env(UAT)):
+                    with self.subTest(text=text.splitlines()[0]):
+                        errors, cfg = ca.check_beta(text, {})
+                        self.assertIn("crm-proxy-production.conf must be byte for byte "
+                                      "crm-proxy.conf", errors)
+                        self.assertIsNone(cfg)
+            self.assertEqual(ca.check_beta(env(PROD, CRM_BETA_MODE="production"), {})[0], [])
 
 
 class TestComposeProxyMount(unittest.TestCase):
@@ -286,7 +372,35 @@ STRONG = "Uat-Common-Pass-2026"  # synthetic test value
 SERVICE = "ZZZTEST00000002AAA"   # intake.one plays a service identity here
 
 
-class TestCommonPassword(tp.UsersBase):
+class OwnRuntime(tp.UsersBase):
+    """Each test gets its own deployed dev and beta runtimes (env file and the
+    db directory deploy_release.sh makes), so the sticky service-identity
+    store of one test never leaks into another. The store's owner is the
+    test user here (root in production)."""
+
+    def setUp(self):
+        super().setUp()
+        self.root = os.path.realpath(tempfile.mkdtemp())  # under /tmp (TMPDIR)
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.root, True))
+        for target in ("dev", "beta"):
+            src = os.path.join(tp.RUNTIME_ROOT, target, "env")
+            os.makedirs(os.path.join(self.root, target, provision_users.DEPLOYED_MARKER))
+            with open(src) as a, open(os.path.join(self.root, target, "env"), "w") as b:
+                b.write(a.read())
+        self.envs = {"dev": dict(tp.ENV, CRM_RUNTIME_DIR=os.path.join(self.root, "dev")),
+                     "beta": dict(tp.BETA_ENV, CRM_TEST_ROOT=self.root)}
+        patcher = mock.patch.object(provision_users, "SERVICE_IDENTITIES_OWNER_UID", os.getuid())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def store(self, target="dev"):
+        return os.path.join(self.root, target, provision_users.SERVICE_IDENTITIES_FILE)
+
+    def run_users(self, argv, fake=None):
+        return tp.run(provision_users.main, argv, fake or self.fake, environ=self.envs[argv[0]])
+
+
+class TestCommonPassword(OwnRuntime):
     def setUp(self):
         super().setUp()
         patcher = mock.patch.object(provision_users, "COMMON_PASSWORD_OWNER_UID", os.getuid())
@@ -301,9 +415,8 @@ class TestCommonPassword(tp.UsersBase):
         return path
 
     def run_beta(self, *extra, users=None, fake=None):
-        return tp.run(provision_users.main,
-                      ["beta", "--input", self.write_users(users or tp.synthetic_users()),
-                       "--legacy-shared", tp.LEGACY, *extra], fake or self.fake)
+        return self.run_users(["beta", "--input", self.write_users(users or tp.synthetic_users()),
+                               "--legacy-shared", tp.LEGACY, *extra], fake)
 
     def users(self):
         return {u["userName"]: u for u in self.fake.records["User"].values()
@@ -379,23 +492,21 @@ class TestCommonPassword(tp.UsersBase):
     def test_dev_and_reset_refused(self):
         pw = self.write_pw()
         fake = tp.FakeEspo()
-        code, _, err = tp.run(provision_users.main,
-                              ["dev", "--input", self.write_users(tp.synthetic_users()),
-                               "--common-password-file", pw], fake)
+        code, _, err = self.run_users(["dev", "--input", self.write_users(tp.synthetic_users()),
+                                       "--common-password-file", pw], fake)
         self.assertEqual(code, 1)
         self.assertIn("only for target beta", err)
-        code, _, err = tp.run(provision_users.main, ["beta", "--reset", SERVICE,
-                                                     "--common-password-file", pw], fake)
+        code, _, err = self.run_users(["beta", "--reset", SERVICE,
+                                       "--common-password-file", pw], fake)
         self.assertEqual(code, 1)
         self.assertEqual(fake.calls, [])
 
 
-class TestServiceIdentity(tp.UsersBase):
+class TestServiceIdentity(OwnRuntime):
     def test_inactive_unrecorded_names_kept_and_reset_refused(self):
-        code, out, err = tp.run(provision_users.main,
-                                ["dev", "--input", self.write_users(tp.synthetic_users()),
-                                 "--password-file", self.path("pw.csv"),
-                                 "--service-identity", SERVICE], self.fake)
+        code, out, err = self.run_users(["dev", "--input", self.write_users(tp.synthetic_users()),
+                                         "--password-file", self.path("pw.csv"),
+                                         "--service-identity", SERVICE])
         self.assertEqual(code, 0, err)
         svc = self.fake.by_user_name("intake.one")
         self.assertFalse(svc["isActive"])
@@ -404,9 +515,8 @@ class TestServiceIdentity(tp.UsersBase):
         self.assertNotIn("intake.one", {r[1] for r in rows[1:]})
         self.assertNotIn(self.fake.passwords[svc["id"]], {r[2] for r in rows[1:]})
         self.assertIn("service identity", err)
-        code, _, err = tp.run(provision_users.main,
-                              ["dev", "--reset", SERVICE, "--password-file", self.path("r.csv"),
-                               "--service-identity", SERVICE], self.fake)
+        code, _, err = self.run_users(["dev", "--reset", SERVICE, "--password-file",
+                                       self.path("r.csv"), "--service-identity", SERVICE])
         self.assertEqual(code, 1)
         self.assertIn("service identity", err)
         self.assertFalse(os.path.lexists(self.path("r.csv")))
@@ -415,12 +525,156 @@ class TestServiceIdentity(tp.UsersBase):
         for sf in ("ZZZTEST00000099AAA", "bad id"):
             with self.subTest(sf=sf):
                 fake = tp.FakeEspo()
-                code, _, _ = tp.run(provision_users.main,
-                                    ["dev", "--input", self.write_users(tp.synthetic_users()),
-                                     "--password-file", self.path("x.csv"),
-                                     "--service-identity", sf], fake)
+                code, _, _ = self.run_users(
+                    ["dev", "--input", self.write_users(tp.synthetic_users()),
+                     "--password-file", self.path("x.csv"), "--service-identity", sf], fake)
                 self.assertEqual(code, 1)
                 self.assertEqual(fake.calls, [])
+                self.assertFalse(os.path.lexists(self.store()))
+
+
+class TestStickyServiceIdentity(OwnRuntime):
+    """CRM-009 r2: service identities persist in <runtime>/service_identities.json."""
+
+    def provision(self, *extra, target="dev", csv="pw.csv", fake=None):
+        return self.run_users([target, "--input", self.write_users(tp.synthetic_users()),
+                               "--password-file", self.path(csv), *extra], fake)
+
+    def stored(self, target="dev"):
+        with open(self.store(target), encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_flag_creates_the_store_0600_and_runs_take_the_union(self):
+        old = os.umask(0)
+        try:
+            code, _, err = self.provision("--service-identity", SERVICE)
+        finally:
+            os.umask(old)
+        self.assertEqual(code, 0, err)
+        st = os.lstat(self.store())
+        self.assertTrue(stat.S_ISREG(st.st_mode))
+        self.assertEqual(stat.S_IMODE(st.st_mode), 0o600)
+        self.assertEqual(self.stored(), {"serviceIdentities": [SERVICE]})
+        other = "ZZZTEST00000001AAA"
+        code, _, err = self.provision("--service-identity", other, csv="pw2.csv")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.stored(), {"serviceIdentities": sorted([SERVICE, other])})
+        self.assertFalse(self.fake.by_user_name("staff.one")["isActive"])
+        self.assertFalse(self.fake.by_user_name("intake.one")["isActive"])
+        self.assertFalse(os.path.lexists(self.store("beta")))  # per target runtime
+
+    def test_a_run_without_the_flag_keeps_the_identity_inactive(self):
+        code, _, err = self.provision("--service-identity", SERVICE)
+        self.assertEqual(code, 0, err)
+        before = (copy.deepcopy(self.fake.records), dict(self.fake.passwords))
+        self.fake.calls.clear()
+        code, out, err = self.provision(csv="pw2.csv")  # no --service-identity
+        self.assertEqual(code, 0, err)
+        self.assertFalse(self.fake.by_user_name("intake.one")["isActive"])
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual((self.fake.records, self.fake.passwords), before)
+        self.assertEqual(json.loads(out)["passwordsIssued"], 0)
+        self.assertFalse(os.path.lexists(self.path("pw2.csv")))
+
+    def test_reset_is_refused_for_a_stored_identity_whatever_the_flags(self):
+        code, _, err = self.provision("--service-identity", SERVICE)
+        self.assertEqual(code, 0, err)
+        # make it active behind the script's back: --reset must still refuse
+        self.fake.by_user_name("intake.one")["isActive"] = True
+        for extra in ([], ["--service-identity", "ZZZTEST00000001AAA"]):
+            with self.subTest(extra=extra):
+                fake_calls = len(self.fake.calls)
+                code, _, err = self.run_users(["dev", "--reset", SERVICE, "--password-file",
+                                               self.path("r.csv"), *extra])
+                self.assertEqual(code, 1)
+                self.assertIn("service identity", err)
+                self.assertEqual(len(self.fake.calls), fake_calls)  # no API call at all
+                self.assertFalse(os.path.lexists(self.path("r.csv")))
+
+    def test_an_active_user_that_becomes_a_service_identity_loses_its_password(self):
+        code, _, err = self.provision()
+        self.assertEqual(code, 0, err)
+        svc = self.fake.by_user_name("intake.one")
+        issued = self.fake.passwords[svc["id"]]
+        self.assertTrue(svc["isActive"])
+        code, _, err = self.provision("--service-identity", SERVICE, csv="pw2.csv")
+        self.assertEqual(code, 0, err)
+        self.assertFalse(svc["isActive"])
+        self.assertNotEqual(self.fake.passwords[svc["id"]], issued)
+        self.assertFalse(os.path.lexists(self.path("pw2.csv")))  # never recorded
+        self.assertNotIn(self.fake.passwords[svc["id"]], err)
+        staff = self.fake.by_user_name("staff.one")
+        self.assertTrue(staff["isActive"])  # others untouched
+
+    def test_beta_uses_the_beta_runtime(self):
+        code, _, err = self.provision("--service-identity", SERVICE, target="beta")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.stored("beta"), {"serviceIdentities": [SERVICE]})
+        self.assertFalse(os.path.lexists(self.store("dev")))
+
+    def test_bad_store_refused_before_any_request(self):
+        good = json.dumps({"serviceIdentities": [SERVICE]})
+        real = self.path("real.json")
+        with open(real, "w") as fh:
+            fh.write(good)
+        os.chmod(real, 0o600)
+
+        def write(text, mode=0o600):
+            def make():
+                with open(self.store(), "w") as fh:
+                    fh.write(text)
+                os.chmod(self.store(), mode)
+            return make
+        cases = {
+            "symlink": lambda: os.symlink(real, self.store()),
+            "dangling symlink": lambda: os.symlink(self.path("nope"), self.store()),
+            "directory": lambda: os.mkdir(self.store()),
+            "mode 0644": write(good, 0o644),
+            "mode 0400": write(good, 0o400),
+            "not JSON": write("{"),
+            "a list": write(json.dumps([SERVICE])),
+            "extra key": write(json.dumps({"serviceIdentities": [], "x": 1})),
+            "bad sfId": write(json.dumps({"serviceIdentities": ["bad id"]})),
+        }
+        for name, make in cases.items():
+            for argv in (["--input", self.write_users(tp.synthetic_users())],
+                         ["--reset", "ZZZTEST00000001AAA"]):
+                with self.subTest(case=name, mode=argv[0]):
+                    make()
+                    try:
+                        fake = tp.FakeEspo()
+                        code, _, err = self.run_users(
+                            ["dev", *argv, "--password-file", self.path("x.csv")], fake)
+                        self.assertEqual(code, 1, err)
+                        self.assertEqual(fake.calls, [])
+                        self.assertIn(provision_users.SERVICE_IDENTITIES_FILE, err)
+                    finally:
+                        if os.path.isdir(self.store()) and not os.path.islink(self.store()):
+                            os.rmdir(self.store())
+                        else:
+                            os.unlink(self.store())
+
+    def test_not_root_owned_store_refused(self):
+        code, _, err = self.provision("--service-identity", SERVICE)
+        self.assertEqual(code, 0, err)
+        with mock.patch.object(provision_users, "SERVICE_IDENTITIES_OWNER_UID", os.getuid() + 1):
+            fake = tp.FakeEspo()
+            code, _, err = self.provision(csv="pw2.csv", fake=fake)
+        self.assertEqual(code, 1)
+        self.assertIn("owned by root", err)
+        self.assertEqual(fake.calls, [])
+
+    def test_never_created_in_an_undeployed_runtime(self):
+        os.rmdir(os.path.join(self.root, "dev", provision_users.DEPLOYED_MARKER))
+        fake = tp.FakeEspo()
+        code, _, err = self.provision("--service-identity", SERVICE, fake=fake)
+        self.assertEqual(code, 1)
+        self.assertIn("has not been deployed", err)
+        self.assertEqual(fake.calls, [])
+        self.assertEqual(sorted(os.listdir(os.path.join(self.root, "dev"))), ["env"])
+        code, _, err = self.provision(csv="pw2.csv")  # without the flag: nothing to store
+        self.assertEqual(code, 0, err)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.root, "dev"))), ["env"])
 
 
 # --- beta-safe suite in UAT mode ---------------------------------------------------
