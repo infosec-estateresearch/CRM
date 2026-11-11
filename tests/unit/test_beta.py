@@ -1782,14 +1782,33 @@ class TestDeploySteps(ShellEnv):
         calls = self.docker_calls()
         beta = f"compose -p crm-beta -f {REPO}/deploy/beta/compose.json --env-file {self.env_file} "
         self.assertTrue(all(c.startswith(beta) for c in calls), calls)
-        self.assertTrue(calls[0].endswith("config:set siteUrl https://crm-beta.example.invalid"))
-        self.assertTrue(calls[1].endswith("config:set phoneNumberInternational false"))
+        self.assertTrue(calls[0].endswith(
+            "config:set siteUrl https://crm-beta.example.invalid --type=string"), calls[0])
+        self.assertTrue(calls[1].endswith(
+            "config:set phoneNumberInternational false --type=bool"), calls[1])
         self.assertIn("php -r", calls[2])
         for out in ("'false'", "true", "NULL", "", "0", "false\nfalse"):
             with self.subTest(read_back=out):
                 res = self.step(f"configure_site {REPO}", extra={"FAKE_PHP_OUT": out})
                 self.assertEqual(res.returncode, 1)
                 self.assertIn("not exactly false", res.stderr)
+
+    def test_configure_site_sets_phone_as_bool_and_string_false_still_fails(self):
+        # CRM-009-F: config:set defaults to --type=string; the boolean needs --type=bool.
+        res = self.step(f"configure_site {REPO}")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        sets = [c for c in self.docker_calls() if "config:set phoneNumberInternational" in c]
+        self.assertEqual(len(sets), 1, sets)
+        self.assertEqual(sets[0].split("config:set ", 1)[1],
+                         "phoneNumberInternational false --type=bool")
+        self.assertNotIn("--type=string", sets[0])
+        # The setter change must not relax the strict read-back: the string 'false' fails.
+        os.remove(self.log)
+        res = self.step(f"configure_site {REPO}; echo NOT-REACHED", extra={"FAKE_PHP_OUT": "'false'"})
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("read back as ''false'', not exactly false", res.stderr)
+        self.assertNotIn("NOT-REACHED", res.stdout)
+        self.assertTrue(any("--type=bool" in c for c in self.docker_calls()))
 
     # check_access.py runs for real (the pinned beta URL from the env file).
     PY_STUB = ('python3() { case "$*" in *check_access.py*) command python3 "$@"; return;; esac; '
