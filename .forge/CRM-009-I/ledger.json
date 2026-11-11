@@ -1,0 +1,174 @@
+{
+  "base": "main",
+  "base_sha": "c3c0fefbac3a45360325b1ccb4e0cd56fc63525b",
+  "branch": "forge/CRM-009-I",
+  "candidate": "4265b71501958ce30407eebc76ebe2b638f0a186",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-11T16:44:28Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-11T16:44:28Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-11T16:49:07Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r1: usersIds create-only, truncated-text single read, address normalisation",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-11T16:49:52Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "4265b71501958ce30407eebc76ebe2b638f0a186",
+      "t": "2026-11-11T16:49:52Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "4265b71501958ce30407eebc76ebe2b638f0a186",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-11T16:49:52Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "4265b71501958ce30407eebc76ebe2b638f0a186",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-11T16:49:52Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "4265b71501958ce30407eebc76ebe2b638f0a186",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-11T16:49:52Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-11T16:53:38Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-11T16:53:38Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-11T16:53:38Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "4265b71501958ce30407eebc76ebe2b638f0a186",
+      "findings": [],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-11T16:54:20Z",
+      "type": "result"
+    },
+    {
+      "candidate": "4265b71501958ce30407eebc76ebe2b638f0a186",
+      "findings": [
+        {
+          "key": "text-shortened-to-cut",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-11T16:54:20Z",
+      "type": "result"
+    },
+    {
+      "candidate": "4265b71501958ce30407eebc76ebe2b638f0a186",
+      "findings": [
+        {
+          "key": "addr-dup-collapse",
+          "severity": "advisory"
+        },
+        {
+          "key": "single-read-transport-error",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-11T16:54:20Z",
+      "type": "result"
+    },
+    {
+      "note": "r1: advisories only",
+      "outcome": "DELIVERED",
+      "t": "2026-11-11T16:54:21Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-009-I",
+  "host": "docker1",
+  "known_commit": "c3c0fefbac3a45360325b1ccb4e0cd56fc63525b",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-009-I",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-009-I",
+  "wo": "CRM-009-I",
+  "worktree": "/srv/CRM/worktrees/CRM-009-I"
+}
