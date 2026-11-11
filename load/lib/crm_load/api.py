@@ -44,7 +44,11 @@ class EspoClient:
             return status, doc
 
     def list_all(self, entity, attributes, key="sfId"):
-        """One paged read: every record whose key is not null. Returns a list of dicts."""
+        """One paged read: every record whose key is not null. Returns a list of dicts.
+
+        CRM-009-H: 10.0.12 does not count Email lists (``total: -1``). A missing, non-integer
+        or negative total is unknown: paging continues until a page has fewer than PAGE rows.
+        A known total must equal the records read, else ``list_incomplete``."""
         out, offset = [], 0
         select = ",".join(["id"] + [a for a in attributes if a != "id"])
         while True:
@@ -54,9 +58,16 @@ class EspoClient:
             status, doc = self._send("GET", entity, query)
             if status != 200 or not isinstance(doc, dict) or not isinstance(doc.get("list"), list):
                 raise TransportError("list_failed", status)
-            out.extend(doc["list"])
-            offset += len(doc["list"])
-            if not doc["list"] or offset >= int(doc.get("total", 0)):
+            rows = doc["list"]
+            out.extend(rows)
+            offset += len(rows)
+            total = doc.get("total")
+            if not isinstance(total, int) or isinstance(total, bool) or total < 0:
+                if len(rows) < PAGE:
+                    return out
+            elif not rows or offset >= total:
+                if len(out) != total:
+                    raise TransportError("list_incomplete", status)
                 return out
 
     def get(self, entity, record_id):

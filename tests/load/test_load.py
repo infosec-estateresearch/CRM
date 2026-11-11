@@ -2757,5 +2757,117 @@ class TestCrm008G(Base):
         self.assertEqual(self.rerun_writes(snap, espo), [])
 
 
+class _Pages:
+    """A scripted list endpoint: returns the given (total, rows) pages in order; records offsets."""
+
+    def __init__(self, pages):
+        self.pages = list(pages)
+        self.offsets = []
+
+    def send(self, method, path, query=None, body=None, headers=None):
+        assert method == "GET"
+        self.offsets.append(int(dict(query)["offset"]))
+        total, n = self.pages.pop(0)
+        doc = {"list": [{"id": f"r{len(self.offsets)}-{i}", "sfId": f"s{len(self.offsets)}-{i}"} for i in range(n)]}
+        if total is not _Pages.MISSING:
+            doc["total"] = total
+        return 200, doc
+
+    MISSING = object()
+
+
+class TestUnknownListTotal(Base):
+    """CRM-009-H: 10.0.12 answers an Email list read with ``total: -1``; every page is read."""
+
+    EXTRA = 250                     # more than one page (PAGE 200) of Emails
+
+    def big_email_snapshot(self):
+        data = fx.org()
+        base = dict(data["EmailMessage"][1], ActivityId=None, RelatedToId=fx.O[0])
+        for i in range(self.EXTRA):
+            data["EmailMessage"].append(dict(base, Id=fx.sid("02s", 100 + i)))
+        return write_snapshot(os.path.join(self.tmp, "many-emails"), data=data)
+
+    def test_fake_reports_unknown_total_only_for_chosen_entities(self):
+        espo = FakeEspo(uncounted={"Email"})
+        espo._insert("Email", {"sfId": "e"})
+        q = [("select", "id,sfId"), ("maxSize", "200"), ("offset", "0"),
+             ("where[0][type]", "isNotNull"), ("where[0][attribute]", "sfId")]
+        self.assertEqual(espo.send("GET", "Email", q)[1]["total"], -1)
+        self.assertEqual(espo.send("GET", "User", q)[1]["total"], 4)
+        counted = FakeEspo()                                                     # default unchanged
+        counted._insert("Email", {"sfId": "e"})
+        self.assertEqual(counted.send("GET", "Email", q)[1]["total"], 1)
+
+    def test_every_email_indexed_rerun_zero_writes_parents_match(self):
+        snap = self.big_email_snapshot()
+        espo = FakeEspo(uncounted={"Email"})
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        emails = len(espo.by_sf("Email"))
+        self.assertGreater(emails, 200)
+        self.assertEqual(self.report()["objects"]["EmailMessage"]["targets"]["Email"]["created"], emails)
+        rel = self.report()["relationships"]
+        for name, r in rel.items():
+            self.assertEqual(r["snapshot"], r["espocrm"], name)
+        self.assertGreater(rel["activity_parents"]["snapshot"], self.EXTRA)
+        first = len(espo.writes)
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        self.assertIn(f"event=index entity=Email records={emails}", self.last_err)
+        self.assertEqual(len(espo.writes), first)
+        rep = self.report()
+        self.assertEqual(rep["requests"]["writes"], 0)
+        self.assertEqual(rep["objects"]["EmailMessage"]["targets"]["Email"]["unchanged"], emails)
+        for name, r in rep["relationships"].items():
+            self.assertEqual(r["snapshot"], r["espocrm"], name)
+
+    def test_unknown_total_pages_until_a_short_page(self):
+        for total in (-1, None, _Pages.MISSING, "400", 1.5, True):
+            with self.subTest(total=total):
+                t = _Pages([(total, 200), (total, 200), (total, 7)])
+                rows = EspoClient(t, sleep=lambda s: None).list_all("Email", ["sfId"])
+                self.assertEqual(len(rows), 407)
+                self.assertEqual(t.offsets, [0, 200, 400])
+                self.assertEqual(t.pages, [])
+
+    def test_unknown_total_stops_on_an_empty_page(self):
+        t = _Pages([(-1, 200), (-1, 0)])
+        client = EspoClient(t, sleep=lambda s: None)
+        self.assertEqual(len(client.list_all("Email", ["sfId"])), 200)
+        self.assertEqual(t.offsets, [0, 200])
+        self.assertEqual(client.reads, 2)
+        self.assertEqual(client.writes, 0)
+        self.assertEqual(len(EspoClient(_Pages([(-1, 0)]), sleep=lambda s: None).list_all("Email", ["sfId"])), 0)
+
+    def test_known_total_unchanged(self):
+        t = _Pages([(250, 200), (250, 50)])
+        self.assertEqual(len(EspoClient(t, sleep=lambda s: None).list_all("Meeting", ["sfId"])), 250)
+        self.assertEqual(t.offsets, [0, 200])                    # stops at the total, no extra read
+        t = _Pages([(0, 0)])
+        self.assertEqual(EspoClient(t, sleep=lambda s: None).list_all("Meeting", ["sfId"]), [])
+
+    def test_known_total_not_reached_is_list_incomplete(self):
+        for pages in ([(300, 200), (300, 0)],                    # the server stops short
+                      [(300, 200), (300, 50), (300, 0)],
+                      [(150, 200)]):                             # more rows than the total
+            with self.subTest(pages=pages):
+                with self.assertRaises(TransportError) as cm:
+                    EspoClient(_Pages(pages), sleep=lambda s: None).list_all("Meeting", ["sfId"])
+                self.assertEqual(cm.exception.code, "list_incomplete")
+                self.assertEqual(cm.exception.exit_code, 4)
+
+    def test_incomplete_index_fails_the_load_with_no_writes(self):
+        class ShortMeeting(FakeEspo):
+            def send(self, method, path, query=None, body=None, headers=None):
+                st, doc = super().send(method, path, query, body, headers)
+                if method == "GET" and path == "Meeting" and isinstance(doc, dict) and "list" in doc:
+                    doc["total"] = len(doc["list"]) + 1          # the count disagrees with the rows
+                return st, doc
+        espo = ShortMeeting()
+        self.assertEqual(self.run_load(espo=espo), 4)
+        self.assertIn("list_incomplete", self.last_err)
+        self.assertEqual(espo.writes, [])
+        self.assertFalse([r for r in espo.requests if r[0] != "GET"])
+
+
 if __name__ == "__main__":
     unittest.main()
