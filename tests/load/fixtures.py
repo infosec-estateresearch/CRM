@@ -497,28 +497,34 @@ class FakeEspo:
     # with an account), email_to (Email.to required).
     # CRM-008-G: date_completed_read_only (API input discarded, fact 1), date_completed_core (the
     # core DateCompleted hook, fact 2), completed_hook (PreserveSalesforceCompletedDate, fact 3),
-    # completed_hook_api_recompletion (round 2: the hook also fires on a status change by an API
-    # user, i.e. the importer re-completing a Task staff reopened).
+    # completed_hook_api_recompletion (round 2: the hook also fires on a status change by the ER
+    # Import user, i.e. the importer re-completing a Task staff reopened), import_user_identity
+    # (round 3: only type api with userName er-import counts, not any API user).
     CHECKS = ("owner", "required", "max_length", "currency", "email",
               "phone_list", "title_account", "email_to",
               "date_completed_read_only", "date_completed_core", "completed_hook",
-              "completed_hook_api_recompletion")
+              "completed_hook_api_recompletion", "import_user_identity")
     # The server clock the core DateCompleted hook stamps ("now"); never a source value.
     NOW = "2026-11-10 09:00:00"
 
-    # The saving user: every REST call (send) is ER Import, an API user. staff() saves as a
-    # person (not an API user), as the UI would (CRM-008-G round 2).
-    saving_user_is_api = True
+    # The saving user (type, userName): every REST call (send) is ER Import. staff() saves as a
+    # person, as the UI would (CRM-008-G round 2); as_user() as any other user (round 3).
+    IMPORT_USER = ("api", "er-import")
+    saving_user = IMPORT_USER
 
-    def staff(self, method, path, body=None):
-        """``send`` as a staff (non-API) user; not recorded as an importer request or write."""
+    def as_user(self, user, method, path, body=None):
+        """``send`` as ``user`` (type, userName); not recorded as an importer request or write."""
         n, r, h = len(self.writes), len(self.requests), len(self.headers)
-        self.saving_user_is_api = False
+        self.saving_user = user
         try:
             return self.send(method, path, body=body)
         finally:
-            self.saving_user_is_api = True
+            self.saving_user = self.IMPORT_USER
             del self.writes[n:], self.requests[r:], self.headers[h:]
+
+    def staff(self, method, path, body=None):
+        """``send`` as a staff (regular) user; not recorded as an importer request or write."""
+        return self.as_user(("regular", "staff.one"), method, path, body)
 
     def _checks(self):
         return set(self.CHECKS) - getattr(self, "disabled_checks", set())
@@ -544,8 +550,12 @@ class FakeEspo:
         if "date_completed_core" in checks and (new or rec.get("status") != before.get("status")):
             # Core hook, on a status change: null unless Completed, then now (no IMPORT option).
             rec["dateCompleted"] = self.NOW if rec.get("status") == "Completed" else None
+        if "import_user_identity" in checks:
+            is_import_user = self.saving_user == self.IMPORT_USER
+        else:
+            is_import_user = self.saving_user[0] == "api"      # the round-2 hook: any API user
         api_recompletion = "completed_hook_api_recompletion" in checks and not new and \
-            self.saving_user_is_api and rec.get("status") != before.get("status")
+            is_import_user and rec.get("status") != before.get("status")
         if "completed_hook" in checks and rec.get("status") == "Completed" and rec.get("sfCompletedAt") and \
                 (new or rec.get("sfCompletedAt") != before.get("sfCompletedAt") or api_recompletion):
             # The custom hook, $order 20 (after core).

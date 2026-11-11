@@ -127,15 +127,17 @@ def archived_save_allowed(is_new, fetched_status, is_admin, is_import_user, chan
 # --- the Task completion-date rule (mirrors PreserveSalesforceCompletedDate.php) ------
 
 def completed_date_after_save(is_new, status, sf_completed_at, sf_changed, core_value,
-                              status_changed=False, is_api=False):
+                              status_changed=False, user_type="regular", user_name=None):
     """WO CRM-008-G item 2: Task.dateCompleted after the custom hook, given the value the
     core DateCompleted hook left (core_value: null when not Completed, now when the status
     became Completed, else unchanged). sf_changed means sfCompletedAt changed in this save;
-    status_changed that the status changed in it; is_api that the saving user is an API user
-    (only ER Import is one). Round 2: an API user's change to Completed (the importer
-    re-completing a Task that staff reopened) also takes sfCompletedAt; a staff one keeps now."""
+    status_changed that the status changed in it; user_type and user_name are the saving
+    user's. Round 2: a change to Completed by the ER Import user (type api and userName
+    'er-import', as in archived_save_allowed: the importer re-completing a Task that staff
+    reopened) also takes sfCompletedAt; staff and any other API user keep core's now (round 3)."""
+    is_import_user = user_type == "api" and user_name == "er-import"
     if status == "Completed" and sf_completed_at and \
-            (is_new or sf_changed or (status_changed and is_api)):
+            (is_new or sf_changed or (status_changed and is_import_user)):
         return sf_completed_at
     return core_value
 
@@ -367,7 +369,9 @@ _COMPLETED_BODY = re.compile(r"""
 \s*if\s*\(\s*\$entity->get\('status'\)\s*!==\s*'Completed'\s*\)\s*\{\s*return\s*;\s*\}
 \s*\$sfCompletedAt\s*=\s*\$entity->get\('sfCompletedAt'\)\s*;
 \s*if\s*\(\s*!\s*\$sfCompletedAt\s*\)\s*\{\s*return\s*;\s*\}
-\s*\$isImporterRecompletion\s*=\s*\$entity->isAttributeChanged\('status'\)\s*&&\s*\$this->user->isApi\(\)\s*;
+\s*\$isImportUser\s*=\s*\$this->user->getType\(\)\s*===\s*User::TYPE_API\s*&&
+\s*\$this->user->getUserName\(\)\s*===\s*'(?P<user>[^'\\]+)'\s*;
+\s*\$isImporterRecompletion\s*=\s*\$entity->isAttributeChanged\('status'\)\s*&&\s*\$isImportUser\s*;
 \s*if\s*\(\s*!\s*\$entity->isNew\(\)\s*&&\s*!\s*\$entity->isAttributeChanged\('sfCompletedAt'\)\s*&&
 \s*!\s*\$isImporterRecompletion\s*\)\s*\{\s*return\s*;\s*\}
 \s*\$entity->set\('dateCompleted'\s*,\s*\$sfCompletedAt\s*\)\s*;\s*
@@ -399,8 +403,13 @@ def rule_completed_hook_shape(b):
 
 def rule_completed_hook_body(b):
     body = _method_body(_php(b.get("completedHook") or ""), "beforeSave")
-    if body is None or not _COMPLETED_BODY.fullmatch(body):
+    match = _COMPLETED_BODY.fullmatch(body) if body is not None else None
+    if not match:
         return ["beforeSave is not exactly the completion-date rule (see completed_date_after_save)"]
+    names = import_user_names(b)
+    if names != [match.group("user")]:
+        return [f"completed hook trusts API user {match.group('user')!r}, but the ER Import API "
+                f"users in api_users.json are {names}"]
     return []
 
 

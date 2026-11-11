@@ -14,9 +14,10 @@ use Espo\ORM\Repository\Option\SaveOptions;
  * Completed. The importer sends the Salesforce value in sfCompletedAt instead; this hook
  * runs after core ($order 20) and copies it to dateCompleted when the status is Completed,
  * sfCompletedAt is set and the entity is new, or sfCompletedAt changed, or the status changed
- * in a save by an API user (only ER Import is one: the importer re-completing a Task that staff
- * reopened, CRM-008-G round 2). Any other save keeps core's behaviour, so a staff member
- * re-completing a reopened Task gets core's now.
+ * in a save by the ER Import API user (type api, userName 'er-import', as in
+ * ProtectArchivedEmail and RequireLossReason: the importer re-completing a Task that staff
+ * reopened, CRM-008-G round 2). Any other save keeps core's behaviour, so a staff member, or
+ * any other API user, re-completing a reopened Task gets core's now.
  * The rule table is mirrored in tests/unit/activity_policy.py (completed_date_after_save).
  *
  * @implements BeforeSave<Entity>
@@ -40,7 +41,10 @@ class PreserveSalesforceCompletedDate implements BeforeSave
             return;
         }
 
-        $isImporterRecompletion = $entity->isAttributeChanged('status') && $this->user->isApi();
+        $isImportUser = $this->user->getType() === User::TYPE_API &&
+            $this->user->getUserName() === 'er-import';
+
+        $isImporterRecompletion = $entity->isAttributeChanged('status') && $isImportUser;
 
         if (
             !$entity->isNew() &&
