@@ -18,7 +18,7 @@ import os
 
 from .api import WriteRejected
 from .errors import LoadError
-from .mapping import EXCEPTION_CODES, REFUSING_CODES, check_shape
+from .mapping import EXCEPTION_CODES, REFUSING_CODES, SENT_ONLY_CODES, check_shape
 from .users import is_human
 
 ENTITIES = ("User", "ServiceType", "Account", "Contact", "Opportunity", "Task", "Call", "Meeting", "Email")
@@ -492,6 +492,15 @@ class Loader:
             o["skipped"]["absent_unexplained"] = unexplained
         return cur
 
+    def _server_stamped(self, obj, row, entity, stored):
+        """CRM-008-G round 3 (PL decision, state-based): a Task whose stored state after the
+        upsert is Completed with sfCompletedAt null has a dateCompleted EspoCRM stamped itself
+        (the save time). Recorded (id only) on every run, for each such Task that was stored
+        or already exists; ``stored`` is None for a refused or rejected record (no code)."""
+        if entity == "Task" and stored is not None and stored.get("status") == "Completed" and \
+                _norm(stored.get("sfCompletedAt")) is None:
+            self.exception(obj, row["Id"], "date_completed_server_stamped")
+
     def _record_exc(self, obj, row, codes):
         """Record the codes; True when one of them refuses the record (never sent)."""
         for c in codes:
@@ -560,7 +569,8 @@ class Loader:
             entity, attrs, exc = m.task(r, ctx, routed)
             if self._record_exc("Task", r, exc):
                 continue
-            self.upsert("task", "Task", r["Id"], entity, r["Id"], attrs)
+            stored = self.upsert("task", "Task", r["Id"], entity, r["Id"], attrs)
+            self._server_stamped("Task", r, entity, stored)
         for r in self._source("Event"):
             attrs, exc = m.event(r, ctx)
             if self._record_exc("Event", r, exc):
@@ -578,14 +588,26 @@ class Loader:
             relations.setdefault(rel.get("EmailMessageId"), []).append(rel)
         for r in emails:
             attrs, exc = m.email_message(r, relations.get(r["Id"], []), task_by_id, ctx)
-            if attrs["to"] is None:
-                if r["Id"] not in self.index["Email"]:
-                    # CRM-008-F change 4: Email.to is required; no recipient -> a Task.
-                    attrs, exc = m.email_message_as_task(r, task_by_id, ctx)
-                    if self._record_exc("EmailMessage", r, exc):
-                        continue
-                    self.upsert("email_message", "EmailMessage", r["Id"], "Task", r["Id"], attrs)
+            as_email = r["Id"] in self.index["Email"]
+            kept = not as_email and r["Id"] in self.index["Task"]
+            has_to = attrs["to"] is not None
+            if kept or (not has_to and not as_email):
+                # CRM-008-F change 4: Email.to is required; no recipient -> a Task.
+                # CRM-008-G: one an earlier run created as a Task stays a Task (never moved,
+                # never also POSTed as an Email), even once it has a recipient.
+                attrs, exc = m.email_message_as_task(r, task_by_id, ctx)
+                if has_to:
+                    exc = [("email_kept_as_task" if c == "email_without_recipient_imported_as_task"
+                            else c) for c in exc]
+                sent_only = [c for c in exc if c in SENT_ONLY_CODES]
+                if self._record_exc("EmailMessage", r, [c for c in exc if c not in SENT_ONLY_CODES]):
                     continue
+                stored = self.upsert("email_message", "EmailMessage", r["Id"], "Task", r["Id"], attrs)
+                if stored is not None:
+                    self._record_exc("EmailMessage", r, sent_only)
+                self._server_stamped("EmailMessage", r, "Task", stored)
+                continue
+            if not has_to:
                 # An Email from an earlier run stays an Email; null to would be refused (400).
                 del attrs["to"]
             if self._record_exc("EmailMessage", r, exc):

@@ -8,6 +8,11 @@ PHP-free decision table of the archived-email hook.
 
 import copy
 import itertools
+import json
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 import access_policy
@@ -36,6 +41,13 @@ def _hook(old, new):
     def mutate(b):
         assert old in b["hook"], old
         b["hook"] = b["hook"].replace(old, new, 1)
+    return mutate
+
+
+def _completed(old, new):
+    def mutate(b):
+        assert old in b["completedHook"], old
+        b["completedHook"] = b["completedHook"].replace(old, new, 1)
     return mutate
 
 
@@ -115,7 +127,53 @@ BROKEN = {
     "task_detail_no_date_completed": (_call(lambda b: b["layouts"]["Task"]["detail"][0]["rows"]
                                             .pop(3)), {"layouts"}),
     "hook_wrong_status": (_hook("!== 'Archived'", "!== 'Sent'"), {"hook_body"}),
-    "api_user_renamed": (_set(["apiUsers", 0, "userName"], "er-loader"), {"hook_body"}),
+    "api_user_renamed": (_set(["apiUsers", 0, "userName"], "er-loader"),
+                         {"hook_body", "completed_hook_body"}),
+    # CRM-008-G: Task.sfCompletedAt and the completion-date hook.
+    "task_completed_at_read_only": (_set(["defs", "Task", "fields", "sfCompletedAt", "readOnly"],
+                                         True), {"legacy_fields"}),
+    "task_completed_at_missing": (_del(["defs", "Task", "fields", "sfCompletedAt"]),
+                                  {"legacy_fields", "layouts"}),
+    "task_completed_at_unlabelled": (_del(["i18n", "Task", "fields", "sfCompletedAt"]), {"labels"}),
+    "task_completed_at_not_in_legacy": (_set(["layouts", "Task", "detail", 1, "rows", 1, 1], False),
+                                        {"layouts"}),
+    "completed_hook_core_order": (_completed("$order = 20;", "$order = 9;"),
+                                  {"completed_hook_shape"}),
+    "completed_hook_after_save": (_completed("CompletedDate implements BeforeSave",
+                                            "CompletedDate implements AfterSave"),
+                                  {"completed_hook_shape"}),
+    "completed_hook_any_status": (_completed("!== 'Completed'", "=== 'Never'"),
+                                  {"completed_hook_body"}),
+    "completed_hook_every_save": (_completed("if (\n            !$entity->isNew() &&\n"
+                                             "            !$entity->isAttributeChanged('sfCompletedAt') &&\n"
+                                             "            !$isImporterRecompletion\n        ) {\n"
+                                             "            return;\n        }", ""),
+                                  {"completed_hook_body"}),
+    "completed_hook_new_only": (_completed("            !$entity->isAttributeChanged('sfCompletedAt') &&\n", ""),
+                                {"completed_hook_body"}),
+    "completed_hook_null_copied": (_completed("if (!$sfCompletedAt) {\n            return;\n        }",
+                                              ""), {"completed_hook_body"}),
+    "completed_hook_wrong_target": (_completed("set('dateCompleted'", "set('dateEnd'"),
+                                    {"completed_hook_body"}),
+    # Round 2: the importer's re-completion (status change by an API user).
+    "completed_hook_no_recompletion": (_completed("            !$entity->isAttributeChanged('sfCompletedAt') &&\n"
+                                                  "            !$isImporterRecompletion\n",
+                                                  "            !$entity->isAttributeChanged('sfCompletedAt')\n"),
+                                       {"completed_hook_body"}),
+    "completed_hook_any_user": (_completed(" && $isImportUser;", ";"), {"completed_hook_body"}),
+    # Round 3: only ER Import (type api and userName 'er-import'), as in ProtectArchivedEmail.
+    "completed_hook_any_api_user": (_completed("$this->user->getType() === User::TYPE_API &&\n"
+                                               "            $this->user->getUserName() === 'er-import';",
+                                               "$this->user->isApi();"), {"completed_hook_body"}),
+    "completed_hook_name_only": (_completed("$this->user->getType() === User::TYPE_API &&\n"
+                                            "            $this->user->getUserName()",
+                                            "$this->user->getUserName()"), {"completed_hook_body"}),
+    "completed_hook_other_user_name": (_completed("=== 'er-import'", "=== 'sync-bot'"),
+                                       {"completed_hook_body"}),
+    "completed_hook_admin_not_api": (_completed("$this->user->getType() === User::TYPE_API",
+                                                "$this->user->isAdmin()"), {"completed_hook_body"}),
+    "completed_hook_no_user": (_completed("    public function __construct(private User $user)\n    {}\n", ""),
+                               {"completed_hook_shape"}),
 }
 
 
@@ -168,6 +226,12 @@ class TestRepository(unittest.TestCase):
         self.assertEqual(len(policy.PROTECTED_ATTRIBUTES), 30)
         self.assertEqual(len(set(policy.PROTECTED_ATTRIBUTES)), 30)
         self.assertEqual(set(policy.PROTECTED_ATTRIBUTES), policy.EMAIL_GUARDED_ATTRIBUTES)
+
+    def test_task_completed_at_is_in_the_legacy_panel(self):
+        panel = policy.load_bundle()["layouts"]["Task"]["detail"][-1]
+        self.assertEqual(panel["rows"][-1], [{"name": "sfCreatedAt"}, {"name": "sfCompletedAt"}])
+        self.assertEqual(policy.load_bundle()["i18n"]["Task"]["fields"]["sfCompletedAt"],
+                         "Completed in Salesforce")
 
     def test_task_detail_keeps_date_completed_after_date_end(self):
         rows = policy.load_bundle()["layouts"]["Task"]["detail"][0]["rows"]
@@ -246,6 +310,180 @@ class TestArchivedEmailTable(unittest.TestCase):
         finally:
             policy.archived_save_allowed = original
         self.assertEqual(len(wrong), 5)
+
+
+class TestCompletedDateTable(unittest.TestCase):
+    """The spec of PreserveSalesforceCompletedDate (WO CRM-008-G item 2)."""
+
+    SF, NOW, OLD = "2025-05-05 10:00:00", "2026-11-10 12:00:00", "2026-01-01 09:00:00"
+    # The saving user (type, userName): ER Import, another API user, a person.
+    IMPORT, OTHER_API, STAFF = ("api", "er-import"), ("api", "sync-bot"), ("regular", "staff.one")
+    # isNew, status, sfCompletedAt, sfCompletedAt changed, core value, status changed,
+    # user type, userName -> dateCompleted
+    TABLE = [
+        (True, "Completed", SF, True, NOW, True, *IMPORT, SF),          # import creates Completed
+        (True, "Not Started", SF, True, None, True, *IMPORT, None),     # not Completed: core null
+        (True, "Completed", None, False, NOW, True, *IMPORT, NOW),      # no Salesforce date: core now
+        (False, "Completed", SF, False, SF, False, *STAFF, SF),         # unrelated PUT: unchanged
+        (False, "Not Started", SF, False, None, True, *STAFF, None),    # staff reopens: core null
+        (False, "Completed", SF, False, NOW, True, *STAFF, NOW),        # staff re-completes: core now
+        (False, "Completed", SF, True, NOW, False, *IMPORT, SF),        # importer corrects the date
+        (False, "Completed", OLD, True, SF, False, *IMPORT, OLD),
+        # Round 2: the importer re-completes a Task staff reopened -> the Salesforce date.
+        (False, "Completed", SF, False, NOW, True, *IMPORT, SF),
+        (False, "Not Started", SF, False, None, True, *IMPORT, None),   # importer reopens: core null
+        (False, "Completed", SF, False, SF, False, *IMPORT, SF),        # importer, no status change
+        (False, "Completed", None, False, NOW, True, *IMPORT, NOW),     # importer, no source date
+        # Round 3: only ER Import; another API user re-completing gets core's now.
+        (False, "Completed", SF, False, NOW, True, *OTHER_API, NOW),
+        (False, "Completed", SF, False, NOW, True, "regular", "er-import", NOW),   # a person named so
+    ]
+
+    def test_rule_table(self):
+        for *args, want in self.TABLE:
+            with self.subTest(case=args):
+                self.assertEqual(policy.completed_date_after_save(*args), want)
+
+    def test_harness_detects_a_wrong_table(self):
+        original = policy.completed_date_after_save
+        try:
+            # The probe hook without the refinement: every Completed save takes sfCompletedAt.
+            policy.completed_date_after_save = (lambda n, st, sf, ch, core, sc, ut, un:
+                                                sf if st == "Completed" and sf else core)
+            wrong = [args for *args, want in self.TABLE
+                     if policy.completed_date_after_save(*args) != want]
+            # Round 1 (no API-user rule): the importer's re-completion keeps core's now.
+            policy.completed_date_after_save = (lambda n, st, sf, ch, core, sc, ut, un:
+                                                sf if st == "Completed" and sf and (n or ch) else core)
+            wrong_round1 = [args for *args, want in self.TABLE
+                            if policy.completed_date_after_save(*args) != want]
+            # Any user's status change: the staff re-completion would take sfCompletedAt.
+            policy.completed_date_after_save = (lambda n, st, sf, ch, core, sc, ut, un:
+                                                sf if st == "Completed" and sf and (n or ch or sc) else core)
+            wrong_any_user = [args for *args, want in self.TABLE
+                              if policy.completed_date_after_save(*args) != want]
+            # Round 2 (any API user): another API user's re-completion would take sfCompletedAt.
+            policy.completed_date_after_save = (lambda n, st, sf, ch, core, sc, ut, un:
+                                                sf if st == "Completed" and sf and
+                                                (n or ch or (sc and ut == "api")) else core)
+            wrong_any_api = [args for *args, want in self.TABLE
+                             if policy.completed_date_after_save(*args) != want]
+        finally:
+            policy.completed_date_after_save = original
+        self.assertEqual(len(wrong), 3)
+        self.assertEqual(len(wrong_round1), 1)
+        self.assertEqual(len(wrong_any_user), 3)
+        self.assertEqual(wrong_any_api, [[False, "Completed", self.SF, False, self.NOW, True, *self.OTHER_API]])
+
+
+# Minimal stand-ins for Espo\ORM\Entity, SaveOptions and BeforeSave; the hook file runs
+# against them for every row of TestCompletedDateTable.TABLE.
+COMPLETED_HARNESS = r"""
+namespace Espo\ORM { class Entity {
+    public $a; public $new; public $changed;
+    function __construct($a, $new, $changed) { $this->a = $a; $this->new = $new; $this->changed = $changed; }
+    function get($k) { return $this->a[$k] ?? null; }
+    function set($k, $v) { $this->a[$k] = $v; }
+    function isNew() { return $this->new; }
+    function isAttributeChanged($k) { return in_array($k, $this->changed, true); }
+} }
+namespace Espo\ORM\Repository\Option { class SaveOptions {} }
+namespace Espo\Entities { class User {
+    public const TYPE_API = 'api';
+    public $type; public $name;
+    function __construct($type, $name) { $this->type = $type; $this->name = $name; }
+    function getType() { return $this->type; }
+    function getUserName() { return $this->name; }
+    function isApi() { return $this->type === 'api'; }
+} }
+namespace Espo\Core\Hook\Hook { interface BeforeSave {
+    public function beforeSave(\Espo\ORM\Entity $entity, \Espo\ORM\Repository\Option\SaveOptions $options): void;
+} }
+namespace {
+    require $argv[1];
+    $rows = json_decode($argv[2], true);
+    $cls = 'Espo\Custom\Hooks\Task\PreserveSalesforceCompletedDate';
+    $out = [$cls::$order];
+    foreach ($rows as [$new, $status, $sf, $changed, $core, $statusChanged, $userType, $userName]) {
+        $hook = new $cls(new \Espo\Entities\User($userType, $userName));
+        $e = new \Espo\ORM\Entity(['status' => $status, 'sfCompletedAt' => $sf, 'dateCompleted' => $core],
+                                    $new, array_merge($changed ? ['sfCompletedAt'] : [],
+                                                      $statusChanged ? ['status'] : []));
+        $hook->beforeSave($e, new \Espo\ORM\Repository\Option\SaveOptions());
+        $out[] = $e->get('dateCompleted');
+    }
+    echo json_encode($out);
+}
+"""
+
+
+class TestCompletedHookRuns(unittest.TestCase):
+    """Runs the real hook file under php against stubs (skipped when php is missing)."""
+
+    def run_hook(self, source):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "hook.php")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(source)
+            rows = [args for *args, _want in TestCompletedDateTable.TABLE]
+            res = subprocess.run(["php", "-d", "display_errors=stderr", "-r", COMPLETED_HARNESS,
+                                  path, json.dumps(rows)], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        return json.loads(res.stdout)
+
+    @unittest.skipUnless(shutil.which("php"), "php not installed")
+    def test_hook_follows_the_table_after_core(self):
+        out = self.run_hook(policy.load_bundle()["completedHook"])
+        self.assertEqual(out, [20] + [want for *_a, want in TestCompletedDateTable.TABLE])
+
+    @unittest.skipUnless(shutil.which("php"), "php not installed")
+    def test_harness_detects_the_unrefined_probe_hook(self):
+        source = policy.load_bundle()["completedHook"].replace(
+            "!$entity->isNew() &&\n            !$entity->isAttributeChanged('sfCompletedAt') &&\n"
+            "            !$isImporterRecompletion", "false", 1)
+        self.assertNotEqual(source, policy.load_bundle()["completedHook"])
+        out = self.run_hook(source)
+        self.assertNotEqual(out[1:], [want for *_a, want in TestCompletedDateTable.TABLE])
+
+    def mismatches(self, old, new):
+        source = policy.load_bundle()["completedHook"]
+        self.assertIn(old, source)
+        out = self.run_hook(source.replace(old, new, 1))
+        return [args for (*args, want), got in zip(TestCompletedDateTable.TABLE, out[1:]) if got != want]
+
+    @unittest.skipUnless(shutil.which("php"), "php not installed")
+    def test_harness_detects_the_round1_hook(self):
+        # Without the ER Import rule, the importer's re-completion keeps core's now.
+        wrong = self.mismatches("$entity->isAttributeChanged('status') && $isImportUser", "false")
+        self.assertEqual(wrong, [[False, "Completed", TestCompletedDateTable.SF, False,
+                                  TestCompletedDateTable.NOW, True, *TestCompletedDateTable.IMPORT]])
+
+    @unittest.skipUnless(shutil.which("php"), "php not installed")
+    def test_harness_detects_a_status_change_by_any_user(self):
+        # Without the identity check, staff's or another API user's re-completion would take
+        # sfCompletedAt.
+        wrong = self.mismatches(" && $isImportUser;", ";")
+        t = TestCompletedDateTable
+        self.assertEqual(wrong, [[False, "Completed", t.SF, False, t.NOW, True, *t.STAFF],
+                                 [False, "Completed", t.SF, False, t.NOW, True, *t.OTHER_API],
+                                 [False, "Completed", t.SF, False, t.NOW, True, "regular", "er-import"]])
+
+    @unittest.skipUnless(shutil.which("php"), "php not installed")
+    def test_harness_detects_a_status_change_by_any_api_user(self):
+        # The round-2 hook (isApi() only): another API user's re-completion takes sfCompletedAt.
+        wrong = self.mismatches("$this->user->getType() === User::TYPE_API &&\n"
+                                "            $this->user->getUserName() === 'er-import';",
+                                "$this->user->isApi();")
+        t = TestCompletedDateTable
+        self.assertEqual(wrong, [[False, "Completed", t.SF, False, t.NOW, True, *t.OTHER_API]])
+
+    @unittest.skipUnless(shutil.which("php"), "php not installed")
+    def test_harness_detects_a_name_only_check(self):
+        # userName without the type: a person named er-import would take sfCompletedAt.
+        wrong = self.mismatches("$this->user->getType() === User::TYPE_API &&\n"
+                                "            $this->user->getUserName()", "$this->user->getUserName()")
+        t = TestCompletedDateTable
+        self.assertEqual(wrong, [[False, "Completed", t.SF, False, t.NOW, True, "regular", "er-import"]])
 
 
 if __name__ == "__main__":

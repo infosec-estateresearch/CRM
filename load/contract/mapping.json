@@ -297,7 +297,7 @@
                 "status",
                 "priority",
                 "dateEndDate",
-                "dateCompleted",
+                "sfCompletedAt",
                 "description",
                 "parentType",
                 "parentId"

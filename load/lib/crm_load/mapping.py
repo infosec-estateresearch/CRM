@@ -39,9 +39,14 @@ EXCEPTION_CODES = frozenset({
     # CRM-008-F
     "title_unstorable_without_account", "date_completed_not_storable",
     "email_without_recipient_imported_as_task", "owner_from_created_by", "priority_server_default",
+    # CRM-008-G
+    "email_kept_as_task", "date_completed_server_stamped",
 })
 # Codes that refuse the record: it is never sent (CRM-008).
 REFUSING_CODES = frozenset({"owner_required_unresolved", "email_from_invalid"})
+# CRM-008-G item 4: facts about what was stored, recorded only once the record was sent.
+SENT_ONLY_CODES = frozenset({"email_without_recipient_imported_as_task", "email_kept_as_task",
+                             "priority_server_default"})
 # Core entities whose assignedUser is required: true in EspoCRM 10.0.12 (CRM-008 fact 3).
 OWNER_REQUIRED = frozenset({"Task", "Call", "Meeting"})
 
@@ -408,10 +413,12 @@ class Mapper:
             if not blank(prio) and attrs["priority"] is None:
                 exc.append("enum_unmapped")
             attrs["dateEndDate"] = self._date(row.get("ActivityDate"), exc)
-            # CRM-008-F fact 3: dateCompleted is kept only with status Completed; otherwise it reads
-            # back null, so it is neither sent nor compared.
+            # CRM-008-G: core dateCompleted is readOnly and set by the server (null unless
+            # Completed, else "now"). The Salesforce value goes to sfCompletedAt, which the
+            # PreserveSalesforceCompletedDate hook copies to dateCompleted; dateCompleted is
+            # never sent or compared. A date with any other status is not sent (CRM-008-F).
             if attrs["status"] == "Completed":
-                attrs["dateCompleted"] = completed
+                attrs["sfCompletedAt"] = completed
             elif completed is not None:
                 exc.append("date_completed_not_storable")
             attrs["description"] = text(row.get("Description"))
@@ -531,7 +538,8 @@ class Mapper:
     def email_message_as_task(self, row, task_rows, ctx):
         """CRM-008-F change 4: an EmailMessage whose To list is empty after validation (Email.to
         is required) -> Task, as the CRM-008 Task-Email rule: Subject is the name, TextBody the
-        description, status Completed, dateCompleted from MessageDate, the parent as for the Email.
+        description, status Completed, sfCompletedAt (the hook's dateCompleted, CRM-008-G) from
+        MessageDate, the parent as for the Email.
         The owner is the linked Task's (ActivityId); if there is none or it doesn't resolve, the
         EmailMessage's CreatedById when it is a provisioned user (owner_from_created_by, a recorded
         fact); otherwise the record is refused (owner_required_unresolved). Never guessed.
@@ -558,7 +566,7 @@ class Mapper:
         attrs["name"] = text(row.get("Subject"))
         attrs["status"] = "Completed"
         attrs["dateEndDate"] = None
-        attrs["dateCompleted"] = self._dt(row.get("MessageDate"), exc)
+        attrs["sfCompletedAt"] = self._dt(row.get("MessageDate"), exc)
         attrs["description"] = text(row.get("TextBody"))
         attrs["parentType"], attrs["parentId"] = self._email_parent(row, task_rows, ctx, exc)
         exc.append("email_without_recipient_imported_as_task")

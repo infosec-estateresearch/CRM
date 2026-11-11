@@ -217,6 +217,10 @@
           "sfCreatedAt": {
             "read": "yes",
             "edit": "no"
+          },
+          "sfCompletedAt": {
+            "read": "yes",
+            "edit": "no"
           }
         },
         "Email": {
@@ -477,6 +481,10 @@
           "sfCreatedAt": {
             "read": "yes",
             "edit": "no"
+          },
+          "sfCompletedAt": {
+            "read": "yes",
+            "edit": "no"
           }
         },
         "Email": {
@@ -728,6 +736,10 @@
             "edit": "no"
           },
           "sfCreatedAt": {
+            "read": "yes",
+            "edit": "no"
+          },
+          "sfCompletedAt": {
             "read": "yes",
             "edit": "no"
           }
@@ -988,6 +1000,10 @@
             "edit": "yes"
           },
           "sfCreatedAt": {
+            "read": "yes",
+            "edit": "yes"
+          },
+          "sfCompletedAt": {
             "read": "yes",
             "edit": "yes"
           }

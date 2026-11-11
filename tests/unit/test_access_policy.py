@@ -523,7 +523,8 @@ class TestHookFile(unittest.TestCase):
                  for r, _, files in os.walk(hooks) for f in files]
         self.assertEqual(sorted(found), [os.path.join("Account", "RestrictDeleteWithEnquiries.php"),
                                          os.path.join("Email", "ProtectArchivedEmail.php"),
-                                         os.path.join("Opportunity", "RequireLossReason.php")])
+                                         os.path.join("Opportunity", "RequireLossReason.php"),
+                                         os.path.join("Task", "PreserveSalesforceCompletedDate.php")])
 
     def test_braces_balance(self):
         code = policy._code(policy.load_hook())

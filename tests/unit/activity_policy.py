@@ -18,6 +18,7 @@ REPO = enquiry_policy.REPO
 CUSTOM = enquiry_policy.CUSTOM
 RES = enquiry_policy.RES
 HOOK_PATH = os.path.join(CUSTOM, "Hooks", "Email", "ProtectArchivedEmail.php")
+COMPLETED_HOOK_PATH = os.path.join(CUSTOM, "Hooks", "Task", "PreserveSalesforceCompletedDate.php")
 DASHBOARDS_PATH = os.path.join(REPO, "config", "access", "dashboards.json")
 TEAMS_PATH = os.path.join(REPO, "config", "access", "teams.json")
 
@@ -25,7 +26,10 @@ ENTITIES = ["Call", "Meeting", "Task", "Email"]
 LEGACY_TYPES = {"sfId": "varchar", "sfOwnerId": "varchar", "sfCreatedAt": "datetime"}
 EMAIL_LEGACY_TYPES = dict(LEGACY_TYPES, sfEmailMessageId="varchar",
                           sfThreadIdentifier="varchar", sfActivityId="varchar")
-LEGACY = {e: EMAIL_LEGACY_TYPES if e == "Email" else LEGACY_TYPES for e in ENTITIES}
+# CRM-008-G: Task.sfCompletedAt holds the Salesforce completion date (see the Task hook).
+TASK_LEGACY_TYPES = dict(LEGACY_TYPES, sfCompletedAt="datetime")
+LEGACY = {e: {"Email": EMAIL_LEGACY_TYPES, "Task": TASK_LEGACY_TYPES}.get(e, LEGACY_TYPES)
+          for e in ENTITIES}
 # Salesforce ids are 18 characters; the thread identifier is free text.
 MAX_LENGTH = {"sfId": 18, "sfOwnerId": 18, "sfEmailMessageId": 18, "sfActivityId": 18,
               "sfThreadIdentifier": 255}
@@ -94,6 +98,7 @@ def load_bundle():
         "i18n": {e: _json(os.path.join(RES, "i18n", "en_US", f"{e}.json")) for e in ENTITIES},
         "layouts": {e: _layouts(e) for e in ENTITIES},
         "hook": _text(HOOK_PATH),
+        "completedHook": _text(COMPLETED_HOOK_PATH),
         "apiUsers": _json(enquiry_policy.API_USERS_PATH).get("apiUsers") or [],
         "dashboards": _json(DASHBOARDS_PATH).get("dashboardTemplates") or [],
         "teams": [t.get("name") for t in _json(TEAMS_PATH).get("teams") or []],
@@ -117,6 +122,24 @@ def archived_save_allowed(is_new, fetched_status, is_admin, is_import_user, chan
     if is_admin or is_import_user:
         return True
     return not set(changed) & set(PROTECTED_ATTRIBUTES)
+
+
+# --- the Task completion-date rule (mirrors PreserveSalesforceCompletedDate.php) ------
+
+def completed_date_after_save(is_new, status, sf_completed_at, sf_changed, core_value,
+                              status_changed=False, user_type="regular", user_name=None):
+    """WO CRM-008-G item 2: Task.dateCompleted after the custom hook, given the value the
+    core DateCompleted hook left (core_value: null when not Completed, now when the status
+    became Completed, else unchanged). sf_changed means sfCompletedAt changed in this save;
+    status_changed that the status changed in it; user_type and user_name are the saving
+    user's. Round 2: a change to Completed by the ER Import user (type api and userName
+    'er-import', as in archived_save_allowed: the importer re-completing a Task that staff
+    reopened) also takes sfCompletedAt; staff and any other API user keep core's now (round 3)."""
+    is_import_user = user_type == "api" and user_name == "er-import"
+    if status == "Completed" and sf_completed_at and \
+            (is_new or sf_changed or (status_changed and is_import_user)):
+        return sf_completed_at
+    return core_value
 
 
 # --- entityDefs rules ---------------------------------------------------------------
@@ -339,6 +362,57 @@ def rule_protected_attributes(b):
     return out
 
 
+# --- the Task completion-date hook (static) ----------------------------------------
+
+# The whole of beforeSave, statement by statement (see completed_date_after_save).
+_COMPLETED_BODY = re.compile(r"""
+\s*if\s*\(\s*\$entity->get\('status'\)\s*!==\s*'Completed'\s*\)\s*\{\s*return\s*;\s*\}
+\s*\$sfCompletedAt\s*=\s*\$entity->get\('sfCompletedAt'\)\s*;
+\s*if\s*\(\s*!\s*\$sfCompletedAt\s*\)\s*\{\s*return\s*;\s*\}
+\s*\$isImportUser\s*=\s*\$this->user->getType\(\)\s*===\s*User::TYPE_API\s*&&
+\s*\$this->user->getUserName\(\)\s*===\s*'(?P<user>[^'\\]+)'\s*;
+\s*\$isImporterRecompletion\s*=\s*\$entity->isAttributeChanged\('status'\)\s*&&\s*\$isImportUser\s*;
+\s*if\s*\(\s*!\s*\$entity->isNew\(\)\s*&&\s*!\s*\$entity->isAttributeChanged\('sfCompletedAt'\)\s*&&
+\s*!\s*\$isImporterRecompletion\s*\)\s*\{\s*return\s*;\s*\}
+\s*\$entity->set\('dateCompleted'\s*,\s*\$sfCompletedAt\s*\)\s*;\s*
+""", re.X)
+
+
+def rule_completed_hook_shape(b):
+    code = _php(b.get("completedHook") or "")
+    out = []
+    for pattern, msg in (
+            (r"^\s*namespace\s+Espo\\Custom\\Hooks\\Task\s*;", "namespace"),
+            (r"^\s*use\s+Espo\\Core\\Hook\\Hook\\BeforeSave\s*;", "use BeforeSave"),
+            (r"^\s*use\s+Espo\\ORM\\Entity\s*;", "use Entity"),
+            (r"^\s*use\s+Espo\\ORM\\Repository\\Option\\SaveOptions\s*;", "use SaveOptions"),
+            # Round 2: the saving user, injected as EspoCRM hooks are (constructor injection).
+            (r"^\s*use\s+Espo\\Entities\\User\s*;", "use User"),
+            (r"public\s+function\s+__construct\s*\(\s*private\s+User\s+\$user\s*\)",
+             "constructor injection of User"),
+            (r"\bclass\s+PreserveSalesforceCompletedDate\s+implements\s+BeforeSave\b",
+             "implements BeforeSave"),
+            # After the core DateCompleted hook (default order 9), so its "now" is overridden.
+            (r"public\s+static\s+int\s+\$order\s*=\s*20\s*;", "$order = 20"),
+            (r"public\s+function\s+beforeSave\s*\(\s*Entity\s+\$entity\s*,\s*SaveOptions\s+"
+             r"\$options\s*\)\s*:\s*void", "beforeSave signature")):
+        if not re.search(pattern, code, re.M):
+            out.append(f"completed hook: {msg} missing")
+    return out
+
+
+def rule_completed_hook_body(b):
+    body = _method_body(_php(b.get("completedHook") or ""), "beforeSave")
+    match = _COMPLETED_BODY.fullmatch(body) if body is not None else None
+    if not match:
+        return ["beforeSave is not exactly the completion-date rule (see completed_date_after_save)"]
+    names = import_user_names(b)
+    if names != [match.group("user")]:
+        return [f"completed hook trusts API user {match.group('user')!r}, but the ER Import API "
+                f"users in api_users.json are {names}"]
+    return []
+
+
 RULES = {
     "legacy_fields": rule_legacy_fields,
     "unique_indexes": rule_unique_indexes,
@@ -349,6 +423,8 @@ RULES = {
     "hook_shape": rule_hook_shape,
     "hook_body": rule_hook_body,
     "protected_attributes": rule_protected_attributes,
+    "completed_hook_shape": rule_completed_hook_shape,
+    "completed_hook_body": rule_completed_hook_body,
 }
 
 

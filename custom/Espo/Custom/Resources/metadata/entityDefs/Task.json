@@ -23,6 +23,13 @@
             "isCustom": true,
             "layoutListDisabled": true,
             "layoutMassUpdateDisabled": true
+        },
+        "sfCompletedAt": {
+            "type": "datetime",
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
         }
     },
     "indexes": {

@@ -232,7 +232,7 @@ class TestDuplicateChecks(unittest.TestCase):
                     self.assertTrue(re.search(r"[\\/]Classes[\\/]", root)
                                     or root == CONTROLLERS  # CRM-008
                                     or re.search(
-                                        r"[\\/]Hooks[\\/](Account|Opportunity|Email)$",
+                                        r"[\\/]Hooks[\\/](Account|Opportunity|Email|Task)$",
                                         root), root)
 
 

@@ -79,11 +79,14 @@ OPPORTUNITY_LEGACY_FIELDS = ["sfId", "sfStageName", "sfLeadSource", "sfOwnerId",
                              "legacyStale", "lossReasonLegacyMissing"]
 # Added by CRM-005: the activity and email legacy fields, the same pattern.
 ACTIVITY_LEGACY_FIELDS = ["sfId", "sfOwnerId", "sfCreatedAt"]
+# CRM-008-G: Task also keeps the Salesforce completion date (read-only for people).
+TASK_LEGACY_FIELDS = ACTIVITY_LEGACY_FIELDS + ["sfCompletedAt"]
 EMAIL_LEGACY_FIELDS = ACTIVITY_LEGACY_FIELDS + ["sfEmailMessageId", "sfThreadIdentifier",
                                                 "sfActivityId"]
 SF_FIELDS = dict({"User": ["sfId"], "Account": ["sfId"] + list(SF_EXTRA),
                   "Contact": ["sfId"] + list(SF_EXTRA), "Opportunity": OPPORTUNITY_LEGACY_FIELDS},
-                 **{a: ACTIVITY_LEGACY_FIELDS for a in ACTIVITIES}, Email=EMAIL_LEGACY_FIELDS)
+                 **{a: TASK_LEGACY_FIELDS if a == "Task" else ACTIVITY_LEGACY_FIELDS
+                    for a in ACTIVITIES}, Email=EMAIL_LEGACY_FIELDS)
 AUDITED = {"Account": ["name", "type", "industry", "assignedUser", "parent",
                        "learningPlatformAccess"],
            "Contact": ["account", "emailAddress"]}
