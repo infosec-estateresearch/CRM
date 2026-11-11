@@ -38,7 +38,8 @@ isActive, teams[], roles[]}. Team and role names must exist in config/access.
   that is never recorded; its names are kept; --reset is refused for it.
   Service identities are sticky (CRM-009 r2): every --service-identity sfId
   (on --input and --reset runs) is added to <target runtime>/service_identities.json
-  (outside Git; the runtime found as for the pinned base URL), and every
+  (outside Git; the runtime found as for the pinned base URL) once the run has
+  succeeded (CRM-009 r3: a failed run stores nothing), and every
   --input and --reset run uses the union of that file and the flags, whatever
   the flags say. The file must be a regular file (opened with O_NOFOLLOW),
   owned by root, mode 0600; it is created on first use, and only in a deployed
@@ -229,10 +230,10 @@ def load_service_identities(path):
     return set(ids)
 
 
-def store_service_identities(path, ids):
-    """Atomically write ids (sorted) to path: a new 0600 file opened with
-    O_CREAT|O_EXCL|O_NOFOLLOW, then renamed over path. Refused in a runtime
-    that has not been deployed (no <runtime>/DEPLOYED_MARKER directory)."""
+def _store_preconditions(path):
+    """Raise ProvisionError unless path may be (re)written: the runtime has been
+    deployed (<runtime>/DEPLOYED_MARKER directory) and no temporary file is
+    left from an interrupted run. Checked before the run and again on write."""
     runtime = os.path.dirname(path)
     marker = os.path.join(runtime, DEPLOYED_MARKER)
     if os.path.islink(marker) or not os.path.isdir(marker):
@@ -241,6 +242,14 @@ def store_service_identities(path, ids):
     tmp = path + ".tmp"
     if os.path.lexists(tmp):
         raise ProvisionError(f"{tmp} exists (an interrupted run?); inspect and remove it")
+
+
+def store_service_identities(path, ids):
+    """Atomically write ids (sorted) to path: a new 0600 file opened with
+    O_CREAT|O_EXCL|O_NOFOLLOW, then renamed over path. Refused in a runtime
+    that has not been deployed (no <runtime>/DEPLOYED_MARKER directory)."""
+    _store_preconditions(path)
+    tmp = path + ".tmp"
     body = json.dumps({SERVICE_IDENTITIES_KEY: sorted(ids)}, indent=2) + "\n"
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -259,18 +268,27 @@ def store_service_identities(path, ids):
     os.replace(tmp, path)
 
 
-def sticky_service_identities(target, environ, flagged):
+class StickyServiceIdentities:
     """The union of the stored service identities and flagged (the
-    --service-identity sfIds). New flagged sfIds are added to the store, which
-    is created on first use. There is no way to remove one here: that is a
-    manual root edit of the file (docs/ACCESS.md)."""
-    path = service_identities_path(target, environ)
-    stored = load_service_identities(path)
-    union = stored | set(flagged)
-    if union != stored:
-        store_service_identities(path, union)
-        log(f"{len(union - stored)} service identit(y/ies) added to {path}")
-    return union
+    --service-identity sfIds). The store is read, and its preconditions are
+    checked, before the run (fail closed, before any request); new flagged
+    sfIds are written to it only by commit(), which main calls after the run
+    has succeeded (CRM-009 r3), so a failed --input or --reset run stores
+    nothing. There is no way to remove one here: that is a manual root edit of
+    the file (docs/ACCESS.md)."""
+
+    def __init__(self, target, environ, flagged):
+        self.path = service_identities_path(target, environ)
+        self.stored = load_service_identities(self.path)
+        self.ids = self.stored | set(flagged)
+        if self.ids != self.stored:
+            _store_preconditions(self.path)
+
+    def commit(self):
+        if self.ids != self.stored:
+            store_service_identities(self.path, self.ids)
+            log(f"{len(self.ids - self.stored)} service identit(y/ies) added to {self.path}")
+            self.stored = set(self.ids)
 
 
 def generate_password(length=PASSWORD_LENGTH):
@@ -579,10 +597,11 @@ def main(argv=None, transport=None, environ=None):
         if args.reset:
             if not SF_ID.match(args.reset):
                 raise ProvisionError("--reset needs an sfId (15 or 18 letters and digits)")
-            services = sticky_service_identities(args.target, environ, flagged)
+            services = StickyServiceIdentities(args.target, environ, flagged)
             client = access.client_from_env(args.base_url, environ, transport)
             counts = reset_password(client, args.reset, passwords,
-                                    sticky | set(args.legacy_shared), services)
+                                    sticky | set(args.legacy_shared), services.ids)
+            services.commit()  # only after the run succeeded
         else:
             users = load_users(args.input)
             validate_users(users, config)
@@ -591,11 +610,13 @@ def main(argv=None, transport=None, environ=None):
                 raise ProvisionError("--legacy-shared names an sfId that is not in the input")
             if flagged - {u["sfId"] for u in users}:
                 raise ProvisionError("--service-identity names an sfId that is not in the input")
-            services = sticky_service_identities(args.target, environ, flagged)
+            services = StickyServiceIdentities(args.target, environ, flagged)
             client = access.client_from_env(args.base_url, environ, transport)
             counts = provision_users(client, users, config, passwords,
-                                     sticky | set(args.legacy_shared), services, common_password)
+                                     sticky | set(args.legacy_shared), services.ids,
+                                     common_password)
             common_password = None
+            services.commit()  # only after the run succeeded
     except crm_api.ConfigError as err:
         print(f"{prog}: {err}", file=sys.stderr)
         return 2

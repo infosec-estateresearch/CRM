@@ -46,6 +46,7 @@ import ipaddress
 import json
 import os
 import re
+import socket
 import sys
 import urllib.parse
 
@@ -771,40 +772,85 @@ def check_edge_config(text, mode="production"):
             r"127\.0\.0\.1:[0-9]{4,5}", servers[0][2]) \
             or validate_port("edge server port", servers[0][2].rsplit(":", 1)[1]):
         out.append("edge must forward to exactly one server on 127.0.0.1:<CRM_BETA_APP_PORT>")
-    if any(_wildcard_token(t) for l in lines for t in l.split()):
+    if _edge_wildcard_lines(lines, mode):
         out.append("edge configuration names an unspecified address or a wildcard")
     return out
 
 
+def _base_wildcard_rule(line):
+    """The base (CRM-007) substring rule, unchanged: any "0.0.0.0", any "::" or
+    a "*:" token anywhere in the line."""
+    return "0.0.0.0" in line or re.search(r"(^|\s)\*:", line) or "::" in line
+
+
+def _edge_wildcard_lines(lines, mode):
+    """The lines that name an unspecified address or a wildcard (CRM-009 r3,
+    PL decision on prod-edge-check-relaxed). production (and any other mode):
+    the base substring rule on every line, unchanged, so production refuses at
+    least everything base refused. uat: the same, except on the single
+    `acl trusted_upstream src ...` line, whose networks may legitimately
+    contain the text "0.0.0.0" (the first /16 of 10/8). With no or several such lines
+    nothing is exempt. In both modes every trusted_upstream line also gets the
+    parsed check (_wildcard_token), which in production only adds refusals."""
+    acl = [l for l in lines if l.startswith("acl trusted_upstream src ")]
+    exempt = acl[0] if mode == "uat" and len(acl) == 1 else None
+    bad = []
+    for l in lines:
+        if l != exempt and _base_wildcard_rule(l):
+            bad.append(l)
+        elif l in acl and any(_wildcard_token(t) for t in l.split()):
+            bad.append(l)
+    return bad
+
+
+def _strip_quotes(text):
+    """text without any surrounding single or double quotes."""
+    return text.strip("'\"")
+
+
 def _address_candidates(token):
     """The address-like parts of one config token: the token itself and, for
-    comma lists, [addr]:port, addr:port, addr/N and ipv4@/ipv6@ forms, the
-    address alone."""
+    comma lists, quoted forms, [addr]:port, addr:port (any port text: 8443, *,
+    a name), addr/N and ipv4@/ipv6@ forms, the address alone."""
     out = []
-    for part in token.split(","):
+    for part in _strip_quotes(token).split(","):
+        part = _strip_quotes(part)
         for prefix in ("ipv4@", "ipv6@"):
             if part.lower().startswith(prefix):
                 part = part[len(prefix):]
-        out.append(part)
-        bracket = re.fullmatch(r"\[([^\]]*)\](?::[0-9]*)?", part)
+        found = [part]
+        bracket = re.fullmatch(r"\[([^\]]*)\](?::[^:]*)?", part)
         if bracket:
-            out.append(bracket.group(1))
-        host, sep, port = part.rpartition(":")
-        if sep and re.fullmatch(r"[0-9]*", port):
-            out.append(host)  # "0.0.0.0:8443" -> "0.0.0.0", ":::8443" -> "::"
-        for cand in list(out):
+            found.append(bracket.group(1))
+        host, sep, _port = part.rpartition(":")
+        if sep:
+            found.append(host)  # "0.0.0.0:8443"/"0.0.0.0:*" -> "0.0.0.0", ":::8443" -> "::"
+        for cand in list(found):
             if "/" in cand:
-                out.append(cand.split("/", 1)[0])
+                found.append(cand.split("/", 1)[0])
+        out += [_strip_quotes(c) for c in found]
     return out
+
+
+def _legacy_ipv4_unspecified(cand):
+    """True for the classic inet_aton spellings of 0.0.0.0 that ipaddress
+    refuses: "0", "00", "0x0", "0.0", "0x0.0.0.0", "0000.0.0.0" ..."""
+    if not re.fullmatch(r"(?i)(0x[0-9a-f]+|[0-9]+)(\.(0x[0-9a-f]+|[0-9]+)){0,3}", cand):
+        return False
+    try:
+        return socket.inet_aton(cand) == b"\0\0\0\0"
+    except OSError:
+        return False
 
 
 def _wildcard_token(token):
     """True if token names the unspecified address (0.0.0.0 or ::, in any
-    spelling ipaddress accepts, with or without /N or :port) or the * wildcard.
-    Parsed, never a substring match: a 10/8 network whose text contains
-    "0.0.0.0" is not a wildcard."""
+    spelling ipaddress or inet_aton accepts, quoted or not, with or without /N
+    or :port, the port numeric or not) or the * wildcard. Parsed, never a
+    substring match: a 10/8 network whose text contains "0.0.0.0" is not a
+    wildcard. Used only on the UAT trusted_upstream line (_edge_wildcard_lines)."""
     for cand in _address_candidates(token):
-        if cand == "*":
+        if cand == "*" or _legacy_ipv4_unspecified(cand):
             return True
         try:
             addr = ipaddress.ip_address(cand)

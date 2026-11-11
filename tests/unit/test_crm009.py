@@ -182,6 +182,113 @@ class TestEdgeWildcard(unittest.TestCase):
                 self.assertFalse(ca._wildcard_token(tok))
 
 
+TEN_ZERO = str(TEN.network_address)  # the 10/8 network address, assembled at run time
+
+
+def base_rule(line):
+    """The base (CRM-007) wildcard rule, verbatim, for comparison."""
+    return "0.0.0.0" in line or __import__("re").search(r"(^|\s)\*:", line) or "::" in line
+
+
+class TestEdgeWildcardPerMode(unittest.TestCase):
+    """CRM-009 r3 (Auditor prod-edge-check-relaxed, PL decision): production
+    keeps the base substring rule on every line; UAT keeps it on every line
+    but the single trusted_upstream line, which gets the parsed check."""
+
+    def rendered(self, mode):
+        errors, cfg = ca.check_beta(env(UAT if mode == "uat" else PROD), {})
+        self.assertEqual(errors, [])
+        return cfg
+
+    def variants(self, good):
+        lines = good.splitlines()
+        src = next(l for l in lines if "acl trusted_upstream src" in l)
+        bind = next(l for l in lines if l.strip().startswith("bind "))
+        port = bind.rsplit(":", 1)[1]
+        log = next(l for l in lines if l.strip().startswith("log stdout"))
+
+        def extra(line):  # an extra log line in the global section
+            return good.replace(log, f"{log}\n    {line}")
+        return {
+            f"bind {TEN_ZERO}": good.replace(bind, f"    bind {TEN_ZERO}:{port}"),
+            f"src {TEN_ZERO}": good.replace(src, f"    acl trusted_upstream src {TEN_ZERO}"),
+            f"src {TEN_ZERO}/32": good.replace(src, f"    acl trusted_upstream src {TEN_ZERO}/32"),
+            'log "0.0.0.0:514"': extra('log "0.0.0.0:514" local0'),
+            "log 0x0.0.0.0": extra("log 0x0.0.0.0 local0"),
+            "log ::1": extra("log ::1 local0"),
+            "log unix@/0.0.0.0": extra("log unix@/0.0.0.0 local0"),
+        }
+
+    def test_production_refuses_what_base_refused(self):
+        good = self.rendered("production")
+        for name, text in self.variants(good).items():
+            with self.subTest(case=name):
+                self.assertNotEqual(text, good)
+                self.assertTrue(any(base_rule(l) for l in ca._edge_lines(text)))
+                self.assertIn(WILDCARD, ca.check_edge_config(text))
+                self.assertIn(WILDCARD, ca.check_edge_config(text, "production"))
+        self.assertNotIn(WILDCARD, ca.check_edge_config(good))
+
+    def test_production_refuses_a_ten_zero_network_like_base(self):
+        # the UAT exemption never applies in production
+        errors, cfg = ca.check_beta(env(UAT, CRM_BETA_UPSTREAM_SOURCES=TEN_16), {})
+        self.assertEqual(errors, [])
+        self.assertIn(WILDCARD, ca.check_edge_config(cfg, "production"))
+        self.assertIn(WILDCARD, ca.check_edge_config(cfg, "unknown"))
+
+    def test_production_keeps_the_base_rule_on_every_line(self):
+        good = self.rendered("production")
+        corpus = list(self.variants(good).values()) + list(
+            self.variants(self.rendered("uat")).values())
+        for text in corpus:
+            lines = ca._edge_lines(text)
+            flagged = ca._edge_wildcard_lines(lines, "production")
+            self.assertEqual([l for l in lines if base_rule(l)],
+                             [l for l in flagged if base_rule(l)])  # nothing base refused is lost
+            self.assertTrue(all(base_rule(l) or l.startswith("acl trusted_upstream src ")
+                                for l in flagged))  # and only the source line adds any
+
+    def test_uat_keeps_the_base_rule_off_the_source_line(self):
+        good = self.rendered("uat")
+        for name, text in self.variants(good).items():
+            if name.startswith("src "):
+                continue  # the source line itself: see the parsed tests
+            with self.subTest(case=name):
+                self.assertIn(WILDCARD, ca.check_edge_config(text, "uat"))
+        self.assertNotIn(WILDCARD, ca.check_edge_config(good, "uat"))
+
+    def test_uat_source_line_parsed_and_hardened(self):
+        good = self.rendered("uat")
+        src = next(l for l in good.splitlines() if "acl trusted_upstream src" in l)
+        for listed in ('"0.0.0.0/0"', "'0.0.0.0'", "*:*", "0.0.0.0:*", "0.0.0.0:http",
+                       "0", "0x0", "0x0/0", "0/0", "00", "0.0", "0x0.0.0.0", "'::'",
+                       "[::]:*", f"{LAN_A} 0", f'"{LAN_A}" "0x0"', "*"):
+            with self.subTest(src=listed):
+                text = good.replace(src, f"    acl trusted_upstream src {listed}")
+                self.assertIn(WILDCARD, ca.check_edge_config(text, "uat"))
+
+    def test_uat_ten_zero_exempt_only_on_the_single_source_line(self):
+        errors, cfg = ca.check_beta(env(UAT, CRM_BETA_UPSTREAM_SOURCES=TEN_16), {})
+        self.assertEqual(errors, [])
+        self.assertEqual(ca.check_edge_config(cfg, "uat"), [])
+        src = next(l for l in cfg.splitlines() if "acl trusted_upstream src" in l)
+        twice = cfg.replace(src, f"{src}\n{src}")
+        self.assertIn(WILDCARD, ca.check_edge_config(twice, "uat"))  # nothing exempt
+        lines = ca._edge_lines(twice)
+        self.assertEqual(len(ca._edge_wildcard_lines(lines, "uat")), 2)
+
+    def test_hardened_token_parser(self):
+        for tok in ("*:*", "0.0.0.0:*", '"0.0.0.0"', "'0.0.0.0:8443'", "0", "0x0", "0X0",
+                    "00", "0.0", "0.0.0", "0x0.0.0.0", "0000.0.0.0", "0/0", "[::]:*",
+                    '"::"', f'"{LAN_A}",0'):
+            with self.subTest(token=tok):
+                self.assertTrue(ca._wildcard_token(tok))
+        for tok in (TEN_16, f'"{TEN_16}"', TEN_ZERO, "1", "10", "0x1", "8443", "514",
+                    "local0", "'src'", "*a", "127.0.0.1:*"):
+            with self.subTest(token=tok):
+                self.assertFalse(ca._wildcard_token(tok))
+
+
 class TestUatPrefixMinimum(unittest.TestCase):
     def test_slash_15_refused_by_the_prefix_minimum_alone(self):
         wide = private(TEN, 10, prefix=15)   # an exact RFC 1918 /15, no bridge overlap
@@ -663,6 +770,42 @@ class TestStickyServiceIdentity(OwnRuntime):
         self.assertEqual(code, 1)
         self.assertIn("owned by root", err)
         self.assertEqual(fake.calls, [])
+
+    def test_a_failed_reset_stores_nothing(self):
+        code, _, err = self.provision()
+        self.assertEqual(code, 0, err)
+        staff = self.fake.by_user_name("staff.one")
+        cases = {
+            "unknown sfId": (["--reset", "ZZZTEST00000009AAA"], None),
+            "API failure": (["--reset", staff["sfId"]], ("PUT", "User", 1)),
+            "flagged sfId itself": (["--reset", SERVICE], None),
+        }
+        for name, (argv, fail) in cases.items():
+            with self.subTest(case=name):
+                self.fake.fail = fail
+                code, _, err = self.run_users(["dev", *argv, "--password-file",
+                                               self.path(f"r-{len(name)}.csv"),
+                                               "--service-identity", SERVICE])
+                self.assertEqual(code, 1, err)
+                self.assertFalse(os.path.lexists(self.store()))
+                self.assertFalse(os.path.lexists(self.store() + ".tmp"))
+        self.fake.fail = None
+        code, _, err = self.run_users(["dev", "--reset", staff["sfId"], "--password-file",
+                                       self.path("ok.csv"), "--service-identity", SERVICE])
+        self.assertEqual(code, 0, err)  # a successful reset stores it
+        self.assertEqual(self.stored(), {"serviceIdentities": [SERVICE]})
+
+    def test_a_failed_input_run_stores_nothing(self):
+        self.fake.fail = ("POST", "User", 1)
+        code, _, err = self.provision("--service-identity", SERVICE)
+        self.assertEqual(code, 1, err)
+        self.assertIn("500", err)
+        self.assertFalse(os.path.lexists(self.store()))
+        self.assertFalse(os.path.lexists(self.store() + ".tmp"))
+        self.fake.fail = None
+        code, _, err = self.provision("--service-identity", SERVICE, csv="pw3.csv")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.stored(), {"serviceIdentities": [SERVICE]})
 
     def test_never_created_in_an_undeployed_runtime(self):
         os.rmdir(os.path.join(self.root, "dev", provision_users.DEPLOYED_MARKER))
