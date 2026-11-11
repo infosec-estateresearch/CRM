@@ -6,6 +6,7 @@ suite (GET only), the restore test's isolation, and the backup timer
 templates. In-process only: fake docker/stat/id/python3, temporary git
 repositories, no network."""
 
+import base64
 import io
 import ipaddress
 import json
@@ -1248,15 +1249,24 @@ sys.path.insert(0, os.path.join(REPO, "tests", "acceptance"))
 import test_beta_safe as bs  # noqa: E402
 
 KEY = "NOT-A-REAL-BETA-KEY"
+ADMIN_USER = "fake-admin-user-q7"
+ADMIN_PASS = "NOT-A-REAL-ADMIN-PASSWORD-9z"
+ADMIN_TOKEN = base64.b64encode(f"{ADMIN_USER}:{ADMIN_PASS}".encode()).decode()
+ADMIN_ENV = {"CRM_ADMIN_USERNAME": ADMIN_USER, "CRM_ADMIN_PASSWORD": ADMIN_PASS}
+SECRETS = (KEY, ADMIN_USER, ADMIN_PASS, ADMIN_TOKEN)
 ROLE_NAMES = bs.role_names()
 
 
 class FakeBetaEspo:
-    """Answers only GETs a live crm-beta would; records every request."""
+    """Answers only GETs a live crm-beta would; records every request.
+
+    As on EspoCRM 10 (CRM-009-G): Role is readable by the admin only (the API
+    key gets 403); every other path is answered for the API key only.
+    """
 
     def __init__(self, phone=False, site="https://crm-beta.example.invalid", markers=0,
                  roles=None, role_status=200, settings_extra=None):
-        self.methods, self.paths = [], []
+        self.methods, self.paths, self.auth = [], [], []
         self.phone, self.site, self.markers = phone, site, markers
         self.roles = ROLE_NAMES if roles is None else roles
         self.role_status = role_status
@@ -1267,11 +1277,20 @@ class FakeBetaEspo:
         path = parts.path.split("/api/v1/", 1)[1]
         self.methods.append(method)
         self.paths.append(path)
-        if headers.get("X-Api-Key") != KEY:
-            return 401, b""
+        is_admin = headers.get("Espo-Authorization") == ADMIN_TOKEN
+        is_key = headers.get("X-Api-Key") == KEY
+        self.auth.append((path, "admin" if is_admin and not is_key else
+                          "key" if is_key and not is_admin else "other"))
         if method != "GET" or body is not None:
             return 405, b""
         q = urllib.parse.parse_qs(parts.query)
+        if path == "Role":
+            if is_key:
+                return 403, b'{"message":"forbidden"}'
+            if not is_admin:
+                return 401, b""
+        elif not is_key or is_admin:
+            return 401, b""
         if path == "App/user":
             return 200, json.dumps({"user": {"id": "u1", "type": "api"}}).encode()
         if path == "Settings":
@@ -1309,20 +1328,29 @@ class TestBetaSafeSuite(unittest.TestCase):
         os.chmod(path, mode)
         return path
 
-    def run_suite(self, fake, environ=None):
+    def run_suite(self, fake, environ=None, admin=True):
+        # The admin credentials (CRM-009-G) are added unless admin=False; an
+        # explicit environ overrides them.
         env = {"CRM_BASE_URL": "http://127.0.0.1:8280", bs.ENV_KEY_FILE: self.key_file}
-        env = env if environ is None else environ
+        env = env if environ is None else dict(environ)
+        if admin:
+            env = {**ADMIN_ENV, **env}
         bs.TRANSPORT = fake
         out = io.StringIO()
         with unittest.mock.patch.dict(os.environ, env, clear=False):
-            for k in ("CRM_BASE_URL", bs.ENV_KEY_FILE):
+            for k in ("CRM_BASE_URL", bs.ENV_KEY_FILE, *ADMIN_ENV):
                 if k not in env:
                     os.environ.pop(k, None)
             suite = unittest.defaultTestLoader.loadTestsFromModule(bs)
             result = unittest.TextTestRunner(stream=out, verbosity=2).run(suite)
         # The GET-only guarantee: whatever the outcome, nothing but GET was sent.
         self.assertEqual(set(fake.methods) - {"GET"}, set(), fake.methods)
-        self.assertNotIn(KEY, out.getvalue())
+        # Neither the key nor any admin credential (or its token) is ever output.
+        for secret in SECRETS:
+            self.assertNotIn(secret, out.getvalue())
+        # The admin is used for Role only, and Role only as the admin.
+        for path, who in fake.auth:
+            self.assertEqual(who, "admin" if path == "Role" else "key", (path, who))
         return result, out.getvalue()
 
     def failed(self, result):
@@ -1393,6 +1421,69 @@ class TestBetaSafeSuite(unittest.TestCase):
         self.assertFalse(result.wasSuccessful())
         self.assertEqual(fake.methods, [])
 
+    def test_role_check_reads_role_as_the_admin_and_the_rest_with_the_key(self):
+        fake = FakeBetaEspo()
+        result, _ = self.run_suite(fake)
+        self.assertTrue(result.wasSuccessful(), result.failures + result.errors)
+        self.assertEqual([p for p, who in fake.auth if who == "admin"], ["Role"] * len(ROLE_NAMES))
+        self.assertEqual({p for p, who in fake.auth if who == "key"},
+                         {"App/user", "Settings", "Account"})
+
+    def test_role_check_fails_never_skips_without_admin_credentials(self):
+        base = {"CRM_BASE_URL": "http://127.0.0.1:8280", bs.ENV_KEY_FILE: self.key_file}
+        cases = {"no username": {"CRM_ADMIN_PASSWORD": ADMIN_PASS},
+                 "no password": {"CRM_ADMIN_USERNAME": ADMIN_USER},
+                 "empty username": {"CRM_ADMIN_USERNAME": "", "CRM_ADMIN_PASSWORD": ADMIN_PASS},
+                 "neither": {}}
+        for name, admin in cases.items():
+            with self.subTest(case=name):
+                fake = FakeBetaEspo()
+                result, out = self.run_suite(fake, environ={**base, **admin}, admin=False)
+                self.assertEqual(self.failed(result), ["test_roles_from_config_exist"], out)
+                self.assertEqual((result.testsRun, len(result.skipped)), (5, 0))
+                self.assertIn("CRM_ADMIN_USERNAME and CRM_ADMIN_PASSWORD must be set", out)
+                self.assertNotIn("Role", fake.paths)
+
+    def test_admin_credentials_never_appear_in_any_output(self):
+        for name, fake in {"healthy": FakeBetaEspo(), "forbidden": FakeBetaEspo(role_status=403),
+                           "missing": FakeBetaEspo(roles=[])}.items():
+            with self.subTest(case=name):
+                with unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as so, \
+                        unittest.mock.patch("sys.stderr", new_callable=io.StringIO) as se:
+                    _, out = self.run_suite(fake)
+                for secret in SECRETS:
+                    self.assertNotIn(secret, out + so.getvalue() + se.getvalue())
+        reader = bs.AdminRoleReader("http://127.0.0.1:8280", ADMIN_USER, ADMIN_PASS, FakeBetaEspo())
+        # Only the header is held; the username and password are not attributes.
+        for value in vars(reader).values():
+            self.assertNotIn(value, (ADMIN_USER, ADMIN_PASS))
+        for secret in SECRETS:
+            self.assertNotIn(secret, repr(reader))
+        with self.assertRaises(bs.crm_api.ApiError) as cm:
+            bs.AdminRoleReader("http://127.0.0.1:8280", ADMIN_USER, ADMIN_PASS,
+                               FakeBetaEspo(role_status=403)).get("Role")
+        self.assertEqual(cm.exception.body, b"")
+        for secret in SECRETS:
+            self.assertNotIn(secret, str(cm.exception))
+
+    def test_the_admin_reader_sends_get_only_and_only_to_role(self):
+        public = sorted(n for n in dir(bs.AdminRoleReader) if not n.startswith("_"))
+        self.assertEqual(public, ["METHOD", "PATHS", "count", "get"])
+        self.assertEqual(bs.AdminRoleReader.PATHS, ("Role",))
+        fake = FakeBetaEspo()
+        reader = bs.AdminRoleReader("http://127.0.0.1:8280", ADMIN_USER, ADMIN_PASS, fake)
+        for path in ("Settings", "App/user", "Account", "Role/1", "User", "role"):
+            with self.subTest(path=path):
+                with self.assertRaises(bs.BetaSafeError):
+                    reader.get(path)
+        with unittest.mock.patch.object(bs.ReadOnlyClient, "METHOD", "POST"):
+            with self.assertRaises(bs.BetaSafeError):
+                reader.get("Role")
+        self.assertEqual(fake.methods, [])
+        self.assertEqual(reader.count("Role", [("equals", "name", ROLE_NAMES[0])]), 1)
+        self.assertEqual(fake.methods, ["GET"])
+        self.assertEqual(fake.auth, [("Role", "admin")])
+
     def test_the_client_can_only_send_get(self):
         public = sorted(n for n in dir(bs.ReadOnlyClient) if not n.startswith("_"))
         self.assertEqual(public, ["METHOD", "count", "get"])
@@ -1408,6 +1499,10 @@ class TestBetaSafeSuite(unittest.TestCase):
             src = fh.read()
         for token in ('"POST"', '"PUT"', '"PATCH"', '"DELETE"', "'POST'", "'PUT'", "'DELETE'",
                       ".call(", ".create(", ".delete(", "EspoClient", "sys.argv", "data="):
+            with self.subTest(token=token):
+                self.assertNotIn(token, src)
+        # Nothing is printed or logged (the admin credentials included).
+        for token in ("print(", "logging", "sys.stdout", "sys.stderr"):
             with self.subTest(token=token):
                 self.assertNotIn(token, src)
         # Exactly one place sends a request, and it hard-codes GET with no body.
@@ -1817,6 +1912,9 @@ class TestDeploySteps(ShellEnv):
                '[ -z "${WRITE_KEY:-}" ] || printf "CRM_IMPORT_API_KEY=k\\n" > "$CRM_PROVISION_KEY_FILE"; '
                'return "${FAKE_PROV_RC:-0}";; '
                '*" -c "*) echo "safe-key=$CRM_BETA_SAFE_KEY_FILE" >> "$FAKE_DOCKER_LOG"; '
+               '[ "${CRM_ADMIN_USERNAME:-}" = "${WANT_ADMIN_USER:-a}" ] '
+               '&& [ "${CRM_ADMIN_PASSWORD:-}" = "${WANT_ADMIN_PASS:-p}" ] '
+               '&& echo "admin=passed" >> "$FAKE_DOCKER_LOG"; '
                'return "${FAKE_SAFE_RC:-0}";; esac; }')
 
     def creds(self, **over):
@@ -1859,6 +1957,19 @@ class TestDeploySteps(ShellEnv):
         self.assertEqual(calls[1], "url=http://127.0.0.1:8280")
         self.assertIn(" -c ", calls[2])
         self.assertEqual(calls[3], f"safe-key={self.tmp}/new-key.env")
+        self.assertEqual(calls[4], "admin=passed")
+
+    def test_admin_credentials_reach_the_suite_by_environment_only(self):
+        # CRM-009-G: the suite's role check needs the admin; never via argv or output.
+        user, pw = "deploy-admin-x1", "NOT-A-REAL-DEPLOY-PASSWORD-k4"
+        res = self.accept(dict(self.creds(CRM_ADMIN_USERNAME=user, CRM_ADMIN_PASSWORD=pw),
+                               WRITE_KEY="1", WANT_ADMIN_USER=user, WANT_ADMIN_PASS=pw))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        calls = self.docker_calls()
+        self.assertIn("admin=passed", calls)
+        for secret in (user, pw):
+            self.assertNotIn(secret, res.stdout + res.stderr)
+            self.assertFalse([c for c in calls if secret in c], calls)
 
     def test_existing_provision_key_without_safe_key_file_refused(self):
         key = os.path.join(self.tmp, "new-key.env")

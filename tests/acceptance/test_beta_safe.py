@@ -4,6 +4,7 @@ Run against a live crm-beta, as root, from the unpacked release:
 
     export CRM_BASE_URL=http://127.0.0.1:<CRM_BETA_APP_PORT>
     export CRM_BETA_SAFE_KEY_FILE=/root/crm-beta-import-key.env
+    export CRM_ADMIN_USERNAME=... CRM_ADMIN_PASSWORD=...   # for the role check
     python3 -m unittest discover -s tests/acceptance -p test_beta_safe.py -v
 
 The module is skipped unless both are set. The API key is read from the file
@@ -13,20 +14,30 @@ bits, holding NAME=value lines with exactly one of CRM_IMPORT_API_KEY (the file
 scripts/provision_access.py writes) or CRM_LOAD_API_KEY (load.env). The key is
 sent as X-Api-Key and is never printed.
 
+The role check alone (CRM-009-G) reads as the EspoCRM admin: Role is an
+administration entity, so no API-key user can read it. The admin credentials
+come from CRM_ADMIN_USERNAME / CRM_ADMIN_PASSWORD in the environment (which
+deploy_release.sh requires and passes in); if either is missing the role check
+fails, it never skips. AdminRoleReader sends GET only, and only to Role; the
+credentials are never printed, logged, put in argv or kept beyond the role
+check (the reader is local to that test). Every other check uses the API key.
+
 It checks that:
 - the API answers (GET App/user);
-- every role in config/access/roles.json exists (GET Role, by name);
+- every role in config/access/roles.json exists (GET Role, by name, as admin);
 - phoneNumberInternational is the JSON boolean false (GET Settings);
 - siteUrl uses https (GET Settings); in UAT mode (CRM_BETA_SAFE_MODE=uat,
   CRM-009) it is http://<LAN address>:<port> instead;
 - no Account name contains the synthetic seed marker (a count only; no name
   is fetched or printed).
 
-Every request goes through ReadOnlyClient, which can only send GET.
+Every request goes through ReadOnlyClient (or its AdminRoleReader subclass),
+which can only send GET.
 tests/unit/test_beta.py runs this module in-process against a fake EspoCRM and
 fails if any other method is sent.
 """
 
+import base64
 import ipaddress
 import json
 import os
@@ -110,6 +121,37 @@ class ReadOnlyClient:
         return total
 
 
+class AdminRoleReader(ReadOnlyClient):
+    """GET-only reads of Role as the EspoCRM admin (Espo-Authorization basic).
+
+    Same single GET path as ReadOnlyClient; any path other than Role is refused
+    before a request is made. The username and password are not stored: only
+    the header, and only for the life of the role check.
+    """
+
+    PATHS = ("Role",)
+
+    def __init__(self, base_url, username, password, transport=None):
+        super().__init__(base_url, "", transport)
+        token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        self._headers = {"Espo-Authorization": token, "Accept": "application/json"}
+
+    def get(self, path, params=None):
+        if path not in self.PATHS:
+            raise BetaSafeError("the admin reader reads Role only")
+        return super().get(path, params)
+
+
+def admin_reader_from_env(environ=None, transport=None):
+    environ = os.environ if environ is None else environ
+    username = environ.get(crm_api.ENV_USERNAME, "")
+    password = environ.get(crm_api.ENV_PASSWORD, "")
+    if not username or not password:
+        raise BetaSafeError(f"{crm_api.ENV_USERNAME} and {crm_api.ENV_PASSWORD} must be set "
+                            "(Role is readable by the admin only)")
+    return AdminRoleReader(environ.get(crm_api.ENV_BASE_URL, ""), username, password, transport)
+
+
 def client_from_env(environ=None, transport=None):
     environ = os.environ if environ is None else environ
     base_url = environ.get(crm_api.ENV_BASE_URL, "")
@@ -146,15 +188,21 @@ class TestBetaSafe(unittest.TestCase):
         self.assertIsInstance(me.get("user"), dict, "App/user returned no user")
 
     def test_roles_from_config_exist(self):
+        # CRM-009-G: Role is admin-only in EspoCRM, so this check alone reads as
+        # the admin. Missing credentials fail the check; they never skip it.
+        try:
+            admin = admin_reader_from_env(transport=TRANSPORT)
+        except BetaSafeError as err:
+            self.fail(f"cannot check roles: {err}")
         missing = []
         for name in role_names():
             try:
-                n = CLIENT.count("Role", [("equals", "name", name)])
+                n = admin.count("Role", [("equals", "name", name)])
             except crm_api.ApiError as err:
-                self.fail(f"cannot read roles (HTTP {err.status}); the key's user needs read "
-                          "access to Role")
+                self.fail(f"cannot read roles as the admin (HTTP {err.status})")
             if n < 1:
                 missing.append(name)
+        del admin
         self.assertEqual(missing, [], "roles from config/access/roles.json missing in crm-beta")
 
     def test_phone_number_international_is_false(self):
