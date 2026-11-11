@@ -634,8 +634,12 @@ class TestMapping(Base):
         e = em[fx.M[0]]
         self.assertEqual(e["status"], "Archived")
         self.assertIs(e["isHtml"], False)
-        self.assertEqual(e["to"], f"a.{SENTINEL}@example.test;b@example.test")
-        self.assertEqual(e["from"], f"from.{SENTINEL}@example.test")          # bare address
+        # What the importer sends (the server stores it lower case, reordered: CRM-009-I fact 3).
+        sent = next(b for m, ent, b in self.espo.writes if m == "POST" and ent == "Email" and b["sfId"] == fx.M[0])
+        self.assertEqual(sent["to"], f"a.{SENTINEL}@example.test;b@example.test")
+        self.assertEqual(sent["from"], f"from.{SENTINEL}@example.test")       # bare address
+        self.assertEqual(e["to"], f"b@example.test;a.{SENTINEL.lower()}@example.test")
+        self.assertEqual(e["from"], f"from.{SENTINEL.lower()}@example.test")
         self.assertEqual(e["fromString"], f"N {SENTINEL} <from.{SENTINEL}@example.test>")
         self.assertEqual(em[fx.M[1]]["fromString"], "x@example.test")         # no name: the address
         self.assertTrue(e["messageId"].startswith("dummy:"))                 # server-set, never sent
@@ -2988,6 +2992,139 @@ class TestListPagingSafety(Base):
         with self.assertRaises(TransportError) as cm:
             self.client(NoId([(-1, 3)])).list_all("Email", ["sfId"])
         self.assertEqual(cm.exception.code, "list_failed")
+
+
+
+def _long(n, tag=""):
+    """A synthetic text of ``n`` characters (SENTINEL included)."""
+    unit = f"{SENTINEL} {tag}line\n"
+    return (unit * (n // len(unit) + 1))[:n]
+
+
+class TestCrm009I(Base):
+    """CRM-009-I: re-run convergence against the 10.0.12 read behaviours (all data synthetic)."""
+
+    LONG = 17318                       # the PL's example body (list read: its first 10,000 characters)
+
+    def org(self):
+        data = fx.org()
+        m0 = data["EmailMessage"][0]
+        m0.update(TextBody=_long(self.LONG, "body"), FromAddress=f"From.{SENTINEL}@Example.TEST",
+                  ToAddress=f"A.{SENTINEL}@Example.test; b@example.test; Z@Example.Test",
+                  CcAddress="C@Example.Test; aa@example.test")
+        data["Task"][0]["Description"] = _long(12000, "task")
+        data["Event"][0]["Description"] = _long(10001, "event")
+        data["Opportunity"][0]["Description"] = _long(20000, "opp")
+        data["Account"][0]["Description"] = _long(10000, "acc")       # exactly the cut: never re-read
+        return data
+
+    def load(self, data=None, name="i", espo=None):
+        snap = write_snapshot(os.path.join(self.tmp, name), data=data or self.org())
+        espo = espo or FakeEspo()
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        self.assertNotIn("write_rejected", self.report()["exceptions"]["byReason"])
+        return snap, espo
+
+    def rerun(self, snap, espo):
+        n, r, q = len(espo.writes), len(espo.single_reads), len(espo.requests)
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)
+        # Every GET (paged and single-record) is counted in requests.reads.
+        gets = [p for m, p in espo.requests[q:] if m == "GET" and p != "Settings"]
+        self.assertEqual(self.report()["requests"]["reads"], len(gets))
+        return espo.writes[n:], espo.single_reads[r:]
+
+    # ------------------------------------------------------------ the fake (facts 1-3)
+    def test_fake_emulates_10_0_12_reads(self):
+        f = FakeEspo()
+        _st, doc = f.send("POST", "Email", body={"sfId": "e1", "from": "A@Example.TEST", "to": "B@x.test; a@x.test",
+                                                 "cc": "C@x.test", "body": "y" * 10500, "usersIds": ["u1"]})
+        q = [("select", "id,sfId,usersIds,body,to,cc,from"), ("maxSize", "200"), ("offset", "0"),
+             ("orderBy", "id"), ("order", "asc"), ("where[0][type]", "isNotNull"), ("where[0][attribute]", "sfId")]
+        row = f.send("GET", "Email", q)[1]["list"][0]
+        self.assertNotIn("usersIds", row)
+        self.assertEqual(row["body"], "y" * 10000)
+        self.assertEqual((row["to"], row["cc"], row["from"]), ("b@x.test;a@x.test", "c@x.test", "a@example.test"))
+        rec = f.send("GET", f"Email/{doc['id']}")[1]
+        self.assertNotIn("usersIds", rec)
+        self.assertEqual(rec["body"], "y" * 10500)
+        self.assertEqual(f.db["Email"][doc["id"]]["usersIds"], ["u1"])          # the relation is stored
+
+    # ------------------------------------------------------------ the re-run converges
+    def test_rerun_zero_writes_long_text_addresses_users(self):
+        snap, espo = self.load()
+        em = espo.by_sf("Email")[fx.M[0]]
+        self.assertEqual(em["usersIds"], [espo.by_sf("User")[fx.U1]["id"]])     # set on create
+        self.assertNotEqual(em["to"], self.org()["EmailMessage"][0]["ToAddress"])
+        writes, reads = self.rerun(snap, espo)
+        self.assertEqual(writes, [])
+        rep = self.report()
+        self.assertEqual(rep["requests"]["writes"], 0)
+        # One single read per record whose list value was cut (Email body and bodyPlain: one GET);
+        # the Account description of exactly 10,000 characters is not re-read.
+        # (Contact: the CRM-008-F read of C[0], which has two phone numbers.)
+        self.assertEqual(sorted(e for e, _ in reads), ["Contact", "Email", "Meeting", "Opportunity", "Task"])
+        self.assertEqual(rep["objects"]["EmailMessage"]["targets"]["Email"]["unchanged"], 2)
+        for obj, ent in (("Task", "Task"), ("Event", "Meeting"), ("Opportunity", "Opportunity"),
+                         ("Account", "Account"), ("Contact", "Contact")):
+            self.assertEqual(rep["objects"][obj]["targets"][ent].get("updated", 0), 0, obj)
+        # A third run is still write-free.
+        self.assertEqual(self.rerun(snap, espo)[0], [])
+
+    def test_email_users_change_is_not_propagated(self):
+        snap, espo = self.load()
+        data = self.org()
+        data["EmailMessageRelation"].append(dict(Id=fx.sid("0EM", 9), EmailMessageId=fx.M[0], RelationId=fx.U2,
+                                                 RelationType="CcAddress", RelationAddress="aa@example.test"))
+        changed = write_snapshot(os.path.join(self.tmp, "users"), data=data)
+        writes, _ = self.rerun(changed, espo)
+        self.assertEqual(writes, [])                                         # accepted limitation
+
+    # ------------------------------------------------------------ real differences still written
+    def test_real_differences_are_updated(self):
+        snap, espo = self.load()
+        data = self.org()
+        m0 = data["EmailMessage"][0]
+        body = list(m0["TextBody"])
+        body[15000] = "#"                                                    # beyond the list cut
+        m0["TextBody"] = "".join(body)
+        m0["ToAddress"] = f"A.{SENTINEL}@Example.test; b@example.test; Y@Example.Test"      # Z -> Y
+        m0["CcAddress"] = "C@Example.Test"                                   # aa removed
+        m0["FromAddress"] = "Other@Example.TEST"
+        task = data["Task"][0]
+        task["Description"] = "!" + task["Description"][1:]                  # inside the cut: not a prefix
+        data["Event"][1]["Description"] = "Short " + SENTINEL                # a short description
+        changed = write_snapshot(os.path.join(self.tmp, "changed"), data=data)
+        writes, reads = self.rerun(changed, espo)
+        by = {(e, k) for m, e, b in writes if m == "PUT" for k in b}
+        self.assertEqual({k for e, k in by if e == "Email"}, {"body", "bodyPlain", "to", "cc", "from",
+                                                                  "fromString"})
+        self.assertEqual({k for e, k in by if e == "Task"}, {"description"})
+        self.assertEqual({k for e, k in by if e == "Meeting"}, {"description"})
+        self.assertEqual(len(writes), 3)
+        sent = next(b for m, e, b in writes if e == "Email")
+        self.assertEqual(sent["to"], m0["ToAddress"].replace("; ", ";"))    # the mapped value
+        self.assertEqual(sent["from"], "Other@Example.TEST")
+        self.assertEqual(sent["body"], m0["TextBody"])
+        em = espo.by_sf("Email")[fx.M[0]]
+        self.assertEqual(em["body"], m0["TextBody"])
+        # The changed Task body is not a prefix of the list value: no single read for it.
+        self.assertNotIn("Task", [e for e, _ in reads])
+        self.assertIn("Email", [e for e, _ in reads])
+        # Converged after the update.
+        self.assertEqual(self.rerun(changed, espo)[0], [])
+
+    # ------------------------------------------------------------ the comparison rules
+    def test_same_value_rules(self):
+        from crm_load.engine import same_value
+        self.assertTrue(same_value("to", "A@x.test; b@x.test", "b@x.test;a@x.test", entity="Email"))
+        self.assertFalse(same_value("to", "a@x.test;b@x.test", "a@x.test", entity="Email"))
+        self.assertTrue(same_value("cc", None, "", entity="Email"))
+        self.assertFalse(same_value("cc", "a@x.test", None, entity="Email"))
+        self.assertTrue(same_value("from", " A@X.test", "a@x.test", entity="Email"))
+        self.assertFalse(same_value("from", "a@x.test", "b@x.test", entity="Email"))
+        self.assertFalse(same_value("from", "a@x.test", None, entity="Email"))
+        # Only Email addresses are case-insensitive.
+        self.assertFalse(same_value("emailAddress", "A@x.test", "a@x.test", entity="Contact"))
 
 
 if __name__ == "__main__":
