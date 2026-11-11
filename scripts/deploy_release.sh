@@ -249,6 +249,9 @@ provision_and_accept() {
     CRM_BETA_SAFE_KEY_FILE=${CRM_BETA_SAFE_KEY_FILE:-$CRM_PROVISION_KEY_FILE}
     [ -f "$CRM_BETA_SAFE_KEY_FILE" ] \
         || die "beta-safe acceptance needs an API key file: set CRM_BETA_SAFE_KEY_FILE (the API user already existed, so no new key was written)"
+    # The role check reads Role as the admin (CRM-009-G): the credentials go in
+    # through the environment only, never argv.
+    CRM_ADMIN_USERNAME=$CRM_ADMIN_USERNAME CRM_ADMIN_PASSWORD=$CRM_ADMIN_PASSWORD \
     CRM_BETA_SAFE_KEY_FILE=$CRM_BETA_SAFE_KEY_FILE CRM_BETA_SAFE_MODE=${DEPLOY_MODE:-production} \
         run_beta_safe "$dest" \
         || die "beta-safe acceptance failed"

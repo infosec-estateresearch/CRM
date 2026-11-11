@@ -103,17 +103,25 @@ TLS ends at the PO's HAProxy. EspoCRM must still generate `https://` links, so `
   - the file must be a regular file, not a symlink, with no group or other permission bits;
   - it holds exactly one `CRM_IMPORT_API_KEY=` or `CRM_LOAD_API_KEY=` line;
   - the key never comes from the command line.
+- The role check alone reads as the EspoCRM admin (CRM-009-G). `Role` is an administration entity: no ACL role can grant an API-key user read on it (the key gets 401/403).
+  - The credentials come from `CRM_ADMIN_USERNAME` and `CRM_ADMIN_PASSWORD` in the environment; `deploy_release.sh` requires them and passes them to the suite through the environment.
+  - If either is missing, the role check **fails**; it never skips.
+  - The admin reader sends GET only, and only to `Role`. The credentials are never printed, logged, put in argv or kept after the role check.
+  - Every other check uses the API key.
 - It checks:
   - the API answers;
-  - every role in `config/access/roles.json` exists;
+  - every role in `config/access/roles.json` exists (as the admin);
   - `phoneNumberInternational` is JSON `false`;
   - `siteUrl` is `https://…`;
   - no Account name contains the synthetic marker `SENTINEL-7f3a`, reported as a count only.
 
-Run it by hand:
+Run it by hand. Export the admin credentials first: a `read -s` prompt keeps the password out of argv and shell history.
 ```sh
+export CRM_ADMIN_USERNAME=admin
+read -rs -p 'admin password: ' CRM_ADMIN_PASSWORD; echo; export CRM_ADMIN_PASSWORD
 CRM_BASE_URL=http://127.0.0.1:<CRM_BETA_APP_PORT> CRM_BETA_SAFE_KEY_FILE=/root/crm-beta-import-key.env \
   python3 -B -m unittest discover -s tests/acceptance -p test_beta_safe.py -v
+unset CRM_ADMIN_PASSWORD
 ```
 `deploy_release.sh` treats a skipped suite as a failure.
 
