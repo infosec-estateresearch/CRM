@@ -17,7 +17,8 @@ It checks that:
 - the API answers (GET App/user);
 - every role in config/access/roles.json exists (GET Role, by name);
 - phoneNumberInternational is the JSON boolean false (GET Settings);
-- siteUrl uses https (GET Settings);
+- siteUrl uses https (GET Settings); in UAT mode (CRM_BETA_SAFE_MODE=uat,
+  CRM-009) it is http://<LAN address>:<port> instead;
 - no Account name contains the synthetic seed marker (a count only; no name
   is fetched or printed).
 
@@ -26,6 +27,7 @@ tests/unit/test_beta.py runs this module in-process against a fake EspoCRM and
 fails if any other method is sent.
 """
 
+import ipaddress
 import json
 import os
 import stat
@@ -39,6 +41,8 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 import crm_api  # noqa: E402
 
 ENV_KEY_FILE = "CRM_BETA_SAFE_KEY_FILE"
+ENV_MODE = "CRM_BETA_SAFE_MODE"
+RFC1918 = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 KEY_NAMES = ("CRM_IMPORT_API_KEY", "CRM_LOAD_API_KEY")
 ROLES_PATH = os.path.join(REPO, "config", "access", "roles.json")
 SEED_MARKER = "SENTINEL-7f3a"
@@ -159,9 +163,25 @@ class TestBetaSafe(unittest.TestCase):
         self.assertIs(self.settings["phoneNumberInternational"], False)
 
     def test_site_url_uses_https(self):
+        # CRM-009: in UAT mode (CRM_BETA_SAFE_MODE=uat, set by deploy_release.sh
+        # from the checked env file) siteUrl is plain http on a private address
+        # with an explicit port; otherwise (production, the default) https.
+        mode = os.environ.get(ENV_MODE) or "production"
+        self.assertIn(mode, ("production", "uat"), f"{ENV_MODE} must be production or uat")
         url = self.settings.get("siteUrl")
         self.assertIsInstance(url, str, "siteUrl is not set")
         parts = urllib.parse.urlsplit(url)
+        if mode == "uat":
+            self.assertEqual(parts.scheme, "http", "siteUrl does not use http in uat mode")
+            try:
+                addr = ipaddress.IPv4Address(parts.hostname or "")
+                port = parts.port
+            except ValueError:
+                addr = port = None
+            self.assertTrue(addr is not None and any(addr in ipaddress.IPv4Network(n) for n in
+                                                     RFC1918), "siteUrl host is not RFC 1918")
+            self.assertIsNotNone(port, "siteUrl has no explicit port")
+            return
         self.assertEqual(parts.scheme, "https", "siteUrl does not use https")
         self.assertTrue(parts.hostname, "siteUrl has no host")
 

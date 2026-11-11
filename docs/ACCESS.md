@@ -115,6 +115,14 @@ The input is a JSON list of `{sfId, userName, firstName, lastName, emailAddress,
 - **Where passwords go.** They are written only to `--password-file`, a CSV with the columns `sfId,userName,temporaryPassword`. It is created at the first password, so a run that issues none creates no file. Passwords are never printed or logged. If a run fails part-way, the file still holds the passwords already issued, and stderr says how many.
 - **A user re-activated by a later input** has no known password. The script says so; issue one with `--reset <sfId>`.
 - **`--reset <sfId>`** sets a new temporary password for one active regular user.
+- **`--service-identity <sfId>`** (CRM-009, repeatable, the sfId must be in the input) is for non-person Salesforce logins, such as integration users and shared mailboxes, so that the records they own keep an owner. The user is always provisioned **inactive** with a random password that is sent once and never recorded. Its names are kept as in the input. `--reset` is refused for it (pass the same `--service-identity` on the reset run).
+- **`--common-password-file FILE`** (CRM-009, **target `beta` only**, with `--input`): every **new active** user that is neither legacy shared nor a service identity gets the one common UAT password in FILE instead of a generated one. Nothing is written for those users to `--password-file`, which is optional in this mode and, when given, records only generated passwords. FILE must be a regular file (opened with `O_NOFOLLOW`, so a symlink is refused), owned by root, mode `0600`, holding exactly one line: at least 16 characters from at least three of lower case, upper case, digits and other characters. The password never appears in argv, output, logs or the CSV; `sendAccessInfo` stays false. Re-runs never touch passwords, and the admin and `ER Import` API users are never affected (only regular users are provisioned). Example:
+
+  ```sh
+  python3 scripts/provision_users.py beta --input users.json \
+      --common-password-file /root/crm-beta-uat-password \
+      --service-identity <sfId> --legacy-shared <sfId>
+  ```
 
 Delete each password CSV once its passwords have been handed over.
 

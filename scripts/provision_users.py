@@ -9,6 +9,9 @@ Usage (operator stage; credentials only in the environment):
         [--legacy-shared <sfId>]...
     python3 scripts/provision_users.py dev --reset <sfId> --password-file /root/reset.csv
     python3 scripts/provision_users.py dev --report-never-logged-in
+    python3 scripts/provision_users.py beta --input users.json \
+        --common-password-file /root/uat-password [--password-file FILE] \
+        [--service-identity <sfId>]... [--legacy-shared <sfId>]...
 
 Input: a JSON list of {sfId, userName, firstName, lastName, emailAddress,
 isActive, teams[], roles[]}. Team and role names must exist in config/access.
@@ -29,9 +32,23 @@ isActive, teams[], roles[]}. Team and role names must exist in config/access.
   password, and --reset is refused for them.
 - --reset issues a new temporary password for one active user.
 - --report-never-logged-in lists active regular users whose lastAccess is empty.
+- --service-identity SFID (CRM-009, repeatable, must be in the input): a
+  non-person Salesforce login (an integration user, a shared mailbox) kept so
+  that its records have an owner. Always inactive, with a random password
+  that is never recorded; its names are kept; --reset is refused for it.
+- --common-password-file FILE (CRM-009, target beta only, with --input): every
+  NEW ACTIVE user that is neither legacy shared nor a service identity gets the
+  one common UAT password in FILE instead of a generated one, and nothing is
+  written for it to --password-file (optional in this mode; when given it holds
+  only generated passwords, so none). FILE must be a regular file (opened with
+  O_NOFOLLOW), owned by root, mode 0600, holding one line: at least 16
+  characters from at least three of lower case, upper case, digits and other.
+  The password is never printed or logged. Re-runs never touch passwords, and
+  the admin and ER Import API users (not regular users) are never touched.
 
-The first argument names the target environment and must be exactly "dev"
-(exit 2 otherwise). Credentials come from CRM_ADMIN_USERNAME /
+The first argument names the target environment and must be exactly "dev" or
+"beta" (exit 2 otherwise); the base URL is pinned to it
+(check_access.base_url_problem). Credentials come from CRM_ADMIN_USERNAME /
 CRM_ADMIN_PASSWORD; the base URL from --base-url or CRM_BASE_URL.
 """
 
@@ -41,6 +58,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import string
 import sys
 
@@ -65,6 +83,73 @@ PASSWORD_CLASSES = (string.ascii_lowercase, string.ascii_uppercase, string.digit
                     PASSWORD_SYMBOLS)
 PASSWORD_ALPHABET = "".join(PASSWORD_CLASSES)
 CSV_HEADER = ("sfId", "userName", "temporaryPassword")
+
+# CRM-009: the common UAT password file.
+COMMON_PASSWORD_OWNER_UID = 0  # root; tests patch it to their own uid
+COMMON_PASSWORD_MIN_LENGTH = 16
+COMMON_PASSWORD_MIN_CLASSES = 3
+COMMON_PASSWORD_MAX_BYTES = 1024
+
+
+def read_common_password(path):
+    """The common UAT password from path. Raise ProvisionError (never quoting
+    the content) unless path is a regular file, not a symlink, owned by
+    COMMON_PASSWORD_OWNER_UID, mode 0600, holding exactly one line with a
+    password of at least 16 characters and three character classes."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+    except OSError as err:
+        raise ProvisionError(f"--common-password-file cannot be opened without following a "
+                             f"symlink ({type(err).__name__})") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise ProvisionError("--common-password-file must be a regular file")
+        if st.st_uid != COMMON_PASSWORD_OWNER_UID:
+            raise ProvisionError("--common-password-file must be owned by root")
+        if stat.S_IMODE(st.st_mode) != 0o600:
+            raise ProvisionError("--common-password-file must have mode 0600")
+        raw = os.read(fd, COMMON_PASSWORD_MAX_BYTES + 1)
+    finally:
+        os.close(fd)
+    if len(raw) > COMMON_PASSWORD_MAX_BYTES:
+        raise ProvisionError("--common-password-file is too long")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ProvisionError("--common-password-file is not UTF-8 text") from None
+    if text.endswith("\n"):
+        text = text[:-1]
+    if any(c in text for c in "\r\n") or any(ord(c) < 32 or ord(c) == 127 for c in text):
+        raise ProvisionError("--common-password-file must hold exactly one line, with no "
+                             "control characters")
+    if len(text) < COMMON_PASSWORD_MIN_LENGTH:
+        raise ProvisionError(f"the common password must be at least "
+                             f"{COMMON_PASSWORD_MIN_LENGTH} characters")
+    classes = sum((any(c.islower() for c in text), any(c.isupper() for c in text),
+                   any(c.isdigit() for c in text), any(not c.isalnum() for c in text)))
+    if classes < COMMON_PASSWORD_MIN_CLASSES:
+        raise ProvisionError("the common password must use at least three of lower case, "
+                             "upper case, digits and other characters")
+    return text
+
+
+class NoPasswordFile:
+    """Stands in for --password-file when it is not given with
+    --common-password-file: any attempt to record a password fails."""
+
+    path = None
+    issued = 0
+
+    def open(self):
+        raise ProvisionError("a generated password would be issued, but no --password-file "
+                             "was given")
+
+    def record(self, *_):
+        self.open()
+
+    def close(self):
+        pass
 
 
 def generate_password(length=PASSWORD_LENGTH):
@@ -194,15 +279,17 @@ def _user_changes(current, desired):
     return changes
 
 
-def provision_users(client, users, config, passwords, legacy_shared=()):
+def provision_users(client, users, config, passwords, legacy_shared=(), service_ids=(),
+                    common_password=None):
     names_used = sorted({n for u in users for n in u["teams"]})
     roles_used = sorted({n for u in users for n in u["roles"]})
     team_ids = access.name_ids(client, "Team", names_used)
     role_ids = access.name_ids(client, "Role", roles_used)
     counter = access.Counter()
+    common_users = 0
     for u in users:
         sf_id, user_name = u["sfId"], u["userName"]
-        active = u["isActive"] and sf_id not in legacy_shared
+        active = u["isActive"] and sf_id not in legacy_shared and sf_id not in service_ids
         desired = {
             "firstName": u["firstName"],
             "lastName": u["lastName"],
@@ -218,7 +305,10 @@ def provision_users(client, users, config, passwords, legacy_shared=()):
             if clash is not None:
                 raise ProvisionError(f"user {user_name} already exists without sfId {sf_id}; "
                                      "refusing to adopt it")
-            if active:
+            common = active and common_password is not None
+            if common:
+                password = common_password  # CRM-009: never recorded
+            elif active:
                 passwords.open()  # fail before the user exists if the file cannot be made
                 password = generate_password()
             else:
@@ -226,7 +316,7 @@ def provision_users(client, users, config, passwords, legacy_shared=()):
             data = dict(desired, userName=user_name, type="regular", sfId=sf_id,
                         sendAccessInfo=False, password=password, passwordConfirm=password)
             record = client.create("User", data)
-            if active:
+            if active and not common:
                 passwords.record(sf_id, user_name, password)
             password = data = None
             stored = record.get("sfId")
@@ -237,7 +327,16 @@ def provision_users(client, users, config, passwords, legacy_shared=()):
                     f"user {user_name} was created but EspoCRM did not store its sfId; "
                     "re-runs could not find it. See docs/ACCESS.md, section 5.")
             counter.add("user", "created")
-            log(f"user {user_name}: created ({'active, temporary password issued' if active else 'inactive, no usable password'})")
+            if common:
+                common_users += 1
+                state = "active, common UAT password"
+            elif active:
+                state = "active, temporary password issued"
+            elif sf_id in service_ids:
+                state = "service identity, inactive, no usable password"
+            else:
+                state = "inactive, no usable password"
+            log(f"user {user_name}: created ({state})")
             continue
         current = access.get(client, "User", found["id"])
         if current.get("type") != "regular":
@@ -259,12 +358,16 @@ def provision_users(client, users, config, passwords, legacy_shared=()):
             log(f"user {current.get('userName')}: unchanged")
     counts = counter.counts
     counts["passwordsIssued"] = passwords.issued
+    if common_password is not None:
+        counts["commonPasswordUsers"] = common_users
     return counts
 
 
-def reset_password(client, sf_id, passwords, legacy_shared=()):
+def reset_password(client, sf_id, passwords, legacy_shared=(), service_ids=()):
     if sf_id in legacy_shared:
         raise ProvisionError(f"sfId {sf_id} is a legacy shared identity; it never gets a password")
+    if sf_id in service_ids:
+        raise ProvisionError(f"sfId {sf_id} is a service identity; it never gets a password")
     found = _find_by_sf_id(client, sf_id)
     if found is None:
         raise ProvisionError(f"no user has sfId {sf_id}")
@@ -311,6 +414,10 @@ def main(argv=None, transport=None, environ=None):
     parser.add_argument("--password-file", help="new file (mode 0600) for temporary passwords")
     parser.add_argument("--legacy-shared", action="append", default=[], metavar="SFID",
                         help="a legacy shared identity: always provisioned inactive")
+    parser.add_argument("--service-identity", action="append", default=[], metavar="SFID",
+                        help="a non-person login: always inactive, no usable password")
+    parser.add_argument("--common-password-file", metavar="FILE",
+                        help="beta only: the common UAT password for new active users")
     parser.add_argument("--config-dir", default=access.CONFIG_DIR, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     # CRM-007R: the base URL is pinned to the target (check_access.pinned_base_url).
@@ -325,27 +432,41 @@ def main(argv=None, transport=None, environ=None):
             for name in never_logged_in(client):
                 print(name)
             return 0
-        if not args.password_file:
+        common_password = None
+        if args.common_password_file is not None:
+            if args.target != "beta":
+                raise ProvisionError("--common-password-file is allowed only for target beta")
+            if not args.input:
+                raise ProvisionError("--common-password-file is allowed only with --input")
+            common_password = read_common_password(args.common_password_file)
+        elif not args.password_file:
             raise ProvisionError("--password-file is required with --input and --reset")
-        access.check_new_private_path(args.password_file)
+        if not all(SF_ID.match(i) for i in args.service_identity):
+            raise ProvisionError("--service-identity needs an sfId (15 or 18 letters and digits)")
+        services = set(args.service_identity)
+        if args.password_file:
+            access.check_new_private_path(args.password_file)
         config = access.load_config(args.config_dir)
         sticky = load_legacy_shared(args.config_dir)
-        passwords = PasswordFile(args.password_file)
+        passwords = PasswordFile(args.password_file) if args.password_file else NoPasswordFile()
         if args.reset:
             if not SF_ID.match(args.reset):
                 raise ProvisionError("--reset needs an sfId (15 or 18 letters and digits)")
             client = access.client_from_env(args.base_url, environ, transport)
             counts = reset_password(client, args.reset, passwords,
-                                    sticky | set(args.legacy_shared))
+                                    sticky | set(args.legacy_shared), services)
         else:
             users = load_users(args.input)
             validate_users(users, config)
             unknown = set(args.legacy_shared) - {u["sfId"] for u in users}
             if unknown:
                 raise ProvisionError("--legacy-shared names an sfId that is not in the input")
+            if services - {u["sfId"] for u in users}:
+                raise ProvisionError("--service-identity names an sfId that is not in the input")
             client = access.client_from_env(args.base_url, environ, transport)
             counts = provision_users(client, users, config, passwords,
-                                     sticky | set(args.legacy_shared))
+                                     sticky | set(args.legacy_shared), services, common_password)
+            common_password = None
     except crm_api.ConfigError as err:
         print(f"{prog}: {err}", file=sys.stderr)
         return 2

@@ -3,15 +3,18 @@
 crm-beta edge settings (CRM-007), standard library only.
 
     python3 scripts/check_access.py beta [--render]
+    python3 scripts/check_access.py beta --mode
     python3 scripts/check_access.py restoretest
     python3 scripts/check_access.py dev|beta --base-url
 
 beta validates CRM_BETA_* and CRM_SITE_URL in /srv/CRM/runtime/beta/env, the
-beta compose bind policy, the crm-app HTTPS policy (crm-proxy.conf) and the
-rendered edge configuration (see the beta section below); --render then writes
-it to <runtime>/edge/haproxy.cfg. Without --render, beta also refuses unless
-the on-disk <runtime>/edge/haproxy.cfg is byte for byte the rendered one
-(scripts/up.sh beta re-renders it and recreates the edge). restoretest checks only the isolation policy
+beta compose bind policy, the crm-app scheme policy (crm-proxy.conf, or
+crm-proxy-uat.conf in UAT mode, CRM-009) and the rendered edge configuration
+(see the beta section below); --render then writes it to
+<runtime>/edge/haproxy.cfg. Without --render, beta also refuses unless the
+on-disk <runtime>/edge/haproxy.cfg is byte for byte the rendered one
+(scripts/up.sh beta re-renders it and recreates the edge). beta --mode prints
+the validated CRM_BETA_MODE (production or uat) and nothing else. restoretest checks only the isolation policy
 of deploy/beta/restoretest/compose.json (restore.sh beta --restoretest).
 The rest of this docstring describes dev.
 
@@ -250,6 +253,18 @@ EDGE_SERVICE = "crm-beta-edge"
 BETA_NAMES = ("CRM_BETA_BIND_IP", "CRM_BETA_PORT", "CRM_BETA_UPSTREAM_SOURCES",
               "CRM_BETA_HOSTNAME", "CRM_BETA_APP_PORT", "CRM_SITE_URL")
 MAX_UPSTREAM_SOURCES = 4
+# CRM-009: CRM_BETA_MODE selects production (the default: absent or empty) or
+# uat. It is optional, so it is not in BETA_NAMES (each of which must be set
+# exactly once). In uat mode CRM_BETA_HOSTNAME is optional too (and must be empty).
+BETA_MODE_NAME = "CRM_BETA_MODE"
+BETA_MODES = ("production", "uat")
+UAT_MIN_PREFIX = 16
+# UAT sources must not overlap a Docker bridge subnet: the edge runs on the
+# host network, so a container on any bridge reaches it from that bridge's
+# subnet. crm-beta-net has no fixed subnet (Docker assigns it from its default
+# bridge pool inside 172.16.0.0/12), so the whole of 172.16.0.0/12 is refused,
+# plus every subnet deploy/compose.json (crm-dev) declares.
+DOCKER_DEFAULT_POOL = ipaddress.IPv4Network("172.16.0.0/12")
 # A strict DNS name: at least two labels, letters/digits/hyphens, no leading or
 # trailing hyphen, each label 1-63 characters, 253 characters at most.
 HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
@@ -310,6 +325,70 @@ def validate_upstream_sources(value):
     return out
 
 
+def read_optional_value(text, name):
+    """(value or None if absent, [errors]) for an optional env-file name: absent
+    is allowed; otherwise the read_env_values rules apply (once, plain form)."""
+    any_form = re.compile(rf"^\s*(export\s+)?{name}([^A-Za-z0-9_]|$)")
+    if not any(any_form.match(l) for l in text.splitlines()):
+        return None, []
+    values, errors = read_env_values(text, (name,))
+    return values.get(name), errors
+
+
+def beta_mode(text):
+    """(mode, [errors]) from beta env-file text: production when CRM_BETA_MODE is
+    absent or empty, uat, or (None, errors) for anything else (fail closed)."""
+    value, errors = read_optional_value(text, BETA_MODE_NAME)
+    if errors:
+        return None, errors
+    if value in (None, ""):
+        return "production", []
+    if value not in BETA_MODES:
+        return None, [f"{BETA_MODE_NAME} must be empty, 'production' or 'uat'"]
+    return value, []
+
+
+def validate_uat_sources(value, avoid=()):
+    """CRM-009 UAT mode: 1-4 space-separated RFC 1918 IPv4 networks a.b.c.d/N,
+    N 16-32, no host bits set, none overlapping a Docker bridge subnet
+    (DOCKER_DEFAULT_POOL and avoid)."""
+    if value is None or value.strip() == "":
+        return ["CRM_BETA_UPSTREAM_SOURCES is empty"]
+    if not re.fullmatch(r"[0-9./ ]+", value):
+        return ["CRM_BETA_UPSTREAM_SOURCES may contain only IPv4 networks separated by spaces"]
+    tokens = value.split()
+    out = []
+    if len(tokens) > MAX_UPSTREAM_SOURCES:
+        out.append(f"CRM_BETA_UPSTREAM_SOURCES has {len(tokens)} entries; at most "
+                   f"{MAX_UPSTREAM_SOURCES} are allowed")
+    for i, token in enumerate(tokens, start=1):
+        where = f"CRM_BETA_UPSTREAM_SOURCES entry {i}"
+        if not CIDR.fullmatch(token) or _ipv4(token.split("/")[0]) is None:
+            out.append(f"{where} is not an IPv4 network of the form a.b.c.d/N")
+            continue
+        try:
+            net = ipaddress.IPv4Network(token, strict=True)
+        except ValueError:
+            out.append(f"{where} is not a valid network (bad prefix or host bits set)")
+            continue
+        if not UAT_MIN_PREFIX <= net.prefixlen <= 32:
+            out.append(f"{where} must have a prefix from /{UAT_MIN_PREFIX} to /32")
+            continue
+        if not any(net.subnet_of(block) for block in RFC1918):
+            out.append(f"{where} is not inside an RFC 1918 private block")
+            continue
+        if net.overlaps(DOCKER_DEFAULT_POOL) or any(net.overlaps(o) for o in avoid):
+            out.append(f"{where} overlaps a Docker bridge subnet (172.16.0.0/12 or a crm-dev "
+                       "compose network), which would admit traffic from containers")
+    return out
+
+
+def validate_uat_site_url(value, bind_ip, port):
+    if value not in (f"http://{bind_ip}:{port}", f"http://{bind_ip}:{port}/"):
+        return ["CRM_SITE_URL must be exactly http://<CRM_BETA_BIND_IP>:<CRM_BETA_PORT> in uat mode"]
+    return []
+
+
 def validate_hostname(value):
     if not value or not HOSTNAME_RE.match(value):
         return ["CRM_BETA_HOSTNAME is not a lower-case DNS name (letters, digits, hyphens, "
@@ -323,15 +402,35 @@ def validate_beta_site_url(value, hostname):
     return []
 
 
-def validate_beta(values):
+def _dev_subnets():
+    """The IPv4 subnets deploy/compose.json (crm-dev) declares; fail closed."""
+    return [n for n in compose_subnets(COMPOSE_PATH) if n.version == 4]
+
+
+def validate_beta(values, mode="production"):
     errors = []
     errors += validate_beta_bind_ip(values.get("CRM_BETA_BIND_IP"))
     errors += validate_port("CRM_BETA_PORT", values.get("CRM_BETA_PORT"))
     errors += validate_port("CRM_BETA_APP_PORT", values.get("CRM_BETA_APP_PORT"))
-    errors += validate_upstream_sources(values.get("CRM_BETA_UPSTREAM_SOURCES"))
-    errors += validate_hostname(values.get("CRM_BETA_HOSTNAME"))
-    if not validate_hostname(values.get("CRM_BETA_HOSTNAME")) and "CRM_SITE_URL" in values:
-        errors += validate_beta_site_url(values["CRM_SITE_URL"], values["CRM_BETA_HOSTNAME"])
+    if mode == "uat":
+        try:
+            avoid = _dev_subnets()
+        except (OSError, ValueError, AttributeError) as err:
+            return errors + [f"cannot read the crm-dev subnets from {COMPOSE_PATH}: "
+                             f"{type(err).__name__}"]
+        errors += validate_uat_sources(values.get("CRM_BETA_UPSTREAM_SOURCES"), avoid)
+        if values.get("CRM_BETA_HOSTNAME"):
+            errors.append("CRM_BETA_HOSTNAME must be empty or absent in uat mode")
+        if not errors:
+            errors += validate_uat_site_url(values.get("CRM_SITE_URL"),
+                                            values["CRM_BETA_BIND_IP"], values["CRM_BETA_PORT"])
+    elif mode == "production":
+        errors += validate_upstream_sources(values.get("CRM_BETA_UPSTREAM_SOURCES"))
+        errors += validate_hostname(values.get("CRM_BETA_HOSTNAME"))
+        if not validate_hostname(values.get("CRM_BETA_HOSTNAME")) and "CRM_SITE_URL" in values:
+            errors += validate_beta_site_url(values["CRM_SITE_URL"], values["CRM_BETA_HOSTNAME"])
+    else:
+        return errors + ["unknown CRM_BETA_MODE"]
     if not errors and values["CRM_BETA_PORT"] == values["CRM_BETA_APP_PORT"]:
         errors.append("CRM_BETA_PORT and CRM_BETA_APP_PORT must differ")
     for name in ("CRM_BETA_PORT", "CRM_BETA_APP_PORT"):
@@ -350,7 +449,7 @@ BETA_BIND_VAR = re.compile(r"\$\{CRM_(DB|DATA|CUSTOM|CLIENT_CUSTOM)_DIR:\?[^}]*\
 def _bind_source_ok(src):
     if not isinstance(src, str) or "docker.sock" in src or ".." in src.split("/"):
         return False
-    if BETA_BIND_VAR.fullmatch(src):
+    if BETA_BIND_VAR.fullmatch(src) or src == PROXY_MOUNT_SOURCE:
         return True
     if src.startswith(BETA_DEFAULT_RUNTIME + "/") and "$" not in src:
         return True
@@ -442,6 +541,56 @@ def _beta_allowlist_errors(doc, services):
     return out
 
 
+# CRM-009: crm-app mounts the Git-controlled scheme policy file for
+# CRM_BETA_MODE straight from the release directory. Compose resolves the
+# source from the env file: absent or empty -> crm-proxy.conf (production, as
+# before), production -> crm-proxy-production.conf (a byte-identical copy,
+# enforced), uat -> crm-proxy-uat.conf. check_beta checks the file the mode
+# resolves to with that mode's policy, and refuses any other mode value, so no
+# mode can mount an unchecked file. A mode change changes the resolved source,
+# so `up` recreates crm-app.
+PROXY_TARGET = "/etc/apache2/conf-enabled/crm-proxy.conf"
+PROXY_MOUNT_SOURCE = "./apache/crm-proxy${CRM_BETA_MODE:+-${CRM_BETA_MODE}}.conf"
+
+
+def _mount_fields(vol):
+    if isinstance(vol, dict):
+        return vol.get("source"), vol.get("target"), vol
+    if isinstance(vol, str):
+        parts = vol.split(":")
+        return parts[0], (parts[1] if len(parts) > 1 else None), None
+    return None, None, None
+
+
+def _beta_proxy_mount_errors(services):
+    """crm-app mounts exactly the runtime scheme policy file, read-only, at
+    PROXY_TARGET; nothing else mounts anything into /etc/apache2 or mounts an
+    apache file from anywhere else."""
+    out, found = [], []
+    for name, svc in services.items():
+        if not isinstance(svc, dict):
+            continue
+        for vol in svc.get("volumes") or []:
+            src, target, spec = _mount_fields(vol)
+            apache_src = isinstance(src, str) and ("/apache/" in src or src.startswith("apache/"))
+            apache_dst = isinstance(target, str) and (target == "/etc/apache2"
+                                                      or target.startswith("/etc/apache2/"))
+            if not (apache_src or apache_dst):
+                continue
+            if name == "crm-app" and target == PROXY_TARGET and src == PROXY_MOUNT_SOURCE \
+                    and spec is not None and spec.get("type") == "bind" \
+                    and spec.get("read_only") is True and set(spec) == {
+                        "type", "source", "target", "read_only"}:
+                found.append(vol)
+            else:
+                out.append(f"{name}: mount into /etc/apache2 or of an apache file is refused "
+                           f"(only crm-app {PROXY_MOUNT_SOURCE} -> {PROXY_TARGET}, read-only)")
+    if len(found) != 1:
+        out.append(f"crm-app must mount exactly {PROXY_MOUNT_SOURCE} read-only at {PROXY_TARGET} "
+                   "(the scheme policy file for CRM_BETA_MODE)")
+    return out
+
+
 def check_beta_compose(doc):
     """The beta bind policy, on deploy/beta/compose.json: only allowlisted keys,
     every image pinned by digest, crm-app publishes exactly
@@ -468,6 +617,7 @@ def check_beta_compose(doc):
         if svc.get("network_mode") == "host" and name != EDGE_SERVICE:
             out.append(f"{name}: network_mode host is allowed for {EDGE_SERVICE} only")
     out += _beta_resources_errors(doc, services)
+    out += _beta_proxy_mount_errors(services)
     edge = services.get(EDGE_SERVICE)
     if not isinstance(edge, dict):
         return out + [f"{EDGE_SERVICE} service missing"]
@@ -553,8 +703,10 @@ def _edge_structure_errors(lines):
     return out
 
 
-def check_edge_config(text):
-    """The edge policy, on rendered HAProxy configuration text. [] = acceptable."""
+def check_edge_config(text, mode="production"):
+    """The edge policy, on rendered HAProxy configuration text. [] = acceptable.
+    CRM-009: in uat mode the trusted_upstream list holds networks
+    (validate_uat_sources) instead of single hosts."""
     lines = _edge_lines(text)
     out = _edge_structure_errors(lines)
     binds = [l for l in lines if l.split()[0] == "bind"]
@@ -581,8 +733,17 @@ def check_edge_config(text):
         out.append("edge must define exactly one 'acl trusted_upstream src <hosts>' with a "
                    "source list")
     else:
-        out += [e.replace("CRM_BETA_UPSTREAM_SOURCES", "edge trusted_upstream")
-                for e in validate_upstream_sources(" ".join(acls[0][3:]))]
+        listed = " ".join(acls[0][3:])
+        if mode == "production":
+            problems = validate_upstream_sources(listed)
+        elif mode == "uat":
+            try:
+                problems = validate_uat_sources(listed, _dev_subnets())
+            except (OSError, ValueError, AttributeError) as err:
+                problems = [f"cannot read the crm-dev subnets: {type(err).__name__}"]
+        else:
+            problems = ["unknown CRM_BETA_MODE"]
+        out += [e.replace("CRM_BETA_UPSTREAM_SOURCES", "edge trusted_upstream") for e in problems]
     other_acl = [l for l in lines if l.startswith("acl ") and not l.startswith("acl trusted_upstream ")]
     if other_acl:
         out.append("edge defines other ACLs; only trusted_upstream is allowed")
@@ -615,18 +776,57 @@ def check_edge_config(text):
 
 
 PROXY_CONF_PATH = os.path.join(REPO, "deploy", "beta", "apache", "crm-proxy.conf")
+PROXY_UAT_CONF_PATH = os.path.join(REPO, "deploy", "beta", "apache", "crm-proxy-uat.conf")
+PROXY_PRODUCTION_COPY_PATH = os.path.join(REPO, "deploy", "beta", "apache",
+                                          "crm-proxy-production.conf")
+# CRM-009: the Git-controlled scheme policy file for each CRM_BETA_MODE.
+PROXY_CONFS = {"production": PROXY_CONF_PATH, "uat": PROXY_UAT_CONF_PATH}
+
+
+def proxy_conf_for(text):
+    """(mode, path of the file Compose mounts for it) from beta env-file text,
+    as PROXY_MOUNT_SOURCE resolves; (None, None) for a refused mode."""
+    value, errors = read_optional_value(text, BETA_MODE_NAME)
+    mode = beta_mode(text)[0]
+    if errors or mode is None:
+        return None, None
+    if value == "production":
+        return mode, PROXY_PRODUCTION_COPY_PATH
+    return mode, PROXY_CONFS[mode]
+
+
+def proxy_copy_errors(original=PROXY_CONF_PATH, copy=PROXY_PRODUCTION_COPY_PATH):
+    """crm-proxy-production.conf must be byte for byte crm-proxy.conf."""
+    try:
+        with open(original, "rb") as a, open(copy, "rb") as b:
+            same = a.read() == b.read()
+    except OSError as err:
+        return [f"cannot compare {os.path.basename(copy)} with crm-proxy.conf: "
+                f"{type(err).__name__}"]
+    return [] if same else [f"{os.path.basename(copy)} must be byte for byte crm-proxy.conf"]
 PROXY_MODULES = {"env_module": "/usr/lib/apache2/modules/mod_env.so",
                  "headers_module": "/usr/lib/apache2/modules/mod_headers.so"}
 
 
-def check_proxy_conf(text):
+def check_proxy_conf(text, mode="production"):
     """The crm-app HTTPS policy (PL decision on CRM-007 r1), on
     deploy/beta/apache/crm-proxy.conf text. [] = acceptable.
 
     Exactly one unconditional `SetEnv HTTPS on` and one unconditional
     `RequestHeader unset X-Forwarded-Proto` at top level. The only blocks allowed
     are `<IfModule !env_module|!headers_module>` holding just the matching
-    LoadModule. Nothing may make the scheme depend on the request or the peer."""
+    LoadModule. Nothing may make the scheme depend on the request or the peer.
+
+    CRM-009, mode "uat" (deploy/beta/apache/crm-proxy-uat.conf): the same, but
+    with no SetEnv at all (plain HTTP), so only the header removal and the
+    `<IfModule !headers_module>` block are allowed."""
+    if mode not in PROXY_CONFS:
+        return ["unknown CRM_BETA_MODE for the scheme policy"]
+    name = os.path.basename(PROXY_CONFS[mode])
+    allowed = ("SetEnv HTTPS on", "RequestHeader unset X-Forwarded-Proto") \
+        if mode == "production" else ("RequestHeader unset X-Forwarded-Proto",)
+    modules = PROXY_MODULES if mode == "production" else {
+        "headers_module": PROXY_MODULES["headers_module"]}
     out = []
     lines = _edge_lines(text)  # comments and blank lines removed
     depth, block = 0, None
@@ -641,8 +841,8 @@ def check_proxy_conf(text):
             continue
         if low.startswith("<"):
             m = re.fullmatch(r"<IfModule\s+!(\w+)>", line)
-            if depth != 0 or not m or m.group(1) not in PROXY_MODULES:
-                out.append(f"block not allowed (only <IfModule !env_module|!headers_module>): {line}")
+            if depth != 0 or not m or m.group(1) not in modules:
+                out.append(f"block not allowed (only <IfModule !{'|!'.join(modules)}>): {line}")
             depth, block = depth + 1, (m.group(1) if m else None)
             continue
         if depth:
@@ -653,14 +853,14 @@ def check_proxy_conf(text):
         top.append(" ".join(line.split()))
     if depth:
         out.append("unclosed block")
-    if top.count("SetEnv HTTPS on") != 1:
+    if mode == "production" and top.count("SetEnv HTTPS on") != 1:
         out.append("crm-proxy.conf must set 'SetEnv HTTPS on' exactly once, unconditionally")
     if top.count("RequestHeader unset X-Forwarded-Proto") != 1:
-        out.append("crm-proxy.conf must 'RequestHeader unset X-Forwarded-Proto' exactly once, "
+        out.append(f"{name} must 'RequestHeader unset X-Forwarded-Proto' exactly once, "
                    "unconditionally")
     for line in top:
-        if line not in ("SetEnv HTTPS on", "RequestHeader unset X-Forwarded-Proto"):
-            out.append(f"directive not allowed in crm-proxy.conf: {line}")
+        if line not in allowed:
+            out.append(f"directive not allowed in {name}: {line}")
     return out
 
 
@@ -767,10 +967,17 @@ def render_edge(values, template_path=EDGE_TEMPLATE_PATH):
 
 
 def check_beta(text, environ, compose_path=BETA_COMPOSE_PATH, template_path=EDGE_TEMPLATE_PATH,
-               proxy_conf_path=PROXY_CONF_PATH):
-    """([errors], rendered edge config or None) for beta env-file text."""
+               proxy_conf_path=None):
+    """([errors], rendered edge config or None) for beta env-file text.
+    proxy_conf_path defaults to the scheme policy file for CRM_BETA_MODE."""
     errors = [f"{n} is set in the process environment; Compose would prefer it to the "
-              "env file. Unset it." for n in BETA_NAMES if n in environ]
+              "env file. Unset it." for n in BETA_NAMES + (BETA_MODE_NAME,) if n in environ]
+    mode, mode_errors = beta_mode(text)
+    if mode_errors:
+        return errors + mode_errors, None
+    if proxy_conf_path is None:
+        proxy_conf_path = proxy_conf_for(text)[1]
+        errors += proxy_copy_errors()
     try:
         with open(compose_path, encoding="utf-8") as fh:
             errors += check_beta_compose(json.load(fh))
@@ -778,22 +985,30 @@ def check_beta(text, environ, compose_path=BETA_COMPOSE_PATH, template_path=EDGE
         errors.append(f"cannot read {compose_path}: {type(err).__name__}")
     try:
         with open(proxy_conf_path, encoding="utf-8") as fh:
-            errors += check_proxy_conf(fh.read())
+            errors += check_proxy_conf(fh.read(), mode)
     except (OSError, UnicodeDecodeError) as err:
         errors.append(f"cannot read {proxy_conf_path}: {type(err).__name__}")
-    values, env_errors = read_env_values(text, BETA_NAMES)
+    if mode == "uat":  # CRM_BETA_HOSTNAME is optional (and must be empty)
+        values, env_errors = read_env_values(
+            text, tuple(n for n in BETA_NAMES if n != "CRM_BETA_HOSTNAME"))
+        hostname, host_errors = read_optional_value(text, "CRM_BETA_HOSTNAME")
+        env_errors += host_errors
+        values["CRM_BETA_HOSTNAME"] = hostname or ""
+    else:
+        values, env_errors = read_env_values(text, BETA_NAMES)
     errors += env_errors
     if env_errors:
         return errors, None
-    errors += validate_beta(values)
+    errors += validate_beta(values, mode)
     if errors:
         return errors, None
     try:
         rendered = render_edge(values, template_path)
     except (OSError, ValueError) as err:
         return errors + [f"edge template: {err}"], None
-    edge_errors = check_edge_config(rendered)
+    edge_errors = check_edge_config(rendered, mode)
     return errors + edge_errors, (None if edge_errors else rendered)
+
 
 
 def write_edge_config(runtime, rendered):
@@ -973,7 +1188,8 @@ def main(argv=None, environ=None):
         print(url)
         return 0
     render = target == "beta" and argv[1:] == ["--render"]
-    if target not in ("dev", "beta") or (len(argv) != 1 and not render):
+    show_mode = target == "beta" and argv[1:] == ["--mode"]
+    if target not in ("dev", "beta") or (len(argv) != 1 and not render and not show_mode):
         print(f"{prog()}: refusing to run: target environment must be 'dev' or 'beta' "
               f"(got '{target or '<none>'}')", file=sys.stderr)
         return 2
@@ -1000,11 +1216,24 @@ def main(argv=None, environ=None):
         print(f"{prog()}: env file not readable: {env_file}", file=sys.stderr)
         return 1
     if target == "beta":
+        if show_mode:  # CRM-009: the mode only, never an address
+            if BETA_MODE_NAME in environ:
+                print(f"{prog()}: refused: {BETA_MODE_NAME} is set in the process environment",
+                      file=sys.stderr)
+                return 1
+            mode, mode_errors = beta_mode(text)
+            for err in mode_errors:
+                print(f"{prog()}: refused: {err}", file=sys.stderr)
+            if mode_errors:
+                return 1
+            print(mode)
+            return 0
         errors, rendered = check_beta(text, environ)
         for err in errors:
             print(f"{prog()}: refused: {err}", file=sys.stderr)
         if errors:
             return 1
+        mode = beta_mode(text)[0]
         if render:
             try:
                 write_edge_config(runtime, rendered)
@@ -1019,10 +1248,12 @@ def main(argv=None, environ=None):
                 print(f"{prog()}: refused: {problem}; run scripts/up.sh beta to re-render it "
                       "and recreate the edge", file=sys.stderr)
                 return 1
-        count = len(read_env_values(text, BETA_NAMES)[0]["CRM_BETA_UPSTREAM_SOURCES"].split())
-        print(f"{prog()}: beta access settings OK: CRM_BETA_BIND_IP, CRM_BETA_PORT, "
+        names = BETA_NAMES if mode == "production" else tuple(
+            n for n in BETA_NAMES if n != "CRM_BETA_HOSTNAME")
+        count = len(read_env_values(text, names)[0]["CRM_BETA_UPSTREAM_SOURCES"].split())
+        print(f"{prog()}: beta access settings OK ({mode} mode): CRM_BETA_BIND_IP, CRM_BETA_PORT, "
               f"{count} upstream source(s), CRM_BETA_HOSTNAME, CRM_BETA_APP_PORT, CRM_SITE_URL, "
-              "beta compose bind policy, edge policy, crm-proxy HTTPS policy")
+              f"beta compose bind policy, edge policy, crm-proxy {mode} scheme policy")
         return 0
     errors = check(text, environ)
     for err in errors:
