@@ -21,7 +21,8 @@
 #  5. from the unpacked release: check_access.py beta --render (edge config),
 #     then the validated CRM_BETA_MODE (check_access.py beta --mode, CRM-009) is
 #     printed (the mode only, never an address), up.sh beta, deploy_custom.sh beta;
-#  6. siteUrl := CRM_SITE_URL and phoneNumberInternational := false via
+#  6. siteUrl := CRM_SITE_URL (--type=string) and phoneNumberInternational :=
+#     false (--type=bool; config:set defaults to --type=string, CRM-009-F) via
 #     bin/command config:set, then read phoneNumberInternational back: anything
 #     but exactly the PHP boolean false fails the deploy (the CRM-006S load
 #     precondition);
@@ -173,7 +174,9 @@ check_phone_value() {
     [ "$1" = false ] || die "phoneNumberInternational read back as '$1', not exactly false"
 }
 
-# 6. siteUrl and phoneNumberInternational, then the read-back.
+# 6. siteUrl and phoneNumberInternational, then the read-back. config:set
+# defaults to --type=string, which stores the string 'false' (CRM-009-F), so the
+# boolean needs --type=bool.
 configure_site() {
     local dest=$1 site_url got
     # shellcheck source=lib/common.sh
@@ -181,8 +184,8 @@ configure_site() {
     require_target beta
     site_url=$(sed -n 's/^CRM_SITE_URL=//p' -- "$CRM_ENV_FILE")
     [ -n "$site_url" ] || die "CRM_SITE_URL is not set in $CRM_ENV_FILE"
-    compose exec -T -u www-data -w /var/www/html crm-app php bin/command config:set siteUrl "$site_url"
-    compose exec -T -u www-data -w /var/www/html crm-app php bin/command config:set phoneNumberInternational false
+    compose exec -T -u www-data -w /var/www/html crm-app php bin/command config:set siteUrl "$site_url" --type=string
+    compose exec -T -u www-data -w /var/www/html crm-app php bin/command config:set phoneNumberInternational false --type=bool
     # Read data/config.php back with php -r (PL decision, CRM-007 r2): var_export
     # tells the boolean false apart from the string 'false'.
     got=$(compose exec -T -u www-data -w /var/www/html crm-app php -r \

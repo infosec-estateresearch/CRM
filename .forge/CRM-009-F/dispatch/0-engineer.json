@@ -1,0 +1,19 @@
+{
+  "candidate": null,
+  "exit": 0,
+  "meta": {
+    "duration_ms": 151724,
+    "num_turns": 12,
+    "subtype": "success",
+    "total_cost_usd": 0.3168274
+  },
+  "n": 1,
+  "prompt": "# CRM-009-F, round 1: Engineer\n\n- **Worktree:** `/srv/CRM/worktrees/CRM-009-F`, branch `forge/CRM-009-F`. The expected HEAD is `479027a79d3e823c1a5d62c3b9b4d1b3af993140` (main, with the WO merged). Confirm it first. Do not modify `.forge/`.\n- **Work order:** `/srv/CRM/main/work-orders/CRM-009-F.md` v1.0. It is a one-line fix plus tests, and its fact was verified live by the PL. Keep to the allowlist.\n- **Time box:** 15 minutes. Run the unit suite as a non-root user. Report `STATUS: completed`.\n\nGive exact counts and mutation evidence, and use the Engineer final message format.\n",
+  "prompt_sha256": "d578086d25b469cff936076a7e4423e38fc6b37d9f704bab1a23dc6ba5fa9145",
+  "reported": "completed",
+  "result": "```\nSTATUS: completed\nCHANGED: scripts/deploy_release.sh, tests/unit/test_beta.py, docs/BETA.md\nTESTS: (cwd /srv/CRM/worktrees/CRM-009-F, uid 1002 forgev2-pl, not root)\n  python3 -m unittest discover -s tests/unit -> Ran 556 tests, OK (the baseline before the change was 555, OK; this adds 1 new test)\n  python3 -I -B -m unittest discover -s tests/load -t . -> Ran 202 tests, OK\n  bash -n scripts/deploy_release.sh -> syntax ok\nNON-VACUITY: run with python3 -m unittest discover -s tests/unit -p test_beta.py (98 tests).\n  M1, the fix reverted (`--type=bool` removed from the phoneNumberInternational config:set) -> FAILED (failures=2):\n    test_configure_site_sets_both_values_and_accepts_only_boolean_false and\n    test_configure_site_sets_phone_as_bool_and_string_false_still_fails.\n  M2, the read-back loosened (check_phone_value also accepts \"'false'\") -> FAILED (failures=2):\n    the existing test's subTest read_back=\"'false'\" and the new test.\n  Script restored (cmp matches the backup) -> 98 tests, OK.\n  An earlier mutation attempt with `-m unittest tests.unit.test_beta` was invalid: it errored at import (the loader's _FailedTest), so it tested nothing. I then ran the mutations correctly with discover, as above.\nNOTES:\n  - The fix is in step 6 (configure_site): phoneNumberInternational now uses `config:set ... false --type=bool` and siteUrl uses an explicit `--type=string`. check_phone_value, the strict read-back, is unchanged.\n  - Tests: the existing configure_site test now asserts both flags on the config:set calls. The new test test_configure_site_sets_phone_as_bool_and_string_false_still_fails checks that phoneNumberInternational is set exactly once with `--type=bool`, and that a stub returning the string 'false' still exits 1 with \"read back as ''false'', not exactly false\" and does not continue.\n  - docs/BETA.md and the comments in deploy_release.sh (the step list in the header and the step 6 comment) now describe the type flags.\n  - No dependencies added. shellcheck isn't installed in the sandbox, so I didn't run it.\n  - I read the WO from the worktree copy (work-orders/CRM-009-F.md) and not from /srv/CRM/main.\n  - A2 (the live deploy on crm-beta) is for the operator and was not run.\n  - No processes were started, no Git writes were made, and .forge was not touched.\n```",
+  "role": "engineer",
+  "round": 1,
+  "spawn": 0,
+  "stderr_tail": ""
+}

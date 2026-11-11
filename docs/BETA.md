@@ -86,7 +86,7 @@ TLS ends at the PO's HAProxy. EspoCRM must still generate `https://` links, so `
    - creates `db`, `data`, `custom`, `client/custom` and `backups` (`0700`);
    - renders the edge config;
    - runs `up.sh beta` and `deploy_custom.sh beta`;
-   - sets `siteUrl` and `phoneNumberInternational=false`, then reads `phoneNumberInternational` back with `php -r` + `var_export`. Only the PHP boolean `false` passes; the string `'false'` fails;
+   - sets `siteUrl` (`config:set ... --type=string`) and `phoneNumberInternational=false` (`config:set ... --type=bool`; `config:set` defaults to `--type=string`, which would store the string `'false'`), then reads `phoneNumberInternational` back with `php -r` + `var_export`. Only the PHP boolean `false` passes; the string `'false'` fails;
    - provisions the CRM-003 teams, roles and `ER Import` API user;
    - runs the beta-safe acceptance suite;
    - writes the sanitised `deploy-report-<stamp>.json` (`0600`).
