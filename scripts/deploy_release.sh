@@ -19,7 +19,8 @@
 #     and any difference or extra file refuses the deploy;
 #  4. create the runtime (root 0700: db, data, custom, client/custom, backups);
 #  5. from the unpacked release: check_access.py beta --render (edge config),
-#     up.sh beta, deploy_custom.sh beta;
+#     then the validated CRM_BETA_MODE (check_access.py beta --mode, CRM-009) is
+#     printed (the mode only, never an address), up.sh beta, deploy_custom.sh beta;
 #  6. siteUrl := CRM_SITE_URL and phoneNumberInternational := false via
 #     bin/command config:set, then read phoneNumberInternational back: anything
 #     but exactly the PHP boolean false fails the deploy (the CRM-006S load
@@ -150,6 +151,14 @@ render_edge() {
         || die "refusing to deploy: the edge settings failed scripts/check_access.py beta"
 }
 
+# 5a'. deploy_mode <release dir>: prints the validated CRM_BETA_MODE (production
+# or uat), from the checked env file; fail closed.
+deploy_mode() {
+    local dest=$1
+    CRM_RUNTIME_DIR=$CRM_RUNTIME_DIR run_clean python3 -I "$dest/scripts/check_access.py" beta --mode \
+        || die "refusing to deploy: CRM_BETA_MODE failed scripts/check_access.py beta --mode"
+}
+
 # 5b. Start the stack and deploy the customisation, from the release.
 start_stack() {
     local dest=$1
@@ -237,7 +246,8 @@ provision_and_accept() {
     CRM_BETA_SAFE_KEY_FILE=${CRM_BETA_SAFE_KEY_FILE:-$CRM_PROVISION_KEY_FILE}
     [ -f "$CRM_BETA_SAFE_KEY_FILE" ] \
         || die "beta-safe acceptance needs an API key file: set CRM_BETA_SAFE_KEY_FILE (the API user already existed, so no new key was written)"
-    CRM_BETA_SAFE_KEY_FILE=$CRM_BETA_SAFE_KEY_FILE run_beta_safe "$dest" \
+    CRM_BETA_SAFE_KEY_FILE=$CRM_BETA_SAFE_KEY_FILE CRM_BETA_SAFE_MODE=${DEPLOY_MODE:-production} \
+        run_beta_safe "$dest" \
         || die "beta-safe acceptance failed"
     ACCEPTANCE=passed
 }
@@ -324,11 +334,13 @@ main() {
     [ "${#CRM_BETA_ENV_NAMES[@]}" -gt 0 ] || die "no env-file names in the release's deploy/beta/env.example"
     export CRM_RUNTIME_DIR
     render_edge "$dest"                                      # 5
+    DEPLOY_MODE=$(deploy_mode "$dest")
+    echo "crm-beta mode: $DEPLOY_MODE"
     start_stack "$dest"
     configure_site "$dest"                                   # 6
     provision_and_accept "$dest" "$upgrade"                  # 7
     report=$(write_report "$dest" "$copy" "$upgrade")        # 8
-    echo "deployed $short to crm-beta; report: $report"
+    echo "deployed $short to crm-beta ($DEPLOY_MODE mode); report: $report"
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

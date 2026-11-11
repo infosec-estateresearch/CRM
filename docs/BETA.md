@@ -65,7 +65,7 @@ TLS ends at the PO's HAProxy. EspoCRM must still generate `https://` links, so `
 
 ## Operator steps (as root)
 
-1. **Prepare a clean runtime.** "Clean" means the runtime holds only the operator's env file, owned by root with mode `0600`. `deploy_release.sh` refuses any other entry unless `--upgrade` is given.
+1. **Prepare a clean runtime.** "Clean" means the runtime holds only the operator's env file, owned by root with mode `0600`. `deploy_release.sh` refuses any other entry unless `--upgrade` is given. Files the scripts create after a deploy, such as `service_identities.json` (UAT mode, `provision_users.py --service-identity`), are such entries; they are never created before the first deploy.
    ```sh
    install -d -m 0700 -o root -g root /srv/CRM/runtime/beta
    install -m 0600 -o root -g root /dev/null /srv/CRM/runtime/beta/env
@@ -146,6 +146,7 @@ The base URL (`--base-url` or `CRM_BASE_URL`) is pinned to the target (CRM-007R)
   - **Leftovers.** If a killed run leaves the directory behind, run `docker compose -p crm-beta-restoretest -f deploy/beta/restoretest/compose.json down -v` and remove the directory, then re-run.
   - **Result.** If any table count is missing (the query failed), the run still tears down, then exits non-zero.
   - **Limit.** It restores the database and the files and counts them. It does not boot EspoCRM on the restored data.
+- **Not in backups: `service_identities.json`.** Backups do not include `/srv/CRM/runtime/beta/service_identities.json` (the sticky service identities, CRM-009; see UAT mode below). Root must keep a copy of it. After rebuilding a runtime (or restoring onto a new one), put the copy back at that path, owned by root, mode `0600`, **before any `provision_users.py` run**. Otherwise the next run treats those users as ordinary users: one marked active in the input is activated, and `--reset` is no longer refused for it.
 - **Retention.** Retention follows [MIGRATION-DATA-HANDLING.md §4](MIGRATION-DATA-HANDLING.md). Nothing prunes backups automatically; remove old `crm-beta-<stamp>/` directories by hand.
 
 ### Backup timer (operator-installed, with PO consent)
@@ -164,6 +165,34 @@ systemctl list-timers 'crm-beta-backup@*'
 # After an upgrade to <new>: disable the old instance, enable the new one.
 systemctl disable --now crm-beta-backup@<short>.timer && systemctl enable --now crm-beta-backup@<new>.timer
 ```
+
+## UAT mode (CRM-009)
+
+crm-beta is a temporary, internal, single-tester UAT environment. With `CRM_BETA_MODE=uat` in `/srv/CRM/runtime/beta/env` it is reached **directly over plain HTTP on the LAN**: no PO HAProxy, no TLS, no public hostname. Production mode (`CRM_BETA_MODE` absent, empty or `production`) stays the default and is unchanged. Any other value is refused by `scripts/check_access.py beta`.
+
+What changes in UAT mode:
+- `CRM_BETA_HOSTNAME` must be empty or absent.
+- `CRM_SITE_URL` must be exactly `http://<CRM_BETA_BIND_IP>:<CRM_BETA_PORT>` (an optional trailing `/`).
+- `CRM_BETA_UPSTREAM_SOURCES` holds 1-4 space-separated RFC 1918 **networks** `a.b.c.d/N`, N from 16 to 32, with no host bits set: the authorised LAN sources. For example `<lan-network>/<N> <second-lan-network>/<N>` (placeholders: use the LAN's real networks only in the env file, never in the repository). No entry may overlap **172.16.0.0/12** (Docker's default bridge pool, which holds the crm-beta network, whose subnet Docker assigns) or any subnet in `deploy/compose.json` (crm-dev). The edge runs on the host network, so a source overlapping a bridge would admit traffic from containers. Documentation addresses such as 192.0.2.0/24 are not RFC 1918 and are refused. Docker can also take bridge subnets from 192.168.0.0/16 once its 172 pool is exhausted; check `docker network ls` and `docker network inspect` on the host before choosing a 192.168 source.
+- crm-app's Apache does **not** set `HTTPS on`, so EspoCRM builds `http://` redirects and non-secure cookies. It still removes `X-Forwarded-Proto` before EspoCRM sees it, so no client can choose the scheme. The file is `deploy/beta/apache/crm-proxy-uat.conf`.
+- `deploy_release.sh` prints the mode (never an address), and the beta-safe suite expects an `http://<LAN address>:<port>` siteUrl instead of https.
+- The success line of `check_access.py beta` names the mode in both modes, for example `beta access settings OK (production mode): ...` or `... (uat mode): ...`. In production this is the only visible difference from before CRM-009 (accepted by the PL); the checks themselves are unchanged. The edge wildcard check is the CRM-007 one in production (any `0.0.0.0`, `::` or `*:` text on any line is refused). In UAT mode it is the same on every line except the single `acl trusted_upstream src …` line, whose networks may contain the text `0.0.0.0` (for example a 10.0.0.0/16 network); that line is checked by parsing each address instead (quotes stripped; `0.0.0.0` and `::` in any spelling, including `0`, `0x0`, with or without `/N` or any `:port`, and `*` are refused).
+
+What does not change: the bind IP rules (one RFC 1918 unicast address, never 0.0.0.0), the ports, crm-app publishing only `127.0.0.1:<CRM_BETA_APP_PORT>`, the edge template and its policy (every other source gets 403 in both modes), siteUrl set from `CRM_SITE_URL` on every deploy, the env-file name checks and every other guard.
+
+How the scheme policy file is chosen (fail closed). `deploy/beta/compose.json` mounts `./apache/crm-proxy${CRM_BETA_MODE:+-${CRM_BETA_MODE}}.conf` from the verified, read-only release directory. Compose resolves it from the env file: absent or empty gives `crm-proxy.conf` (as before), `production` gives `crm-proxy-production.conf` (which the check requires to be byte for byte `crm-proxy.conf`) and `uat` gives `crm-proxy-uat.conf`. `check_access.py beta` checks the file the mode resolves to against that mode's policy, refuses every other mode value and refuses any other Apache mount, so no mode mounts an unchecked file. A mode change changes the resolved source, so `up.sh beta` recreates crm-app. Compose warns that `CRM_BETA_MODE` is not set when the name is absent; set `CRM_BETA_MODE=` (empty) to silence it.
+
+Risks accepted by the PO for UAT:
+- **Plain HTTP on the LAN.** Logins, session cookies and record data cross the LAN unencrypted and can be read by anyone who can capture traffic on the allowed networks.
+- **A common temporary password.** `provision_users.py beta --common-password-file` gives every new active staff account the same password ([ACCESS.md](ACCESS.md)). Anyone who knows it can sign in as any of those users until they change it. It is kept apart from the admin and integration credentials, is never in argv, logs, the password CSV or reports, and service identities, legacy shared identities and inactive users never get it.
+- **Service identities are sticky.** Every `provision_users.py --service-identity <sfId>` is recorded in `/srv/CRM/runtime/beta/service_identities.json` (outside Git: sfIds are never in the repository; root, `0600`, a regular file, never followed through a symlink), and every later run keeps those users inactive with no usable password and refuses `--reset` for them, whatever the flags say ([ACCESS.md](ACCESS.md)). There is no flag to remove one: removing one is a manual edit of that file by root. The file is created only after a deploy (only in a runtime holding the `db` directory `deploy_release.sh` makes), so it never makes a fresh runtime unclean; once it exists, a later `deploy_release.sh` needs `--upgrade`, like every other runtime entry. The file is written only after a run has succeeded, so a failed `--input` or `--reset` run stores nothing. **It is not in backups:** root must keep a copy and put it back (root, `0600`) on a rebuilt runtime before any `provision_users.py` run (see Backup and restore).
+- **UAT records.** Records created during UAT have an empty `sfId`. `python3 scripts/uat_records.py beta [--list-ids NEW_FILE]` (read-only, admin credentials from the environment, pinned base URL) prints their counts per entity (Account, Contact, Opportunity, Task, Call, Meeting, Email) and optionally writes their ids to a new `0600` file. They must be removed before the production migration.
+
+### Returning to production mode
+
+1. **HTTPS.** Set `CRM_BETA_MODE=production` (or empty), set `CRM_BETA_HOSTNAME` to the TLS name the PO's HAProxy serves, `CRM_SITE_URL=https://<CRM_BETA_HOSTNAME>`, and `CRM_BETA_UPSTREAM_SOURCES` to the HAProxy /32s. Redeploy with `deploy_release.sh beta <bundle> --sha256 <hex> --upgrade` (or `scripts/up.sh beta`), which re-checks the settings, re-renders the edge and recreates crm-app with `crm-proxy.conf` (`SetEnv HTTPS on`).
+2. **Unique passwords.** Retire the common password: delete its file, and give every staff user a unique password with `provision_users.py beta --reset <sfId> --password-file <new file>`, handed over individually (ACCESS.md section 4). Check with `--report-never-logged-in`.
+3. **Activation controls.** Review which users are active and deactivate UAT-only accounts through the input file. Keep service identities and legacy shared identities inactive. Remove the UAT records `uat_records.py` reports before the production migration.
 
 ## Data handling
 

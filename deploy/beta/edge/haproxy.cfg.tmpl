@@ -2,8 +2,10 @@
 # fail-closed by `scripts/check_access.py beta --render` into
 # /srv/CRM/runtime/beta/edge/haproxy.cfg. Never edit the rendered file.
 # The edge runs on the host network, so `src` is the real peer address.
-# No X-Forwarded-Proto: crm-app's Apache discards it and sets HTTPS itself
-# (deploy/beta/apache/crm-proxy.conf).
+# No X-Forwarded-Proto: crm-app's Apache discards it and sets the scheme itself
+# (deploy/beta/apache/crm-proxy.conf; crm-proxy-uat.conf in UAT mode).
+# The trusted_upstream source list is 1-4 /32 hosts in production and 1-4 RFC 1918
+# networks in UAT mode (CRM-009); every other source gets 403 in both modes.
 global
     log stdout format raw local0 notice
     maxconn 256

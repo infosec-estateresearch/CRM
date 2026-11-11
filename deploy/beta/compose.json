@@ -69,7 +69,7 @@
         },
         {
           "type": "bind",
-          "source": "./apache/crm-proxy.conf",
+          "source": "./apache/crm-proxy${CRM_BETA_MODE:+-${CRM_BETA_MODE}}.conf",
           "target": "/etc/apache2/conf-enabled/crm-proxy.conf",
           "read_only": true
         }
