@@ -1,0 +1,7 @@
+{
+    "fields": {
+        "sfId": "Salesforce ID",
+        "sfOwnerId": "Salesforce owner ID",
+        "sfCreatedAt": "Salesforce created at"
+    }
+}

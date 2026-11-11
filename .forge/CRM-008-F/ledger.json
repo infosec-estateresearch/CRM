@@ -1,0 +1,217 @@
+{
+  "base": "forge/CRM-008",
+  "base_sha": "4bab43e7515fb171fecac453cb297ab86a3946ba",
+  "branch": "forge/CRM-008-F",
+  "candidate": "4a826e92a215cd23d8277afafaf342837dc9c2d0",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 2,
+    "tester": 1
+  },
+  "created": "2026-11-10T22:53:40Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T22:53:40Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T23:01:24Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "Items 1-5 + extended fake; A2 met (run1 0 write_rejected, run2 0 writes); load 173, unit 333 OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T23:01:53Z",
+      "type": "result"
+    },
+    {
+      "candidate": null,
+      "id": 3,
+      "n": 2,
+      "role": "engineer",
+      "round": 2,
+      "t": "2026-11-10T23:01:53Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/3-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 3,
+      "t": "2026-11-10T23:04:57Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "R2: owner fallback CreatedById (owner_from_created_by), priority_server_default; load 178, unit 333 OK; A2 run1 0 write_rejected, run2 0 writes",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 2,
+      "spawn": 3,
+      "t": "2026-11-10T23:05:23Z",
+      "type": "result"
+    },
+    {
+      "round": 2,
+      "sha": "4a826e92a215cd23d8277afafaf342837dc9c2d0",
+      "t": "2026-11-10T23:05:23Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "4a826e92a215cd23d8277afafaf342837dc9c2d0",
+      "id": 7,
+      "n": 1,
+      "role": "auditor",
+      "round": 2,
+      "t": "2026-11-10T23:05:23Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "4a826e92a215cd23d8277afafaf342837dc9c2d0",
+      "id": 8,
+      "n": 1,
+      "role": "tester",
+      "round": 2,
+      "t": "2026-11-10T23:05:23Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "4a826e92a215cd23d8277afafaf342837dc9c2d0",
+      "id": 9,
+      "n": 1,
+      "role": "devsecops",
+      "round": 2,
+      "t": "2026-11-10T23:05:23Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/7-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 7,
+      "t": "2026-11-10T23:15:11Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/8-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 8,
+      "t": "2026-11-10T23:15:11Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/9-devsecops.json",
+      "reported": "findings",
+      "role": "devsecops",
+      "spawn": 9,
+      "t": "2026-11-10T23:15:11Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "4a826e92a215cd23d8277afafaf342837dc9c2d0",
+      "findings": [
+        {
+          "key": "task-then-email-duplicate",
+          "severity": "advisory"
+        },
+        {
+          "key": "codes-on-refused-email-task",
+          "severity": "advisory"
+        },
+        {
+          "key": "html-only-untested",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 2,
+      "spawn": 7,
+      "t": "2026-11-10T23:16:00Z",
+      "type": "result"
+    },
+    {
+      "candidate": "4a826e92a215cd23d8277afafaf342837dc9c2d0",
+      "findings": [
+        {
+          "key": "html-only-description-untested",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 2,
+      "spawn": 8,
+      "t": "2026-11-10T23:16:00Z",
+      "type": "result"
+    },
+    {
+      "candidate": "4a826e92a215cd23d8277afafaf342837dc9c2d0",
+      "findings": [
+        {
+          "key": "email-task-then-email-duplicate",
+          "severity": "advisory"
+        },
+        {
+          "key": "priority-code-on-refused-record",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "devsecops",
+      "round": 2,
+      "spawn": 9,
+      "t": "2026-11-10T23:16:00Z",
+      "type": "result"
+    },
+    {
+      "note": "Candidate 4a826e9: round 1 advisory-only findings from all reviewers; carried to the next WO (task-then-email duplicate, codes on refused records, HTML-only test)",
+      "outcome": "DELIVERED",
+      "t": "2026-11-10T23:16:34Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-008-F",
+  "host": "docker1",
+  "known_commit": "4bab43e7515fb171fecac453cb297ab86a3946ba",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-008-F",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 2,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-008-F",
+  "wo": "CRM-008-F",
+  "worktree": "/srv/CRM/worktrees/CRM-008-F"
+}

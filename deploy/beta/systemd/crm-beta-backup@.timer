@@ -1,0 +1,13 @@
+# CRM-007: schedule for crm-beta-backup@<short>.service. TEMPLATE in Git;
+# installed and enabled only by the operator, with PO consent (docs/BETA.md).
+[Unit]
+Description=crm-beta nightly backup (release %i)
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=15min
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

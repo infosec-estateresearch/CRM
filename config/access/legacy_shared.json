@@ -1,0 +1,4 @@
+{
+    "_comment": "sfIds of legacy shared identities (CRM-D008). provision_users.py always keeps these users inactive, never issues them a password and refuses --reset for them. The operator fills this list.",
+    "legacyShared": []
+}

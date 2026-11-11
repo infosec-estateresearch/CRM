@@ -1,0 +1,68 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "required": true,
+            "maxLength": 150,
+            "pattern": "$noBadCharacters"
+        },
+        "isActive": {
+            "type": "bool",
+            "default": true
+        },
+        "sfValue": {
+            "type": "varchar",
+            "maxLength": 255
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true
+        },
+        "opportunities": {
+            "type": "linkMultiple",
+            "layoutDetailDisabled": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true,
+            "noLoad": true,
+            "importDisabled": true
+        }
+    },
+    "links": {
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "opportunities": {
+            "type": "hasMany",
+            "entity": "Opportunity",
+            "foreign": "serviceType"
+        }
+    },
+    "collection": {
+        "orderBy": "name",
+        "order": "asc",
+        "textFilterFields": ["name", "sfValue"]
+    },
+    "indexes": {
+        "name": {
+            "type": "unique",
+            "columns": ["name"]
+        }
+    }
+}

@@ -1,0 +1,49 @@
+{
+    "fields": {
+        "account": {
+            "audited": true
+        },
+        "emailAddress": {
+            "audited": true
+        },
+        "title": {
+            "maxLength": 255
+        },
+        "opportunityRole": {
+            "options": ["", "Business User", "Decision Maker", "Economic Buyer", "Economic Decision Maker", "Evaluator", "Executive Sponsor", "Influencer", "Technical Buyer", "Other"]
+        },
+        "sfId": {
+            "type": "varchar",
+            "maxLength": 18,
+            "readOnlyAfterCreate": true,
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        },
+        "sfOwnerId": {
+            "type": "varchar",
+            "maxLength": 18,
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        },
+        "sfCreatedAt": {
+            "type": "datetime",
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        }
+    },
+    "collection": {
+        "textFilterFields": ["name", "emailAddress", "phoneNumber"]
+    },
+    "indexes": {
+        "sfId": {
+            "type": "unique",
+            "columns": ["sfId"]
+        }
+    }
+}

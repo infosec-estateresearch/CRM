@@ -1,0 +1,14 @@
+{
+    "fields": {
+        "name": "Name",
+        "isActive": "Active",
+        "sfValue": "Salesforce value",
+        "opportunities": "Enquiries"
+    },
+    "links": {
+        "opportunities": "Enquiries"
+    },
+    "labels": {
+        "Create ServiceType": "Create Service Type"
+    }
+}

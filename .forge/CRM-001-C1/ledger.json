@@ -1,0 +1,191 @@
+{
+  "base": "forge/CRM-001",
+  "base_sha": "426bb86571dfc5ff73b67bbacd8f34d1a539d0a5",
+  "branch": "forge/CRM-001-C1",
+  "candidate": "ccde74094a776b39c006e5cd48f197e4add3687e",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-10T13:01:39Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T13:02:51Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T13:09:13Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "mount layout corrected to data/custom/client-custom, deploy_custom.sh, backup/restore 4 parts, 79 tests",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T13:09:25Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "ccde74094a776b39c006e5cd48f197e4add3687e",
+      "t": "2026-11-10T13:09:33Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "ccde74094a776b39c006e5cd48f197e4add3687e",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-10T13:09:52Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "ccde74094a776b39c006e5cd48f197e4add3687e",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-10T13:09:52Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "ccde74094a776b39c006e5cd48f197e4add3687e",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-10T13:09:52Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-10T13:12:38Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "inconclusive",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-10T13:12:38Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-10T13:12:38Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "ccde74094a776b39c006e5cd48f197e4add3687e",
+      "findings": [
+        {
+          "key": "admin-ui-writable-claim",
+          "severity": "advisory"
+        }
+      ],
+      "note": "spot-checked BUILD.md:138; deploy tree root-owned until next start",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-10T13:13:02Z",
+      "type": "result"
+    },
+    {
+      "candidate": "ccde74094a776b39c006e5cd48f197e4add3687e",
+      "findings": [
+        {
+          "key": "browser-unverified",
+          "severity": "advisory"
+        },
+        {
+          "key": "image-behaviour-unconfirmed",
+          "severity": "advisory"
+        }
+      ],
+      "note": "browser only; 79 tests OK, script round trips with stub docker",
+      "outcome": "inconclusive",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-10T13:13:02Z",
+      "type": "result"
+    },
+    {
+      "candidate": "ccde74094a776b39c006e5cd48f197e4add3687e",
+      "findings": [
+        {
+          "key": "deploy-custom-symlink",
+          "severity": "advisory"
+        },
+        {
+          "key": "env-path-divergence",
+          "severity": "advisory"
+        },
+        {
+          "key": "restore-arbitrary-source",
+          "severity": "advisory"
+        },
+        {
+          "key": "csv-formula",
+          "severity": "advisory"
+        }
+      ],
+      "note": "symlink guard absence spot-checked; fix before real data; gitleaks clean",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-10T13:13:02Z",
+      "type": "result"
+    },
+    {
+      "note": "Browser-only (CRM-D013): Tester cannot drive a browser on DOCKER1. Auditor PASS, DevSecOps PASS on ccde740; advisories only. Operator stage + AC10 pending.",
+      "outcome": "ESCALATED",
+      "t": "2026-11-10T13:13:17Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-001-C1",
+  "host": "docker1",
+  "known_commit": "426bb86571dfc5ff73b67bbacd8f34d1a539d0a5",
+  "limit": 4,
+  "outcome": "ESCALATED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-001-C1",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-001-C1",
+  "wo": "CRM-001-C1",
+  "worktree": "/srv/CRM/worktrees/CRM-001-C1"
+}

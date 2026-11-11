@@ -1,0 +1,4 @@
+{
+    "_comment": "D7: the PO-approved LeadSource lookup, value by value. Each entry: \"<raw LeadSource>\": {\"introducedBySfUserId\": \"<18-char User sfId>\" or null, \"channel\": \"<Opportunity.channel option>\" or null}. Unmapped values leave introducedBy and channel empty. Starts empty.",
+    "map": {}
+}

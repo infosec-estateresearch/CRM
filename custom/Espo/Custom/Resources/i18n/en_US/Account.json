@@ -1,0 +1,43 @@
+{
+    "fields": {
+        "type": "Tier",
+        "industry": "Industry",
+        "practiceManagementSystem": "Practice Management System",
+        "learningPlatformAccess": "Learning Platform Access",
+        "parent": "Head Office",
+        "branches": "Branches",
+        "billingAddress": "Firm Address"
+    },
+    "links": {
+        "parent": "Head Office",
+        "branches": "Branches",
+        "opportunities": "Enquiries"
+    },
+    "options": {
+        "type": {
+            "": "",
+            "Tier 1": "Tier 1",
+            "Tier 2": "Tier 2",
+            "Tier 3": "Tier 3",
+            "Tier 4": "Tier 4",
+            "Tier 5": "Tier 5",
+            "Prospect": "Prospect",
+            "Closed/Ceased Trading": "Closed/Ceased Trading"
+        },
+        "industry": {
+            "": "",
+            "Solicitor": "Solicitor",
+            "Other Legal Service": "Other Legal Service",
+            "Barrister": "Barrister",
+            "Accountant": "Accountant",
+            "Other": "Other"
+        },
+        "learningPlatformAccess": {
+            "": "",
+            "No": "No",
+            "TLP": "TLP",
+            "Full Access": "Full Access",
+            "E-Course": "E-Course"
+        }
+    }
+}

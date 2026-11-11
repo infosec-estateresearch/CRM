@@ -1,0 +1,89 @@
+{
+    "fields": {
+        "name": "Enquiry name",
+        "amount": "Quoted fee",
+        "stage": "Stage",
+        "lastStage": "Last stage",
+        "serviceType": "Service type",
+        "lossReason": "Loss reason",
+        "introducedBy": "Introduced by",
+        "channel": "Channel",
+        "clientReference": "Client reference",
+        "deceasedName": "Deceased name",
+        "caseNumber": "Case number",
+        "businessType": "Business type",
+        "enquiryCategory": "Enquiry category",
+        "postcode": "Postcode",
+        "keyInformation": "Key information",
+        "sfId": "Salesforce ID",
+        "sfStageName": "Salesforce stage",
+        "sfLeadSource": "Salesforce lead source",
+        "sfOwnerId": "Salesforce owner ID",
+        "sfCreatedAt": "Salesforce created at",
+        "legacyStale": "Legacy stale",
+        "lossReasonLegacyMissing": "Loss reason missing (legacy)"
+    },
+    "links": {
+        "serviceType": "Service type",
+        "introducedBy": "Introduced by",
+        "contacts": "Enquiry contacts"
+    },
+    "options": {
+        "stage": {
+            "Enquiry": "Enquiry",
+            "Quoted": "Quoted",
+            "Instructed": "Instructed",
+            "Lost": "Lost"
+        },
+        "lastStage": {
+            "Enquiry": "Enquiry",
+            "Quoted": "Quoted",
+            "Instructed": "Instructed"
+        },
+        "lossReason": {
+            "": "",
+            "No longer needed": "No longer needed",
+            "Unable to work in that country": "Unable to work in that country",
+            "Other": "Other",
+            "Lost to Competitor": "Lost to Competitor",
+            "Price": "Price",
+            "No Decision / Non-Responsive": "No Decision / Non-Responsive",
+            "Solicitor carried out in house": "Solicitor carried out in house",
+            "No Budget / Lost Funding": "No Budget / Lost Funding",
+            "Lost to Lay Client": "Lost to Lay Client"
+        },
+        "channel": {
+            "": "",
+            "Unmapped (legacy)": "Unmapped (legacy)"
+        },
+        "businessType": {
+            "": "",
+            "New Business": "New Business",
+            "Existing Business": "Existing Business"
+        },
+        "enquiryCategory": {
+            "": "",
+            "Yes": "Yes",
+            "No": "No",
+            "Ancillary": "Ancillary",
+            "Legal rights check": "Legal rights check",
+            "Overseas Assets": "Overseas Assets",
+            "Share Sale": "Share Sale"
+        }
+    },
+    "labels": {
+        "Create Opportunity": "Create Enquiry",
+        "Enquiry": "Enquiry",
+        "Case details": "Case details",
+        "Legacy": "Legacy"
+    },
+    "presetFilters": {
+        "openEnquiries": "Open enquiries",
+        "myOpenEnquiries": "My open enquiries",
+        "legacyStale": "Legacy stale"
+    },
+    "tooltips": {
+        "lossReasonLegacyMissing": "Set by the importer for Salesforce records closed as lost without a reason.",
+        "legacyStale": "Set by the importer for old Salesforce enquiries that were never closed (D2)."
+    }
+}

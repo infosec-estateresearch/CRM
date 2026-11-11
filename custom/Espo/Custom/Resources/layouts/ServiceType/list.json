@@ -1,0 +1,5 @@
+[
+    {"name": "name", "link": true},
+    {"name": "isActive"},
+    {"name": "sfValue"}
+]

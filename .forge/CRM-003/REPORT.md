@@ -1,0 +1,9 @@
+# CRM-003 - ESCALATED (browser and live checks only)
+Repository: infosec-estateresearch/CRM   Branch: forge/CRM-003   Candidate: 29a43eed8baa4805adbcb02f73c790378bfdd96d   Base: 39b7cb5213de31aafdaea5c22fab63d3f664a0d8 (stacked on PR #6)   WO: work-orders/CRM-003.md v1.0 (PO override, #9)
+Change: Users, teams and roles as code, explicit for all 31 ACL scopes verified in EspoCRM 10.0.12 (non-strict mode). Unused CRM scopes are off. Staff edit their own enquiries; Intake edits all; no role deletes firms; ER Import never deletes. sfId is readOnlyAfterCreate with a unique index; other legacy keys are read-only for people through role fieldData. Idempotent provision_access and provision_users: 24-character temporary passwords, a 0600 CSV that is never overwritten, never printed, no email; inactive and legacy shared identities. Firm-deletion guard hook. Audited firm and contact fields.
+Tests: python3 -m unittest discover -s tests/unit -v -> all pass (CRM-001's 176 included); broken fixtures for every rule; reviewers re-ran.
+Reviews: round 1 DevSecOps BLOCKING acl-unlisted-scopes, fixed in engineer round 4; round 2 Auditor, Tester and DevSecOps PASS.
+Advisories (follow-up): sfId not on the Contact and User detail layouts; Account edit form shows the sf fields to admins; legacy_shared.json must stay empty in Git (Salesforce ids are not public), so the operator uses --legacy-shared at run time; an empty key file is left after a failed API-user create.
+Gap: EspoCRM 10.0.12 has no forced password change (documented mitigation). Engineer round 1 timed out (void).
+Operator stage pending: AC3-AC8 on crm-dev with synthetic users.
+Note: the r3-engineer prompt's quotation of the old synthetic test sentinel was redacted, because gitleaks flagged it as a false-positive generic-api-key. It was never a credential.

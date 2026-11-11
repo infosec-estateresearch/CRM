@@ -1,0 +1,446 @@
+{
+    "mapping": "crm-load Salesforce snapshot -> EspoCRM 10.0.12 mapping",
+    "mappingVersion": 2,
+    "contractVersion": 4,
+    "notes": [
+        "Values follow docs/MIGRATION-DECISIONS.md D1-D13 (from the CRM-002 delivery) and the PL value tables of CRM-006R (counts-only L3 analysis).",
+        "copy: the Salesforce value as is; enum: copied only if it is one of the target options, else left empty with exception enum_unmapped.",
+        "Every attribute listed here must exist in the target entityDefs or the 10.0.12 core (TestStatic in tests/load/test_load.py).",
+        "Opportunity Post_code__c and Key_Information__c are not in the contract: postcode and keyInformation stay empty.",
+        "Contact Phone (Office, primary) and MobilePhone (Mobile) go to phoneNumberData.",
+        "Meeting attendees: the owner only (EventRelation is not in the contract). Meeting status: Held if EndDateTime is before the manifest t_start, else Planned.",
+        "OpportunityContactRole.Role: null -> \"\"; a value outside Contact.opportunityRole options -> \"\" with exception role_unmapped.",
+        "Blank source values are sent as explicit null on create and update (never omitted, so the server never stores an entityDefs default), except Call.direction (see below). Call.duration: a blank CallDurationInSeconds is sent as null; EspoCRM stores 0 (derived from dateEnd - dateStart), which compares equal to blank (exception call_duration_unknown).",
+        "Call.direction: CallType Inbound/Outbound map exactly; a blank or unmapped CallType sends no direction (exception call_direction_unknown, plus enum_unmapped when non-blank; EspoCRM shows its core default Outbound).",
+        "Contact.salutationName is a core enum validated by EspoCRM (options in enums, listed in coreEnums): a value outside them is sent as null with exception enum_unmapped.",
+        "syntheticEnumMap is consulted for a synthetic (selftest) snapshot only; a real snapshot never reads it.",
+        "Call.dateStart and Meeting.dateStart are required in core: CompletedDateTime (Call) or StartDateTime/ActivityDateTime (Meeting), else ActivityDate 00:00:00 (exception date_start_from_activity_date), else CreatedDate (exception date_start_from_created). Email.dateSent is never derived from CreatedDate.",
+        "Email from is the bare FromAddress; fromString is 'FromName <FromAddress>' or the address alone.",
+        "A record whose reference points at a row soft-deleted in the snapshot is not linked to it (exception parent_soft_deleted_in_sf)."
+    ],
+    "stageMap": {
+        "Qualification": "Enquiry",
+        "Needs Analysis": "Enquiry",
+        "Proposal": "Quoted",
+        "Negotiation": "Quoted",
+        "Closed Won": "Instructed",
+        "Closed Lost": "Lost"
+    },
+    "staleStages": [
+        "Enquiry",
+        "Quoted"
+    ],
+    "lostStage": "Lost",
+    "taskStatusMap": {
+        "Open": "Not Started",
+        "Completed": "Completed"
+    },
+    "taskPriorityMap": {
+        "Normal": "Normal",
+        "High": "High"
+    },
+    "callDirectionMap": {
+        "Inbound": "Inbound",
+        "Outbound": "Outbound"
+    },
+    "meetingTypeUntyped": "Unspecified (legacy)",
+    "enums": {
+        "Account.type": [
+            "",
+            "Tier 1",
+            "Tier 2",
+            "Tier 3",
+            "Tier 4",
+            "Tier 5",
+            "Prospect",
+            "Closed/Ceased Trading"
+        ],
+        "Account.industry": [
+            "",
+            "Solicitor",
+            "Other Legal Service",
+            "Barrister",
+            "Accountant",
+            "Other"
+        ],
+        "Account.learningPlatformAccess": [
+            "",
+            "No",
+            "TLP",
+            "Full Access",
+            "E-Course"
+        ],
+        "Opportunity.lossReason": [
+            "",
+            "No longer needed",
+            "Unable to work in that country",
+            "Other",
+            "Lost to Competitor",
+            "Price",
+            "No Decision / Non-Responsive",
+            "Solicitor carried out in house",
+            "No Budget / Lost Funding",
+            "Lost to Lay Client"
+        ],
+        "Opportunity.businessType": [
+            "",
+            "New Business",
+            "Existing Business"
+        ],
+        "Opportunity.enquiryCategory": [
+            "",
+            "Yes",
+            "No",
+            "Ancillary",
+            "Legal rights check",
+            "Overseas Assets",
+            "Share Sale"
+        ],
+        "Opportunity.channel": [
+            "",
+            "Unmapped (legacy)"
+        ],
+        "Meeting.meetingType": [
+            "Meeting",
+            "Presentation",
+            "Bag Drop",
+            "Call",
+            "Other",
+            "Email",
+            "Unspecified (legacy)"
+        ],
+        "Contact.opportunityRole": [
+            "",
+            "Business User",
+            "Decision Maker",
+            "Economic Buyer",
+            "Economic Decision Maker",
+            "Evaluator",
+            "Executive Sponsor",
+            "Influencer",
+            "Technical Buyer",
+            "Other"
+        ],
+        "Contact.salutationName": [
+            "",
+            "Mr.",
+            "Ms.",
+            "Mrs.",
+            "Dr."
+        ]
+    },
+    "coreEnums": {
+        "note": "Core 10.0.12 enums (not in custom entityDefs); options PL-verified on crm-dev.",
+        "attributes": [
+            "Contact.salutationName"
+        ]
+    },
+    "syntheticEnumMap": {
+        "note": "Selftest only (dev). crm-migrate selftest fills every picklist with Value A|B|C; for a synthetic snapshot these map to valid target values so dev exercises the Opportunity, Task, Call and contact-role paths end to end. Each use is recorded as synthetic_enum_mapped. A real snapshot never consults this map. Task.TaskSubtype is included so the Call and Email-from-Task paths are reached at all. Event.Type (CRM-008) maps synthetic Event Type values to valid meetingType options.",
+        "Opportunity.StageName": {
+            "Value A": "Enquiry",
+            "Value B": "Instructed",
+            "Value C": "Lost"
+        },
+        "Task.Status": {
+            "Value A": "Not Started",
+            "Value B": "Started",
+            "Value C": "Completed"
+        },
+        "Task.Priority": {
+            "Value A": "Low",
+            "Value B": "Normal",
+            "Value C": "High"
+        },
+        "Task.CallType": {
+            "Value A": "Inbound",
+            "Value B": "Outbound",
+            "Value C": "Outbound"
+        },
+        "Task.TaskSubtype": {
+            "Value A": "Task",
+            "Value B": "Call",
+            "Value C": "Email"
+        },
+        "Event.Type": {
+            "Value A": "Meeting",
+            "Value B": "Call",
+            "Value C": "Other"
+        }
+    },
+    "keyPrefixes": {
+        "001": "Account",
+        "003": "Contact",
+        "005": "User",
+        "006": "Opportunity",
+        "00G": "Group",
+        "00T": "Task",
+        "00U": "Event",
+        "02s": "EmailMessage"
+    },
+    "entities": {
+        "ServiceType": {
+            "source": "Opportunity.Opportunity_Service__c (distinct values)",
+            "key": "sfValue",
+            "attributes": [
+                "name",
+                "sfValue"
+            ]
+        },
+        "Account": {
+            "source": "Account",
+            "key": "sfId",
+            "copy": {
+                "name": "Name",
+                "phoneNumber": "Phone",
+                "website": "Website",
+                "billingAddressStreet": "ShippingStreet",
+                "billingAddressCity": "ShippingCity",
+                "billingAddressState": "ShippingState",
+                "billingAddressPostalCode": "ShippingPostalCode",
+                "billingAddressCountry": "ShippingCountry",
+                "shippingAddressStreet": "BillingStreet",
+                "shippingAddressCity": "BillingCity",
+                "shippingAddressState": "BillingState",
+                "shippingAddressPostalCode": "BillingPostalCode",
+                "shippingAddressCountry": "BillingCountry",
+                "description": "Description"
+            },
+            "enum": {
+                "type": "Type",
+                "industry": "Industry",
+                "learningPlatformAccess": "TLP__c"
+            },
+            "attributes": [
+                "sfId",
+                "sfOwnerId",
+                "sfCreatedAt",
+                "assignedUserId"
+            ],
+            "secondPass": [
+                "parentId"
+            ]
+        },
+        "Contact": {
+            "source": "Contact",
+            "key": "sfId",
+            "copy": {
+                "firstName": "FirstName",
+                "lastName": "LastName",
+                "title": "Title",
+                "emailAddress": "Email",
+                "addressStreet": "MailingStreet",
+                "addressCity": "MailingCity",
+                "addressState": "MailingState",
+                "addressPostalCode": "MailingPostalCode",
+                "addressCountry": "MailingCountry"
+            },
+            "enum": {
+                "salutationName": "Salutation"
+            },
+            "attributes": [
+                "sfId",
+                "sfOwnerId",
+                "sfCreatedAt",
+                "assignedUserId",
+                "accountId",
+                "phoneNumberData"
+            ]
+        },
+        "Opportunity": {
+            "source": "Opportunity",
+            "key": "sfId",
+            "copy": {
+                "name": "Name",
+                "amount": "Amount",
+                "closeDate": "CloseDate",
+                "sfStageName": "StageName",
+                "sfLeadSource": "LeadSource",
+                "description": "Description"
+            },
+            "enum": {
+                "enquiryCategory": "Paid_geneology_enquiry__c",
+                "businessType": "Type"
+            },
+            "attributes": [
+                "amountCurrency",
+                "sfId",
+                "sfOwnerId",
+                "sfCreatedAt",
+                "assignedUserId",
+                "accountId",
+                "stage",
+                "legacyStale",
+                "lossReason",
+                "lossReasonLegacyMissing",
+                "serviceTypeId",
+                "introducedById",
+                "channel",
+                "clientReference",
+                "deceasedName",
+                "caseNumber"
+            ],
+            "secondPass": [
+                "contactsIds",
+                "contactsColumns"
+            ]
+        },
+        "Task": {
+            "source": "Task (TaskSubtype Task or empty)",
+            "key": "sfId",
+            "attributes": [
+                "sfId",
+                "sfOwnerId",
+                "sfCreatedAt",
+                "assignedUserId",
+                "name",
+                "status",
+                "priority",
+                "dateEndDate",
+                "sfCompletedAt",
+                "description",
+                "parentType",
+                "parentId"
+            ]
+        },
+        "Call": {
+            "source": "Task (TaskSubtype Call)",
+            "key": "sfId",
+            "attributes": [
+                "sfId",
+                "sfOwnerId",
+                "sfCreatedAt",
+                "assignedUserId",
+                "name",
+                "status",
+                "direction",
+                "dateStart",
+                "duration",
+                "description",
+                "parentType",
+                "parentId",
+                "contactsIds"
+            ]
+        },
+        "Meeting": {
+            "source": "Event",
+            "key": "sfId",
+            "attributes": [
+                "sfId",
+                "sfOwnerId",
+                "sfCreatedAt",
+                "assignedUserId",
+                "name",
+                "meetingType",
+                "status",
+                "dateStart",
+                "dateEnd",
+                "isAllDay",
+                "description",
+                "parentType",
+                "parentId",
+                "usersIds"
+            ]
+        },
+        "Email": {
+            "source": "Task (TaskSubtype Email or ListEmail) and EmailMessage + EmailMessageRelation",
+            "key": "sfId",
+            "attributes": [
+                "sfId",
+                "sfOwnerId",
+                "sfCreatedAt",
+                "assignedUserId",
+                "status",
+                "name",
+                "from",
+                "fromString",
+                "to",
+                "cc",
+                "bodyPlain",
+                "body",
+                "isHtml",
+                "dateSent",
+                "parentType",
+                "parentId",
+                "usersIds",
+                "sfEmailMessageId",
+                "sfThreadIdentifier",
+                "sfActivityId"
+            ]
+        }
+    },
+    "notImported": {
+        "Note": "D6: preserved in the snapshot, counted only"
+    },
+    "currency": "GBP",
+    "taskSubtypeEntity": {
+        "Task": "Task",
+        "Call": "Call",
+        "Email": "Email",
+        "ListEmail": "Email"
+    },
+    "callStatus": "Held",
+    "enumNoBlank": {
+        "note": "Mapped enum targets whose options have no \"\" (EspoCRM refuses null and \"\" with 400 valid). A blank or unmapped source value refuses the record (exception enum_blank_unrepresentable); it is never defaulted. Call.direction stays the CRM-006R rule: a blank CallType omits direction (call_direction_unknown).",
+        "attributes": [
+            "Opportunity.stage",
+            "Task.status",
+            "Task.priority"
+        ],
+        "nullAccepted": [
+            "Meeting.meetingType"
+        ]
+    },
+    "textAttributes": {
+        "note": "Attributes of type text/wysiwyg: stored verbatim. Every other string attribute is varchar-like and trimmed on save (core StringTrim), so it is compared trimmed.",
+        "Account": ["description"],
+        "Opportunity": ["description"],
+        "Task": ["description"],
+        "Call": ["description"],
+        "Meeting": ["description"],
+        "Email": ["body", "bodyPlain"]
+    },
+    "emailMessageStatus": {
+        "note": "Every EmailMessage (Status 3 outgoing, 1 incoming) becomes Email status Archived."
+    },
+    "notMapped": {
+        "EmailMessage.MessageIdentifier": "EspoCRM 10.0.12 replaces messageId with dummy:<id> on every API write; it cannot be set, so it is neither sent nor compared. ThreadIdentifier goes to sfThreadIdentifier."
+    },
+    "requiredAttributes": {
+        "note": "CRM-008: target attributes with required: true (EspoCRM 10.0.12 core) that have a maxLength. An over-length value here refuses the record (value_too_long, counted in skipped.value_too_long) instead of being sent as null.",
+        "ServiceType": ["name"],
+        "Account": ["name"]
+    },
+    "maxLength": {
+        "note": "CRM-008: target maxLength (EspoCRM 10.0.12 core, PL-verified on crm-dev, and custom entityDefs). A trimmed value longer than this is sent as null with value_too_long (attribute name only); a longer phone number is dropped with phone_rejected. Never truncated.",
+        "ServiceType": {
+            "name": 150
+        },
+        "Account": {
+            "name": 249,
+            "phoneNumber": 36,
+            "billingAddressCity": 100,
+            "billingAddressState": 100,
+            "billingAddressCountry": 100,
+            "billingAddressPostalCode": 40,
+            "shippingAddressCity": 100,
+            "shippingAddressState": 100,
+            "shippingAddressCountry": 100,
+            "shippingAddressPostalCode": 40
+        },
+        "Contact": {
+            "title": 255,
+            "phoneNumberData": 36,
+            "addressCity": 100,
+            "addressState": 100,
+            "addressCountry": 100,
+            "addressPostalCode": 40
+        },
+        "Opportunity": {
+            "sfStageName": 100,
+            "sfLeadSource": 100,
+            "clientReference": 100,
+            "caseNumber": 100
+        }
+    }
+}

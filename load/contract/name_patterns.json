@@ -1,0 +1,4 @@
+{
+    "_comment": "D8: tested patterns for references inside the enquiry name. Each entry: {\"code\": \"<a-z0-9_ id>\", \"regex\": \"<full-match Python regex with named groups clientReference, deceasedName, caseNumber (any subset)>\"}. First full match wins. Unparsed names leave the fields empty and record exception name_unparsed. Starts empty; the PL adds patterns after L3 from counts-only analysis.",
+    "patterns": []
+}

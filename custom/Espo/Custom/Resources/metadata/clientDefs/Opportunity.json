@@ -1,0 +1,12 @@
+{
+    "filterList": [
+        {"name": "openEnquiries"},
+        {"name": "myOpenEnquiries"},
+        {"name": "legacyStale"},
+        "won",
+        "lost"
+    ],
+    "defaultFilterData": {
+        "primary": "openEnquiries"
+    }
+}

@@ -1,0 +1,160 @@
+{
+  "base": "forge/CRM-006S",
+  "base_sha": "a34a9516005e899c916675e9aa15b4933150370b",
+  "branch": "forge/CRM-003-F",
+  "candidate": "769d6cbf11abef42834e1b045c96b4cd7441f474",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-10T21:42:47Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T21:42:47Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T21:46:17Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "Currency read yes/edit no in 4 roles; level_scopes rule + fixture; 29 fixtures' Currency block updated (PL accepted); unit 319 OK, load 131 OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T21:46:30Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "769d6cbf11abef42834e1b045c96b4cd7441f474",
+      "t": "2026-11-10T21:46:30Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "769d6cbf11abef42834e1b045c96b4cd7441f474",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-10T21:46:31Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "769d6cbf11abef42834e1b045c96b4cd7441f474",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-10T21:46:31Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "769d6cbf11abef42834e1b045c96b4cd7441f474",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-10T21:46:31Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-10T21:54:05Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-10T21:54:05Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-10T21:54:05Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "769d6cbf11abef42834e1b045c96b4cd7441f474",
+      "findings": [],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-10T21:54:19Z",
+      "type": "result"
+    },
+    {
+      "candidate": "769d6cbf11abef42834e1b045c96b4cd7441f474",
+      "findings": [],
+      "note": "",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-10T21:54:19Z",
+      "type": "result"
+    },
+    {
+      "candidate": "769d6cbf11abef42834e1b045c96b4cd7441f474",
+      "findings": [],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-10T21:54:19Z",
+      "type": "result"
+    },
+    {
+      "note": "Candidate 769d6cb: all reviewers PASS round 1",
+      "outcome": "DELIVERED",
+      "t": "2026-11-10T21:54:19Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-003-F",
+  "host": "docker1",
+  "known_commit": "a34a9516005e899c916675e9aa15b4933150370b",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-003-F",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-003-F",
+  "wo": "CRM-003-F",
+  "worktree": "/srv/CRM/worktrees/CRM-003-F"
+}

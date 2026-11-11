@@ -1,0 +1,399 @@
+{
+  "base": "forge/CRM-001-LAN",
+  "base_sha": "39b7cb5213de31aafdaea5c22fab63d3f664a0d8",
+  "branch": "forge/CRM-003",
+  "candidate": "29a43eed8baa4805adbcb02f73c790378bfdd96d",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 2,
+    "devsecops": 2,
+    "engineer": 4,
+    "tester": 2
+  },
+  "created": "2026-11-10T17:24:17Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T17:25:49Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 124,
+      "output": "dispatch/0-engineer.json",
+      "reported": null,
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T17:55:50Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "specialist exit 124, no usable result: forge-dispatch: no result within 1800s; stopped",
+      "outcome": "void",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T17:55:50Z",
+      "type": "result"
+    },
+    {
+      "candidate": null,
+      "id": 3,
+      "n": 2,
+      "role": "engineer",
+      "round": 2,
+      "t": "2026-11-10T17:56:13Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/3-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 3,
+      "t": "2026-11-10T17:58:03Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "round-1 work completed in round 2; 252 unit tests OK; 26 broken fixtures fail",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 2,
+      "spawn": 3,
+      "t": "2026-11-10T18:00:18Z",
+      "type": "result"
+    },
+    {
+      "candidate": null,
+      "id": 6,
+      "n": 3,
+      "role": "engineer",
+      "round": 3,
+      "t": "2026-11-10T18:00:46Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 6,
+      "t": "2026-11-10T18:05:52Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r3: sfId readOnlyAfterCreate, legacy via role fieldData, gitleaks FP fixed; 255 tests OK; sfId admin-only read (WO Change 1) accepted by PL",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 3,
+      "spawn": 6,
+      "t": "2026-11-10T18:06:11Z",
+      "type": "result"
+    },
+    {
+      "round": 3,
+      "sha": "e0795bf44d481ae58df759c811843792a7a43004",
+      "t": "2026-11-10T18:06:12Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "e0795bf44d481ae58df759c811843792a7a43004",
+      "id": 10,
+      "n": 1,
+      "role": "auditor",
+      "round": 3,
+      "t": "2026-11-10T18:06:12Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "e0795bf44d481ae58df759c811843792a7a43004",
+      "id": 11,
+      "n": 1,
+      "role": "tester",
+      "round": 3,
+      "t": "2026-11-10T18:06:12Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "e0795bf44d481ae58df759c811843792a7a43004",
+      "id": 12,
+      "n": 1,
+      "role": "devsecops",
+      "round": 3,
+      "t": "2026-11-10T18:06:12Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/10-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 10,
+      "t": "2026-11-10T18:12:02Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/11-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 11,
+      "t": "2026-11-10T18:12:02Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/12-devsecops.json",
+      "reported": "findings",
+      "role": "devsecops",
+      "spawn": 12,
+      "t": "2026-11-10T18:12:02Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "e0795bf44d481ae58df759c811843792a7a43004",
+      "findings": [
+        {
+          "key": "sfid-layouts",
+          "severity": "advisory"
+        },
+        {
+          "key": "empty-name-idempotency",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 3,
+      "spawn": 10,
+      "t": "2026-11-10T18:12:51Z",
+      "type": "result"
+    },
+    {
+      "candidate": "e0795bf44d481ae58df759c811843792a7a43004",
+      "findings": [
+        {
+          "key": "browser-unverified",
+          "severity": "advisory"
+        },
+        {
+          "key": "unset-scopes-default",
+          "severity": "advisory"
+        },
+        {
+          "key": "legacy-shared-not-sticky",
+          "severity": "advisory"
+        },
+        {
+          "key": "hook-static-check-weak",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 3,
+      "spawn": 11,
+      "t": "2026-11-10T18:12:51Z",
+      "type": "result"
+    },
+    {
+      "candidate": "e0795bf44d481ae58df759c811843792a7a43004",
+      "findings": [
+        {
+          "key": "acl-unlisted-scopes",
+          "severity": "blocking"
+        },
+        {
+          "key": "apikey-loss-window",
+          "severity": "advisory"
+        }
+      ],
+      "note": "PL confirmed in image: aclStrictMode absent (non-strict)",
+      "outcome": "findings",
+      "role": "devsecops",
+      "round": 3,
+      "spawn": 12,
+      "t": "2026-11-10T18:12:51Z",
+      "type": "result"
+    },
+    {
+      "candidate": "e0795bf44d481ae58df759c811843792a7a43004",
+      "id": 19,
+      "n": 4,
+      "role": "engineer",
+      "round": 4,
+      "t": "2026-11-10T18:12:51Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/19-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 19,
+      "t": "2026-11-10T18:18:50Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "e0795bf44d481ae58df759c811843792a7a43004",
+      "findings": [],
+      "note": "r4: all 31 verified ACL scopes explicit per role; advisories 1-4 fixed",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 4,
+      "spawn": 19,
+      "t": "2026-11-10T18:19:06Z",
+      "type": "result"
+    },
+    {
+      "round": 4,
+      "sha": "29a43eed8baa4805adbcb02f73c790378bfdd96d",
+      "t": "2026-11-10T18:19:07Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "29a43eed8baa4805adbcb02f73c790378bfdd96d",
+      "id": 23,
+      "n": 2,
+      "role": "auditor",
+      "round": 4,
+      "t": "2026-11-10T18:19:23Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "29a43eed8baa4805adbcb02f73c790378bfdd96d",
+      "id": 24,
+      "n": 2,
+      "role": "tester",
+      "round": 4,
+      "t": "2026-11-10T18:19:23Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "29a43eed8baa4805adbcb02f73c790378bfdd96d",
+      "id": 25,
+      "n": 2,
+      "role": "devsecops",
+      "round": 4,
+      "t": "2026-11-10T18:19:23Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/23-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 23,
+      "t": "2026-11-10T18:24:41Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/24-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 24,
+      "t": "2026-11-10T18:24:41Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/25-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 25,
+      "t": "2026-11-10T18:24:41Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "29a43eed8baa4805adbcb02f73c790378bfdd96d",
+      "findings": [
+        {
+          "key": "contact-user-sfid-detail",
+          "severity": "advisory"
+        },
+        {
+          "key": "account-edit-shows-sf-fields",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 4,
+      "spawn": 23,
+      "t": "2026-11-10T18:25:05Z",
+      "type": "result"
+    },
+    {
+      "candidate": "29a43eed8baa4805adbcb02f73c790378bfdd96d",
+      "findings": [
+        {
+          "key": "legacy-sticky-undocumented",
+          "severity": "advisory"
+        },
+        {
+          "key": "keyfile-empty-on-failure",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 4,
+      "spawn": 24,
+      "t": "2026-11-10T18:25:05Z",
+      "type": "result"
+    },
+    {
+      "candidate": "29a43eed8baa4805adbcb02f73c790378bfdd96d",
+      "findings": [],
+      "note": "acl-unlisted-scopes verified fixed",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 4,
+      "spawn": 25,
+      "t": "2026-11-10T18:25:05Z",
+      "type": "result"
+    },
+    {
+      "note": "Candidate 29a43eed8baa4805adbcb02f73c790378bfdd96d: Auditor/Tester/DevSecOps PASS (round 2). Browser and live AC3-AC8 only (operator stage on crm-dev); BROWSER: yes per CRM-D013.",
+      "outcome": "ESCALATED",
+      "t": "2026-11-10T18:25:05Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-003",
+  "host": "docker1",
+  "known_commit": "39b7cb5213de31aafdaea5c22fab63d3f664a0d8",
+  "limit": 4,
+  "outcome": "ESCALATED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-003",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 4,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-003",
+  "wo": "CRM-003",
+  "worktree": "/srv/CRM/worktrees/CRM-003"
+}

@@ -1,0 +1,8 @@
+[
+    {"name": "name", "link": true, "width": 22},
+    {"name": "billingAddress", "notSortable": true, "width": 26},
+    {"name": "parent", "width": 18},
+    {"name": "type", "width": 10},
+    {"name": "industry", "width": 12},
+    {"name": "learningPlatformAccess", "width": 12}
+]

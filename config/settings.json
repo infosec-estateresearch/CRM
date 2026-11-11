@@ -1,0 +1,8 @@
+{
+    "settings": {
+        "currencyList": ["GBP"],
+        "defaultCurrency": "GBP",
+        "baseCurrency": "GBP",
+        "phoneNumberInternational": false
+    }
+}

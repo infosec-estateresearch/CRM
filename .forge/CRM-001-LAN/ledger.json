@@ -1,0 +1,360 @@
+{
+  "base": "forge/CRM-001-C2",
+  "base_sha": "b60eb1513dfc034a14abbdc2fc894e5bd7faa38a",
+  "branch": "forge/CRM-001-LAN",
+  "candidate": "91e11c8bd67076e8eb35303f1b77d0679c75f6c3",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 2,
+    "devsecops": 2,
+    "engineer": 2,
+    "tester": 2
+  },
+  "created": "2026-11-10T15:01:43Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T15:02:18Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T15:19:12Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "env bind, Apache Require ip allowlist (ro conf), check_access.py, 154 tests",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T15:19:29Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "49bbbe03c8f38adb717cef58c014f8ae5023288b",
+      "t": "2026-11-10T15:19:29Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "49bbbe03c8f38adb717cef58c014f8ae5023288b",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-10T15:19:29Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "49bbbe03c8f38adb717cef58c014f8ae5023288b",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-10T15:19:29Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "49bbbe03c8f38adb717cef58c014f8ae5023288b",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-10T15:19:29Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-10T15:22:50Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "inconclusive",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-10T15:22:50Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-10T15:22:50Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "49bbbe03c8f38adb717cef58c014f8ae5023288b",
+      "findings": [
+        {
+          "key": "script-env-override",
+          "severity": "blocking"
+        },
+        {
+          "key": "https-investigation",
+          "severity": "advisory"
+        },
+        {
+          "key": "decisions-outside-allowlist",
+          "severity": "advisory"
+        },
+        {
+          "key": "check-env-file-path",
+          "severity": "advisory"
+        }
+      ],
+      "note": "blocking spot-checked: compose() env -u omits CRM_BIND_IP/CRM_ALLOWED_SOURCES/CRM_SITE_URL",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-10T15:23:30Z",
+      "type": "result"
+    },
+    {
+      "candidate": "49bbbe03c8f38adb717cef58c014f8ae5023288b",
+      "findings": [
+        {
+          "key": "conf-policy-define-include",
+          "severity": "advisory"
+        },
+        {
+          "key": "bind-ip-not-private",
+          "severity": "advisory"
+        },
+        {
+          "key": "validator-not-enforced",
+          "severity": "advisory"
+        },
+        {
+          "key": "live-and-browser-unverified",
+          "severity": "advisory"
+        }
+      ],
+      "note": "no Docker/LAN/browser for specialists",
+      "outcome": "inconclusive",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-10T15:23:30Z",
+      "type": "result"
+    },
+    {
+      "candidate": "49bbbe03c8f38adb717cef58c014f8ae5023288b",
+      "findings": [
+        {
+          "key": "authz-merge-replaces-denies",
+          "severity": "advisory"
+        },
+        {
+          "key": "sources-vs-other-docker-nets",
+          "severity": "advisory"
+        }
+      ],
+      "note": "PL spot-check: image denies via mod_rewrite [F], not Require; unaffected",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-10T15:23:30Z",
+      "type": "result"
+    },
+    {
+      "candidate": "49bbbe03c8f38adb717cef58c014f8ae5023288b",
+      "id": 13,
+      "n": 2,
+      "role": "engineer",
+      "round": 2,
+      "t": "2026-11-10T15:23:55Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/13-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 13,
+      "t": "2026-11-10T15:34:41Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "49bbbe03c8f38adb717cef58c014f8ae5023288b",
+      "findings": [],
+      "note": "full env-name strip/refusal, require_access in deploy/restore/up.sh, private bind in sources, conf indirection rules, AuthMerging And; 176 tests",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 2,
+      "spawn": 13,
+      "t": "2026-11-10T15:34:56Z",
+      "type": "result"
+    },
+    {
+      "round": 2,
+      "sha": "91e11c8bd67076e8eb35303f1b77d0679c75f6c3",
+      "t": "2026-11-10T15:34:57Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "91e11c8bd67076e8eb35303f1b77d0679c75f6c3",
+      "id": 17,
+      "n": 2,
+      "role": "auditor",
+      "round": 2,
+      "t": "2026-11-10T15:34:57Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "91e11c8bd67076e8eb35303f1b77d0679c75f6c3",
+      "id": 18,
+      "n": 2,
+      "role": "tester",
+      "round": 2,
+      "t": "2026-11-10T15:34:57Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "91e11c8bd67076e8eb35303f1b77d0679c75f6c3",
+      "id": 19,
+      "n": 2,
+      "role": "devsecops",
+      "round": 2,
+      "t": "2026-11-10T15:34:57Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/17-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 17,
+      "t": "2026-11-10T15:40:11Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/18-tester.json",
+      "reported": "inconclusive",
+      "role": "tester",
+      "spawn": 18,
+      "t": "2026-11-10T15:40:11Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/19-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 19,
+      "t": "2026-11-10T15:40:11Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "91e11c8bd67076e8eb35303f1b77d0679c75f6c3",
+      "findings": [
+        {
+          "key": "stale-export-default",
+          "severity": "advisory"
+        },
+        {
+          "key": "broadcast-claim",
+          "severity": "advisory"
+        }
+      ],
+      "note": "advisory only; export default stale (operator always passes CRM_BASE_URL)",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 2,
+      "spawn": 17,
+      "t": "2026-11-10T15:40:30Z",
+      "type": "result"
+    },
+    {
+      "candidate": "91e11c8bd67076e8eb35303f1b77d0679c75f6c3",
+      "findings": [
+        {
+          "key": "browser-and-live-lan",
+          "severity": "advisory"
+        },
+        {
+          "key": "checker-broadcast-claim",
+          "severity": "advisory"
+        }
+      ],
+      "note": "no browser/LAN/Docker for specialists",
+      "outcome": "inconclusive",
+      "role": "tester",
+      "round": 2,
+      "spawn": 18,
+      "t": "2026-11-10T15:40:30Z",
+      "type": "result"
+    },
+    {
+      "candidate": "91e11c8bd67076e8eb35303f1b77d0679c75f6c3",
+      "findings": [
+        {
+          "key": "access-conf-unpinned-at-runtime",
+          "severity": "advisory"
+        },
+        {
+          "key": "sources-prefix-wider-than-authorised",
+          "severity": "advisory"
+        },
+        {
+          "key": "plain-http-admin-on-lan",
+          "severity": "advisory"
+        }
+      ],
+      "note": "conf mitigated: operator runs from root-owned git-archive tree; HTTPS via PO's HAProxy later",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 2,
+      "spawn": 19,
+      "t": "2026-11-10T15:40:30Z",
+      "type": "result"
+    },
+    {
+      "note": "Browser/live-LAN only (CRM-D013). Round 2 on 91e11c8bd67076e8eb35303f1b77d0679c75f6c3: Auditor FINDINGS advisory-only, DevSecOps PASS, Tester INCONCLUSIVE. Live LAN verification at operator stage.",
+      "outcome": "ESCALATED",
+      "t": "2026-11-10T15:40:48Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-001-LAN",
+  "host": "docker1",
+  "known_commit": "b60eb1513dfc034a14abbdc2fc894e5bd7faa38a",
+  "limit": 4,
+  "outcome": "ESCALATED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-001-LAN",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 2,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-001-LAN",
+  "wo": "CRM-001-LAN",
+  "worktree": "/srv/CRM/worktrees/CRM-001-LAN"
+}

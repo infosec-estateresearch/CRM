@@ -1,0 +1,187 @@
+{
+    "fields": {
+        "stage": {
+            "type": "enum",
+            "options": ["Enquiry", "Quoted", "Instructed", "Lost"],
+            "default": "Enquiry",
+            "probabilityMap": {
+                "Enquiry": 10,
+                "Quoted": 50,
+                "Instructed": 100,
+                "Lost": 0
+            },
+            "style": {
+                "Enquiry": null,
+                "Quoted": "primary",
+                "Instructed": "success",
+                "Lost": "info"
+            },
+            "isSorted": false,
+            "audited": true
+        },
+        "lastStage": {
+            "type": "enum",
+            "options": ["Enquiry", "Quoted", "Instructed"],
+            "isSorted": false
+        },
+        "amount": {
+            "required": false,
+            "audited": true
+        },
+        "assignedUser": {
+            "audited": true
+        },
+        "closeDate": {
+            "required": false,
+            "audited": true
+        },
+        "serviceType": {
+            "type": "link",
+            "audited": true,
+            "isCustom": true
+        },
+        "lossReason": {
+            "type": "enum",
+            "options": [
+                "",
+                "No longer needed",
+                "Unable to work in that country",
+                "Other",
+                "Lost to Competitor",
+                "Price",
+                "No Decision / Non-Responsive",
+                "Solicitor carried out in house",
+                "No Budget / Lost Funding",
+                "Lost to Lay Client"
+            ],
+            "default": "",
+            "isSorted": false,
+            "audited": true,
+            "isCustom": true
+        },
+        "introducedBy": {
+            "type": "link",
+            "isCustom": true
+        },
+        "channel": {
+            "type": "enum",
+            "options": ["", "Unmapped (legacy)"],
+            "default": "",
+            "isSorted": false,
+            "isCustom": true
+        },
+        "clientReference": {
+            "type": "varchar",
+            "maxLength": 100,
+            "isCustom": true
+        },
+        "deceasedName": {
+            "type": "varchar",
+            "maxLength": 255,
+            "isCustom": true
+        },
+        "caseNumber": {
+            "type": "varchar",
+            "maxLength": 100,
+            "isCustom": true
+        },
+        "businessType": {
+            "type": "enum",
+            "options": ["", "New Business", "Existing Business"],
+            "default": "",
+            "isSorted": false,
+            "isCustom": true
+        },
+        "enquiryCategory": {
+            "type": "enum",
+            "options": ["", "Yes", "No", "Ancillary", "Legal rights check", "Overseas Assets",
+                        "Share Sale"],
+            "default": "",
+            "isSorted": false,
+            "isCustom": true
+        },
+        "postcode": {
+            "type": "varchar",
+            "maxLength": 20,
+            "isCustom": true
+        },
+        "keyInformation": {
+            "type": "text",
+            "isCustom": true
+        },
+        "sfId": {
+            "type": "varchar",
+            "maxLength": 18,
+            "readOnlyAfterCreate": true,
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        },
+        "sfStageName": {
+            "type": "varchar",
+            "maxLength": 100,
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        },
+        "sfLeadSource": {
+            "type": "varchar",
+            "maxLength": 100,
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        },
+        "sfOwnerId": {
+            "type": "varchar",
+            "maxLength": 18,
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        },
+        "sfCreatedAt": {
+            "type": "datetime",
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        },
+        "legacyStale": {
+            "type": "bool",
+            "default": false,
+            "audited": false,
+            "isCustom": true,
+            "layoutMassUpdateDisabled": true
+        },
+        "lossReasonLegacyMissing": {
+            "type": "bool",
+            "default": false,
+            "audited": false,
+            "isCustom": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true
+        }
+    },
+    "links": {
+        "serviceType": {
+            "type": "belongsTo",
+            "entity": "ServiceType",
+            "foreign": "opportunities",
+            "isCustom": true
+        },
+        "introducedBy": {
+            "type": "belongsTo",
+            "entity": "User",
+            "isCustom": true
+        }
+    },
+    "indexes": {
+        "sfId": {
+            "type": "unique",
+            "columns": ["sfId"]
+        }
+    }
+}
