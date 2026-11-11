@@ -5,6 +5,7 @@ import time
 from .errors import TransportError
 
 PAGE = 200  # recordListMaxSizeLimit of 10.0.12
+MAX_PAGES = 10000  # CRM-009-H: backstop on one paged read (2M rows); beyond it, list_stalled
 SKIP_DUPLICATE_CHECK = {"X-Skip-Duplicate-Check": "true"}
 
 
@@ -22,8 +23,10 @@ def _field(status, doc):
 
 
 class EspoClient:
-    def __init__(self, transport, retries=5, backoff=1.0, sleep=time.sleep, unknown=None):
+    def __init__(self, transport, retries=5, backoff=1.0, sleep=time.sleep, unknown=None,
+                 max_pages=MAX_PAGES):
         self.unknown = unknown
+        self.max_pages = max_pages
         self.t = transport
         self.retries = retries
         self.backoff = backoff
@@ -48,18 +51,35 @@ class EspoClient:
 
         CRM-009-H: 10.0.12 does not count Email lists (``total: -1``). A missing, non-integer
         or negative total is unknown: paging continues until a page has fewer than PAGE rows.
-        A known total must equal the records read, else ``list_incomplete``."""
-        out, offset = [], 0
+        Every page is ordered by ``id`` ascending and rows are de-duplicated by ``id``. A full
+        page that adds no new id (a server ignoring ``offset``), or reaching ``max_pages``,
+        fails with ``list_stalled``. A known total must equal the distinct records read,
+        else ``list_incomplete``."""
+        out, seen, offset, pages = [], set(), 0, 0
         select = ",".join(["id"] + [a for a in attributes if a != "id"])
         while True:
+            if pages >= self.max_pages:
+                raise TransportError("list_stalled", None)
             query = [("select", select), ("maxSize", str(PAGE)), ("offset", str(offset)),
+                     ("orderBy", "id"), ("order", "asc"),
                      ("where[0][type]", "isNotNull"), ("where[0][attribute]", key)]
             self.reads += 1
+            pages += 1
             status, doc = self._send("GET", entity, query)
             if status != 200 or not isinstance(doc, dict) or not isinstance(doc.get("list"), list):
                 raise TransportError("list_failed", status)
             rows = doc["list"]
-            out.extend(rows)
+            added = 0
+            for row in rows:
+                rid = row.get("id") if isinstance(row, dict) else None
+                if not isinstance(rid, str) or not rid:
+                    raise TransportError("list_failed", status)
+                if rid not in seen:
+                    seen.add(rid)
+                    out.append(row)
+                    added += 1
+            if len(rows) >= PAGE and not added:
+                raise TransportError("list_stalled", status)
             offset += len(rows)
             total = doc.get("total")
             if not isinstance(total, int) or isinstance(total, bool) or total < 0:

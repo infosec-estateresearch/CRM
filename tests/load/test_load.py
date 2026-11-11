@@ -2173,7 +2173,8 @@ class TestCrm008F(Base):
                 {"phoneNumber": "07700 900000", "type": "Mobile", "primary": False}]
         _st, doc = f.send("POST", "Contact", body={"sfId": "x", "phoneNumberData": data})
         _st, page = f.send("GET", "Contact", [("select", "id,sfId,phoneNumberData,phoneNumber"), ("maxSize", "200"),
-                                              ("offset", "0"), ("where[0][type]", "isNotNull"),
+                                              ("offset", "0"), ("orderBy", "id"), ("order", "asc"),
+                                              ("where[0][type]", "isNotNull"),
                                               ("where[0][attribute]", "sfId")])
         self.assertNotIn("phoneNumberData", page["list"][0])
         self.assertEqual(page["list"][0]["phoneNumber"], "01632 960000")          # the primary, trimmed
@@ -2758,7 +2759,8 @@ class TestCrm008G(Base):
 
 
 class _Pages:
-    """A scripted list endpoint: returns the given (total, rows) pages in order; records offsets."""
+    """A scripted list endpoint: returns the given (total, rows) pages in order; records offsets.
+    ``rows`` is a row count (fresh ids) or an explicit list of ids."""
 
     def __init__(self, pages):
         self.pages = list(pages)
@@ -2766,9 +2768,12 @@ class _Pages:
 
     def send(self, method, path, query=None, body=None, headers=None):
         assert method == "GET"
-        self.offsets.append(int(dict(query)["offset"]))
+        q = dict(query)
+        assert q["orderBy"] == "id" and q["order"] == "asc", q    # CRM-009-H: on every page
+        self.offsets.append(int(q["offset"]))
         total, n = self.pages.pop(0)
-        doc = {"list": [{"id": f"r{len(self.offsets)}-{i}", "sfId": f"s{len(self.offsets)}-{i}"} for i in range(n)]}
+        ids = n if isinstance(n, list) else [f"r{len(self.offsets)}-{i}" for i in range(n)]
+        doc = {"list": [{"id": rid, "sfId": f"s-{rid}"} for rid in ids]}
         if total is not _Pages.MISSING:
             doc["total"] = total
         return 200, doc
@@ -2791,8 +2796,8 @@ class TestUnknownListTotal(Base):
     def test_fake_reports_unknown_total_only_for_chosen_entities(self):
         espo = FakeEspo(uncounted={"Email"})
         espo._insert("Email", {"sfId": "e"})
-        q = [("select", "id,sfId"), ("maxSize", "200"), ("offset", "0"),
-             ("where[0][type]", "isNotNull"), ("where[0][attribute]", "sfId")]
+        q = [("select", "id,sfId"), ("maxSize", "200"), ("offset", "0"), ("orderBy", "id"),
+             ("order", "asc"), ("where[0][type]", "isNotNull"), ("where[0][attribute]", "sfId")]
         self.assertEqual(espo.send("GET", "Email", q)[1]["total"], -1)
         self.assertEqual(espo.send("GET", "User", q)[1]["total"], 4)
         counted = FakeEspo()                                                     # default unchanged
@@ -2867,6 +2872,122 @@ class TestUnknownListTotal(Base):
         self.assertIn("list_incomplete", self.last_err)
         self.assertEqual(espo.writes, [])
         self.assertFalse([r for r in espo.requests if r[0] != "GET"])
+
+
+class TestListPagingSafety(Base):
+    """CRM-009-H round 2: ordered paging, de-duplication by id, and no unbounded read."""
+
+    @staticmethod
+    def ids(prefix, n):
+        return [f"{prefix}{i:05d}" for i in range(n)]
+
+    def client(self, t, **kw):
+        return EspoClient(t, sleep=lambda s: None, **kw)
+
+    def test_every_page_orders_by_id_ascending(self):
+        class Recording(_Pages):
+            def __init__(self, pages):
+                super().__init__(pages)
+                self.queries = []
+
+            def send(self, method, path, query=None, body=None, headers=None):
+                self.queries.append(dict(query))
+                return super().send(method, path, query, body, headers)
+        for total in (-1, 450):
+            with self.subTest(total=total):
+                t = Recording([(total, 200), (total, 200), (total, 50)])
+                self.assertEqual(len(self.client(t).list_all("Email", ["sfId"])), 450)
+                self.assertEqual(len(t.queries), 3)
+                for q in t.queries:
+                    self.assertEqual((q["orderBy"], q["order"]), ("id", "asc"))
+
+    def test_server_ignoring_offset_unknown_total_is_list_stalled(self):
+        page = self.ids("a", 200)
+        t = _Pages([(-1, list(page))] * 5)
+        client = self.client(t)
+        with self.assertRaises(TransportError) as cm:
+            client.list_all("Email", ["sfId"])
+        self.assertEqual(cm.exception.code, "list_stalled")
+        self.assertEqual(cm.exception.exit_code, 4)
+        self.assertEqual(t.offsets, [0, 200])                    # stops on the first page adding nothing
+        self.assertEqual((client.reads, client.writes), (2, 0))
+
+    def test_server_ignoring_offset_known_total_is_list_stalled(self):
+        page = self.ids("a", 200)
+        t = _Pages([(1000, list(page))] * 5)
+        with self.assertRaises(TransportError) as cm:
+            self.client(t).list_all("Account", ["sfId"])
+        self.assertEqual(cm.exception.code, "list_stalled")
+        self.assertEqual(t.offsets, [0, 200])
+
+    def test_load_against_offset_ignoring_server_fails_with_no_writes(self):
+        class IgnoresOffset(FakeEspo):
+            ignore = False
+
+            def send(self, method, path, query=None, body=None, headers=None):
+                if self.ignore and method == "GET" and query and path == "Email":
+                    query = [(k, "0" if k == "offset" else v) for k, v in query]
+                return super().send(method, path, query, body, headers)
+        data = fx.org()
+        base = dict(data["EmailMessage"][1], ActivityId=None, RelatedToId=fx.O[0])
+        for i in range(250):
+            data["EmailMessage"].append(dict(base, Id=fx.sid("02s", 100 + i)))
+        snap = write_snapshot(os.path.join(self.tmp, "many-emails"), data=data)
+        espo = IgnoresOffset(uncounted={"Email"})
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 0, self.last_err)   # populate
+        first = len(espo.writes)
+        self.assertGreater(len(espo.by_sf("Email")), 200)
+        espo.ignore = True
+        espo.requests.clear()
+        self.assertEqual(self.run_load(snap=snap, espo=espo), 4)
+        self.assertIn("list_stalled", self.last_err)
+        self.assertEqual(len(espo.writes), first)                # the failing run wrote nothing
+        gets = sum(1 for m, p in espo.requests if m == "GET" and p == "Email")
+        self.assertLess(gets, 10)
+
+    def test_duplicate_rows_across_pages_are_dropped(self):
+        a, b = self.ids("a", 200), self.ids("b", 200)
+        # page 2 repeats the last 3 rows of page 1 (a record shifted between reads)
+        t = _Pages([(-1, a), (-1, a[-3:] + b[:197]), (-1, b[197:] + ["c00000"])])
+        rows = self.client(t).list_all("Email", ["sfId"])
+        got = [r["id"] for r in rows]
+        self.assertEqual(got, a + b + ["c00000"])
+        self.assertEqual(len(got), len(set(got)))
+        self.assertEqual(t.offsets, [0, 200, 400])
+
+    def test_duplicates_count_once_against_a_known_total(self):
+        a, b = self.ids("a", 200), self.ids("b", 50)
+        t = _Pages([(250, a), (250, a[-1:] + b)])                # 251 rows, 250 distinct
+        self.assertEqual(len(self.client(t).list_all("Account", ["sfId"])), 250)
+        t = _Pages([(251, a), (251, a[-1:] + b)])                # 250 distinct, total says 251
+        with self.assertRaises(TransportError) as cm:
+            self.client(t).list_all("Account", ["sfId"])
+        self.assertEqual(cm.exception.code, "list_incomplete")
+
+    def test_page_ceiling_is_list_stalled(self):
+        t = _Pages([(-1, 200)] * 4)                              # fresh ids on every page, never short
+        client = self.client(t, max_pages=3)
+        with self.assertRaises(TransportError) as cm:
+            client.list_all("Email", ["sfId"])
+        self.assertEqual(cm.exception.code, "list_stalled")
+        self.assertEqual(client.reads, 3)
+        t = _Pages([(-1, 200), (-1, 200), (-1, 5)])              # exactly at the ceiling: fine
+        self.assertEqual(len(self.client(t, max_pages=3).list_all("Email", ["sfId"])), 405)
+
+    def test_default_page_ceiling(self):
+        from crm_load import api
+        self.assertEqual(api.MAX_PAGES, 10000)
+        self.assertEqual(self.client(_Pages([])).max_pages, 10000)
+
+    def test_row_without_id_is_list_failed(self):
+        class NoId(_Pages):
+            def send(self, *a, **kw):
+                st, doc = super().send(*a, **kw)
+                doc["list"][0].pop("id")
+                return st, doc
+        with self.assertRaises(TransportError) as cm:
+            self.client(NoId([(-1, 3)])).list_all("Email", ["sfId"])
+        self.assertEqual(cm.exception.code, "list_failed")
 
 
 if __name__ == "__main__":

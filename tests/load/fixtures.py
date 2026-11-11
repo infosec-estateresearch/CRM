@@ -431,6 +431,8 @@ class FakeEspo:
             assert int(q["maxSize"]) <= 200
             attr = q["where[0][attribute]"]
             assert q["where[0][type]"] == "isNotNull"
+            # CRM-009-H: every list page is ordered by id ascending, as scripts/crm_api.py does.
+            assert q["orderBy"] == "id" and q["order"] == "asc", q
             select = q["select"].split(",")
             rows = [r for _, r in sorted(self.db[entity].items()) if r.get(attr) not in (None, "")]
             off, size = int(q["offset"]), int(q["maxSize"])
