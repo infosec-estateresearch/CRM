@@ -14,11 +14,18 @@ The build is the official EspoCRM image, pinned by digest, plus Estate Research'
 | `custom/` | ER metadata and code. `scripts/deploy_custom.sh` deploys `custom/Espo/Custom/` into the runtime directory that the app mounts as EspoCRM's `custom/` (§7.2) |
 | `scripts/` | Synthetic data seeder, customisation deploy, backup, restore, export, LAN access check (`check_access.py`) |
 | `tests/unit/` | Run without a stack or network (in the ForgeV2 loop) |
-| `tests/acceptance/` | Need the running dev stack (operator stage) |
+| `tests/acceptance/` | Need the running dev stack (operator stage); `test_beta_safe.py` is the read-only (GET-only) suite for crm-beta |
+| `deploy/beta/compose.json`, `deploy/beta/env.example` | crm-beta (CRM-007): the same three services plus the edge proxy `crm-beta-edge` (HAProxy), and the names of its env file. **No values.** See [BETA.md](BETA.md) |
+| `deploy/beta/apache/crm-proxy.conf` | crm-app behind the edge: every request is HTTPS, `X-Forwarded-Proto` is dropped |
+| `deploy/beta/edge/haproxy.cfg.tmpl` | Edge template, rendered fail-closed by `scripts/check_access.py beta --render` |
+| `deploy/beta/restoretest/compose.json` | The throwaway project `crm-beta-restoretest` for `restore.sh beta --restoretest` |
+| `deploy/beta/systemd/` | Backup timer templates (`crm-beta-backup@.service`/`.timer`); installed only by the operator |
+| `scripts/release.sh`, `scripts/release.py`, `scripts/deploy_release.sh` | Release bundle build and verify, and the clean-host beta deploy ([RELEASE.md](RELEASE.md)) |
 
 Images (see `security/EXTERNAL_CODE_REGISTER.yaml`):
 - `espocrm/espocrm:10.0.12@sha256:b50245d1e291b2636116b0396ce0d06018ffcded6a6c61c7af2420443a20f3ec`
 - `mariadb:11.4.13@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620`
+- `haproxy@sha256:1c3568e520453cc8ba98c39501febcf450429c80e6cc27ecad779961d76e597c` (crm-beta edge only)
 
 **Dev versus release.** CRM-001's dev stack deploys `custom/` from the checkout into its runtime directory. The customer release (CRM-PBI-016) bakes the customisations into an ER image built from the pinned upstream digest, and installs from a release bundle with no Git checkout, ForgeV2, Claude or development-host paths (CRM-D017).
 
@@ -29,11 +36,13 @@ The dev environment lives in `DOCKER1:/srv/CRM/runtime/dev/`, which is root-owne
 - `db/`, `data/`, `custom/` and `client/custom/`: bind mounts;
 - `backups/`.
 
+crm-beta (CRM-007) lives in `/srv/CRM/runtime/beta/` with the same layout and rules (root, `0700`; `env` root `0600`), plus `edge/haproxy.cfg` (rendered, `0644`) and `deploy-report-<stamp>.json` (`0600`). Its releases are unpacked root-owned and read-only into `/srv/CRM/deploy/<shortsha>/`. The restore test uses `/srv/CRM/runtime/beta-restoretest/` only while it runs. See [BETA.md](BETA.md).
+
 ## 3. Isolation boundary (CRM-D012)
 
 - **Naming (CRM-D018):**
   - Services, networks, named volumes and ER images carry the `crm-` prefix.
-  - Each environment has its own project name (`crm-dev`, later `crm-beta` and `crm-prod`).
+  - Each environment has its own project name (`crm-dev`, `crm-beta`, the throwaway `crm-beta-restoretest`, later `crm-prod`).
   - No `container_name` is set: Compose generates instance names, e.g. `crm-dev-crm-app-1` and network `crm-dev_crm-net`.
 - **Compose project:** `crm-dev`, on its own network `crm-net` with subnet `172.16.10.0/24`. On 2026-11-06 Docker on the host had no 172.16.x network; confirm the subnet is also unused on the LAN.
 - **Published ports:** `crm-app` publishes port 8180 on one host LAN address only, `${CRM_BIND_IP}` from the runtime env file. It never uses `0.0.0.0` or a mapping without a host IP, and it no longer publishes on `127.0.0.1`. The database and the daemon publish nothing. The address is never written in Git (§7.6, CRM-D019).
@@ -78,12 +87,13 @@ Defects found at deployment stay open. They are fixed under a follow-up WO and r
 CRM work is confined to:
 - this repository and its approved worktrees;
 - the `crm-dev` runtime under `/srv/CRM/runtime/dev`;
+- the `crm-beta` runtime under `/srv/CRM/runtime/beta`, its releases under `/srv/CRM/deploy`, and the restore-test runtime `/srv/CRM/runtime/beta-restoretest` (CRM-007);
 - specifically authorised supporting operations.
 
 It never inspects, changes or connects to any other application or service on the host. Non-interference is shown from the project's own side, on every WO:
 - the diff touches nothing outside this repository (Auditor);
 - the Compose file declares no external networks or volumes (DevSecOps);
-- the operator inspects only the `crm-dev` project's own containers and network (AC9).
+- the operator inspects only the project's own containers and network (`crm-dev`, AC9; `crm-beta` and `crm-beta-restoretest`, CRM-007).
 
 A genuine shared-host conflict, such as a port or subnet already in use, is reported to Matt, not remediated.
 
@@ -364,3 +374,7 @@ To roll back, run `$DC up -d --wait` from a checkout of the PR #5 head commit, w
 - **The host itself.** Processes on the host that connect to `<CRM_BIND_IP>` carry the host's own address. `check_access.py` requires that address to be inside an authorised subnet, so they are admitted, much as loopback access was before. Containers of other projects that are relayed through the `crm-net` gateway are refused. To confirm at the operator stage.
 - **Docker networking changes.** If Docker's NAT mode changed, for example to `--iptables=false`, sources would appear differently. The overlap rule makes that fail closed for relayed traffic. Re-run step 9 after any Docker upgrade.
 - **IPv6.** Only an IPv4 address is published. No IPv6 access exists or is checked.
+
+## 8. crm-beta (CRM-007)
+
+crm-beta is installed from a verified release bundle, never from a Git checkout, and holds customer data. Everything about it is in [BETA.md](BETA.md) (architecture, the HAProxy upstream contract, operator steps, backup, restore test, timer) and [RELEASE.md](RELEASE.md) (bundle build and verification). The checks that need no stack cover it too: `tests/unit/test_beta.py` holds the target guards, the bind, edge, HTTPS and restore-test isolation policies, the deploy steps with stubbed docker, the GET-only beta-safe suite against a fake, and the timer templates.

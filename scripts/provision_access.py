@@ -39,12 +39,13 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import check_access  # noqa: E402
 import crm_api  # noqa: E402
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CONFIG_DIR = os.path.join(REPO, "config", "access")
 SETTINGS_FILE = os.path.join(REPO, "config", "settings.json")
-TARGET_ENV = "dev"
+TARGET_ENVS = ("dev", "beta")  # CRM-007: beta is provisioned the same way
 
 # Role attributes managed from config/access/roles.json (EspoCRM 10.0.12 Role fields).
 ROLE_PERMISSIONS = (
@@ -72,9 +73,9 @@ def log(msg):
 
 
 def require_target(argv_target, prog):
-    """The environment guard: exactly 'dev'. Returns an exit code or None."""
-    if argv_target != TARGET_ENV:
-        print(f"{prog}: refusing to run: target environment must be '{TARGET_ENV}' "
+    """The environment guard: exactly 'dev' or 'beta'. Returns an exit code or None."""
+    if argv_target not in TARGET_ENVS:
+        print(f"{prog}: refusing to run: target environment must be 'dev' or 'beta' "
               f"(got '{argv_target or '<none>'}')", file=sys.stderr)
         return 2
     return None
@@ -392,6 +393,11 @@ def main(argv=None, transport=None, environ=None):
     parser.add_argument("--config-dir", default=CONFIG_DIR, help=argparse.SUPPRESS)
     parser.add_argument("--settings-file", default=SETTINGS_FILE, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    # CRM-007R: the base URL is pinned to the target (check_access.pinned_base_url).
+    problem = check_access.base_url_problem(args.target, args.base_url, environ)
+    if problem:
+        print(f"{prog}: refusing to run: {problem}", file=sys.stderr)
+        return 2
     active = None if args.import_user_active is None else args.import_user_active == "yes"
     try:
         check_new_private_path(args.key_file)

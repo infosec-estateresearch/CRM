@@ -1,0 +1,46 @@
+{
+  "name": "crm-beta-restoretest",
+  "services": {
+    "crm-db": {
+      "image": "mariadb:11.4.13@sha256:d1891ede5a559f1086f55053bb8cc1569b0298338c4d72d71725a7f74f6ba620",
+      "environment": {
+        "MARIADB_DATABASE": "restoretest",
+        "MARIADB_ROOT_PASSWORD": "${CRM_RESTORETEST_DB_ROOT_PASSWORD:?CRM_RESTORETEST_DB_ROOT_PASSWORD must be set in the restoretest env file}"
+      },
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "db",
+          "target": "/var/lib/mysql"
+        }
+      ],
+      "networks": {
+        "restoretest-net": {}
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "healthcheck.sh",
+          "--connect",
+          "--innodb_initialized"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 30,
+        "start_period": "30s"
+      },
+      "extra_hosts": [
+        "crm-db:host-gateway"
+      ]
+    }
+  },
+  "volumes": {
+    "db": {}
+  },
+  "networks": {
+    "restoretest-net": {
+      "driver": "bridge",
+      "internal": true
+    }
+  }
+}

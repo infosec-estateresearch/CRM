@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Back up the crm-dev stack: a MariaDB dump plus the runtime directories that
+# Back up the crm-dev or crm-beta stack: a MariaDB dump plus the runtime directories that
 # crm-app and crm-daemon mount (data/, custom/, client/custom/), into
-# $CRM_RUNTIME_DIR/backups/crm-dev-<UTC stamp>/.
-# Usage: scripts/backup.sh dev
+# $CRM_RUNTIME_DIR/backups/<project>-<UTC stamp>/ (umask 077: directories 0700, files 0600).
+# Usage: scripts/backup.sh dev|beta
 set -euo pipefail
 # shellcheck source=lib/common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
-require_dev "${1:-}"
+require_target "${1:-}"
 require_env_file
 require_runtime_paths
 for dir in "${CRM_PERSISTENT_DIRS[@]}"; do
@@ -15,7 +15,7 @@ for dir in "${CRM_PERSISTENT_DIRS[@]}"; do
 done
 
 umask 077
-name="crm-dev-$(utc_stamp)"
+name="$CRM_PROJECT-$(utc_stamp)"
 dest="$CRM_BACKUP_DIR/$name"
 partial="$dest.partial"
 [ ! -e "$dest" ] && [ ! -e "$partial" ] || die "backup already exists: $dest"
@@ -35,6 +35,10 @@ for dir in "${CRM_PERSISTENT_DIRS[@]}"; do
     tar -C "$CRM_RUNTIME_DIR" -czf "$partial/$archive" "$dir"
     archives+=("$archive")
 done
+# CRM-007R: the target marker, covered by SHA256SUMS; restore.sh refuses a
+# backup whose marker is not its own target.
+printf '%s\n' "$CRM_TARGET" > "$partial/TARGET"
+archives+=(TARGET)
 (cd "$partial" && sha256sum "${archives[@]}" > SHA256SUMS)
 
 mv "$partial" "$dest"

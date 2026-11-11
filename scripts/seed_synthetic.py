@@ -13,6 +13,7 @@ Credentials come from CRM_ADMIN_USERNAME / CRM_ADMIN_PASSWORD.
 """
 
 import argparse
+import urllib.parse
 import collections
 import json
 import os
@@ -297,6 +298,27 @@ def seed(client, dataset, log=None):
     return ids
 
 
+DEV_PORT = 8180
+
+
+def beta_refusal(base_url, environ):
+    """CRM-007: crm-beta never gets synthetic data. Seeding is allowed only
+    against crm-dev: plain http on port 8180 (check_access.py refuses 8180 for
+    every beta port), and never when CRM_TARGET names anything but dev."""
+    if environ.get("CRM_TARGET", "dev") != "dev":
+        return "synthetic seeding is for crm-dev only (CRM_TARGET is not dev)"
+    if not base_url:
+        return None  # credentials_from_env/EspoClient report the missing URL
+    try:
+        url = urllib.parse.urlsplit(base_url)
+        port = url.port
+    except ValueError:
+        return "the base URL is not a valid URL"
+    if url.scheme != "http" or port != DEV_PORT:
+        return f"synthetic seeding is for crm-dev only (http, port {DEV_PORT}); crm-beta is never seeded"
+    return None
+
+
 def main(argv=None, transport=None, environ=None):
     environ = os.environ if environ is None else environ
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -306,6 +328,10 @@ def main(argv=None, transport=None, environ=None):
                         help="print the dataset summary and make no HTTP calls")
     args = parser.parse_args(argv)
 
+    refused = beta_refusal(args.base_url, environ)
+    if refused:
+        print(f"seed_synthetic: refusing to run: {refused}", file=sys.stderr)
+        return 2
     dataset = build_dataset(args.seed)
     if args.dry_run:
         print(json.dumps(summary(dataset), indent=2))

@@ -27,3 +27,11 @@ candidates:
     usage: CRM database, dev environment, CRM-001
     usage_confirmed: "deploy/compose.json service crm-db, pinned to this exact tag and digest, no published port; checked by tests/unit/test_compose_policy.py (CRM-001)."
     approval: none
+  - name: haproxy
+    origin: https://hub.docker.com/_/haproxy   # image: docker.io/library/haproxy, tag 3.2-alpine
+    version: "3.2.26 (3.2 LTS, alpine)"
+    digest: "sha256:1c3568e520453cc8ba98c39501febcf450429c80e6cc27ecad779961d76e597c"   # pulled and verified by the PL on DOCKER1, 2026-11-10
+    licence: GPL-2.0
+    usage: crm-beta edge proxy (crm-beta-edge), beta environment, CRM-007
+    usage_confirmed: "deploy/beta/compose.json service crm-beta-edge, pinned to this digest, network_mode host, read-only, cap_drop ALL, no-new-privileges, user haproxy; checked by tests/unit/test_beta.py (CRM-007)."
+    approval: none

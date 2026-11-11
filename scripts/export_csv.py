@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """CSV export of Accounts and Contacts through the EspoCRM REST API.
 
-Called by scripts/export.sh. Credentials come from CRM_ADMIN_USERNAME /
+Called by scripts/export.sh:
+
+    export_csv.py dev|beta --base-url URL --out <runtime>/backups/export-<name>
+
+CRM-007R: the base URL must be exactly the target's own (check_access.
+base_url_problem) and --out a new directory export-[A-Za-z0-9._-]+ directly
+under the target's backup directory (check_access.export_out_problem); both
+are checked before any request. Credentials come from CRM_ADMIN_USERNAME /
 CRM_ADMIN_PASSWORD. Values are written verbatim (no spreadsheet-formula
 escaping) so the export is a faithful copy of the data.
 """
@@ -14,6 +21,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import check_access  # noqa: E402
 import crm_api  # noqa: E402
 
 EXPORTS = {
@@ -51,17 +59,25 @@ def export(client, out_dir):
 def main(argv=None, transport=None, environ=None):
     environ = os.environ if environ is None else environ
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("target", choices=("dev", "beta"))
     parser.add_argument("--base-url", default=environ.get(crm_api.ENV_BASE_URL, ""))
-    parser.add_argument("--out", required=True, help="output directory")
+    parser.add_argument("--out", required=True,
+                        help="new directory <target runtime>/backups/export-<name>")
     args = parser.parse_args(argv)
+    problem = (check_access.base_url_problem(args.target, args.base_url, environ)
+               or check_access.export_out_problem(args.target, args.out, environ))
+    if problem:
+        print(f"export_csv: refusing to run: {problem}", file=sys.stderr)
+        return 2
     try:
         username, password = crm_api.credentials_from_env(environ)
         client = crm_api.EspoClient(args.base_url, username, password, transport)
+        os.mkdir(args.out, 0o700)  # fails if it appeared meanwhile
         counts = export(client, args.out)
     except crm_api.ConfigError as err:
         print(f"export_csv: {err}", file=sys.stderr)
         return 2
-    except crm_api.ApiError as err:
+    except (crm_api.ApiError, OSError) as err:
         print(f"export_csv: {err}", file=sys.stderr)
         return 1
     print(json.dumps({"out": args.out, "counts": counts}))

@@ -46,6 +46,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import check_access  # noqa: E402
 import crm_api  # noqa: E402
 import provision_access as access  # noqa: E402
 from provision_access import ProvisionError, log  # noqa: E402
@@ -312,6 +313,11 @@ def main(argv=None, transport=None, environ=None):
                         help="a legacy shared identity: always provisioned inactive")
     parser.add_argument("--config-dir", default=access.CONFIG_DIR, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    # CRM-007R: the base URL is pinned to the target (check_access.pinned_base_url).
+    problem = check_access.base_url_problem(args.target, args.base_url, environ)
+    if problem:
+        print(f"{prog}: refusing to run: {problem}", file=sys.stderr)
+        return 2
     passwords = None
     try:
         if args.report_never_logged_in:
