@@ -374,8 +374,10 @@ class FakeEspo:
     _EMAIL = re.compile(r"\A[^@\s\"(),:;<>\[\]\\]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\Z")
 
     def __init__(self, users=(U1, U2, U_INACTIVE, U_SHARED), hidden_sfids=(), phone_international=False,
-                 settings=None):
+                 settings=None, uncounted=()):
         self.phone_international = phone_international
+        # CRM-009-H: entities whose list read reports ``total: -1``, as 10.0.12 does for Email.
+        self.uncounted = set(uncounted)
         # GET Settings: by default it reports phoneNumberInternational as the phone rule above.
         # The server's currency list; GET Settings reports it unless ``settings`` is given.
         self.currency_list = list(self.DEFAULT_CURRENCY_LIST)
@@ -429,6 +431,8 @@ class FakeEspo:
             assert int(q["maxSize"]) <= 200
             attr = q["where[0][attribute]"]
             assert q["where[0][type]"] == "isNotNull"
+            # CRM-009-H: every list page is ordered by id ascending, as scripts/crm_api.py does.
+            assert q["orderBy"] == "id" and q["order"] == "asc", q
             select = q["select"].split(",")
             rows = [r for _, r in sorted(self.db[entity].items()) if r.get(attr) not in (None, "")]
             off, size = int(q["offset"]), int(q["maxSize"])
@@ -436,7 +440,7 @@ class FakeEspo:
             hidden = {"phoneNumberData"} if "phone_list" in self._checks() else set()
             page = [{k: json.loads(json.dumps(r.get(k))) for k in select if k not in hidden}
                     for r in rows[off:off + size]]
-            return 200, {"total": len(rows), "list": page}
+            return 200, {"total": -1 if entity in self.uncounted else len(rows), "list": page}
         if method == "POST":
             self.writes.append((method, entity, json.loads(json.dumps(body))))
             key = body.get("sfId")

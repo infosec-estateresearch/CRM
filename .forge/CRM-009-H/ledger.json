@@ -1,0 +1,336 @@
+{
+  "base": "main",
+  "base_sha": "e1312667eab5a276c5cdb90cb9f5b7df5b2b5b09",
+  "branch": "forge/CRM-009-H",
+  "candidate": "3c54f73f769e5c1eb4489b1be6475d8236c287bc",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 2,
+    "devsecops": 2,
+    "engineer": 2,
+    "tester": 2
+  },
+  "created": "2026-11-11T13:53:13Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-11T13:53:13Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-11T13:56:00Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r1: list_all pages through unknown total; list_incomplete on known-total mismatch",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-11T13:56:40Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "9c652009a7dc958afa4aa6f3d84c4c79609b7034",
+      "t": "2026-11-11T13:56:41Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "9c652009a7dc958afa4aa6f3d84c4c79609b7034",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-11T13:56:41Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "9c652009a7dc958afa4aa6f3d84c4c79609b7034",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-11T13:56:41Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "9c652009a7dc958afa4aa6f3d84c4c79609b7034",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-11T13:56:41Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-11T13:58:49Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-11T13:58:49Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-11T13:58:49Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "9c652009a7dc958afa4aa6f3d84c4c79609b7034",
+      "findings": [
+        {
+          "key": "unbounded-unknown-paging",
+          "severity": "advisory"
+        },
+        {
+          "key": "unordered-paging",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-11T13:59:41Z",
+      "type": "result"
+    },
+    {
+      "candidate": "9c652009a7dc958afa4aa6f3d84c4c79609b7034",
+      "findings": [
+        {
+          "key": "unknown-total-unbounded-loop",
+          "severity": "blocking"
+        },
+        {
+          "key": "unknown-total-no-completeness-or-order",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-11T13:59:41Z",
+      "type": "result"
+    },
+    {
+      "candidate": "9c652009a7dc958afa4aa6f3d84c4c79609b7034",
+      "findings": [
+        {
+          "key": "unbounded-unknown-total-paging",
+          "severity": "advisory"
+        },
+        {
+          "key": "unordered-offset-paging",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-11T13:59:41Z",
+      "type": "result"
+    },
+    {
+      "candidate": "9c652009a7dc958afa4aa6f3d84c4c79609b7034",
+      "id": 13,
+      "n": 2,
+      "role": "engineer",
+      "round": 2,
+      "t": "2026-11-11T13:59:41Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/13-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 13,
+      "t": "2026-11-11T14:05:21Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "9c652009a7dc958afa4aa6f3d84c4c79609b7034",
+      "findings": [],
+      "note": "r2: orderBy id, dedupe, list_stalled, page ceiling",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 2,
+      "spawn": 13,
+      "t": "2026-11-11T14:06:02Z",
+      "type": "result"
+    },
+    {
+      "round": 2,
+      "sha": "3c54f73f769e5c1eb4489b1be6475d8236c287bc",
+      "t": "2026-11-11T14:06:03Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "3c54f73f769e5c1eb4489b1be6475d8236c287bc",
+      "id": 17,
+      "n": 2,
+      "role": "auditor",
+      "round": 2,
+      "t": "2026-11-11T14:06:03Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "3c54f73f769e5c1eb4489b1be6475d8236c287bc",
+      "id": 18,
+      "n": 2,
+      "role": "tester",
+      "round": 2,
+      "t": "2026-11-11T14:06:03Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "3c54f73f769e5c1eb4489b1be6475d8236c287bc",
+      "id": 19,
+      "n": 2,
+      "role": "devsecops",
+      "round": 2,
+      "t": "2026-11-11T14:06:03Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/17-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 17,
+      "t": "2026-11-11T14:10:53Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/18-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 18,
+      "t": "2026-11-11T14:10:53Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/19-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 19,
+      "t": "2026-11-11T14:10:53Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "3c54f73f769e5c1eb4489b1be6475d8236c287bc",
+      "findings": [
+        {
+          "key": "known-total-request-shape",
+          "severity": "advisory"
+        },
+        {
+          "key": "mutation-evidence-shape",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 2,
+      "spawn": 17,
+      "t": "2026-11-11T14:11:25Z",
+      "type": "result"
+    },
+    {
+      "candidate": "3c54f73f769e5c1eb4489b1be6475d8236c287bc",
+      "findings": [
+        {
+          "key": "known-total-path-additions",
+          "severity": "advisory"
+        },
+        {
+          "key": "mutation-evidence-scope",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 2,
+      "spawn": 18,
+      "t": "2026-11-11T14:11:25Z",
+      "type": "result"
+    },
+    {
+      "candidate": "3c54f73f769e5c1eb4489b1be6475d8236c287bc",
+      "findings": [
+        {
+          "key": "unknown-total-short-cap",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 2,
+      "spawn": 19,
+      "t": "2026-11-11T14:11:25Z",
+      "type": "result"
+    },
+    {
+      "note": "r2: advisories only",
+      "outcome": "DELIVERED",
+      "t": "2026-11-11T14:11:25Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-009-H",
+  "host": "docker1",
+  "known_commit": "e1312667eab5a276c5cdb90cb9f5b7df5b2b5b09",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-009-H",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 2,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-009-H",
+  "wo": "CRM-009-H",
+  "worktree": "/srv/CRM/worktrees/CRM-009-H"
+}

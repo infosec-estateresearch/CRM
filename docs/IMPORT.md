@@ -83,7 +83,7 @@ The snapshot is opened read-only.
 
 ## Order of work
 
-1. **Index.** One paged read per entity (User, ServiceType, Account, Contact, Opportunity, Task, Call, Meeting, Email), using `where isNotNull sfId` (`sfValue` for ServiceType) and `maxSize=200`.
+1. **Index.** One paged read per entity (User, ServiceType, Account, Contact, Opportunity, Task, Call, Meeting, Email), using `where isNotNull sfId` (`sfValue` for ServiceType) and `maxSize=200`. Paged reads tolerate an unknown total (CRM-009-H: 10.0.12 reports `total: -1` for Email): every page is ordered `orderBy=id&order=asc` and rows are de-duplicated by `id`; they page until a short page. A full page that adds no new `id` (a server ignoring `offset`), or more than 10,000 pages, fails with `list_stalled` (exit 4); a known total that the distinct rows read do not match fails with `list_incomplete` (exit 4).
 2. **ServiceType.** One record per distinct `Opportunity_Service__c` value: `name` and `sfValue`.
 3. **Account.** Then a **second pass** sets `parentId` once every Account exists.
 4. **Contact.**
