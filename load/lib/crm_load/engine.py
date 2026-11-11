@@ -41,6 +41,12 @@ def _is_multi(attr):
 
 PHONE_ATTRS = ("phoneNumberData", "phoneNumber")
 NUMERIC_ATTRS = ("amount",)
+# CRM-009-I fact 2: a 10.0.12 list read returns a text attribute cut to its first 10,000 characters.
+LIST_TEXT_LIMIT = 10000
+# CRM-009-I fact 1: EspoCRM never returns Email.usersIds (list or single read): sent on create only.
+CREATE_ONLY = {"Email": ("usersIds",)}
+# CRM-009-I fact 3: Email addresses are stored lower case; a ';' list may be reordered.
+ADDRESS_LISTS = ("to", "cc")
 
 
 def _phone_text(number):
@@ -82,7 +88,18 @@ def as_stored(value, text=False):
     return value
 
 
+def _address_set(value):
+    """An Email to/cc list as EspoCRM stores it: case-insensitive, order-insensitive."""
+    if not isinstance(value, str):
+        return _norm(value)
+    return frozenset(a.strip().lower() for a in value.split(";") if a.strip()) or None
+
+
 def same_value(attr, new, old, text=False, entity=None):
+    if entity == "Email" and attr in ADDRESS_LISTS:
+        return _address_set(new) == _address_set(old)
+    if entity == "Email" and attr == "from" and isinstance(new, str) and isinstance(old, str):
+        return new.strip().lower() == old.strip().lower()
     if attr == "phoneNumberData":
         return _phone_set(new) == _phone_set(old)
     if attr in NUMERIC_ATTRS:
@@ -336,7 +353,11 @@ class Loader:
                 action = "created"
             else:
                 diff = {}
+                single = {}                    # at most one GET {Entity}/{id} per record
+                create_only = CREATE_ONLY.get(entity, ())
                 for a, v in attrs.items():
+                    if a in create_only:
+                        continue               # never returned by the server: never compared or sent
                     old = existing.get(a)
                     if _is_multi(a):
                         if a.endswith("Ids"):
@@ -349,9 +370,10 @@ class Loader:
                             if merged != (old or {}):
                                 diff[a] = merged
                     elif a == "phoneNumberData" and a not in existing:
-                        if not self._phones_same(entity, existing, v):
+                        if not self._phones_same(entity, existing, v, single):
                             diff[a] = None if _norm(v) is None else v
-                    elif not same_value(a, v, old, a in text, entity):
+                    elif not same_value(a, self._untruncated(entity, existing, a, v, a in text, single),
+                                        existing.get(a), a in text, entity):
                         diff[a] = None if _norm(v) is None else v
                 if diff:
                     for a in [a for a in diff if a.endswith("Columns")]:
@@ -389,8 +411,25 @@ class Loader:
         self._count(obj, entity, action)
         return self.index[entity].get(key)
 
+    def _single(self, entity, existing, single):
+        """The record's single read, ``GET {Entity}/{id}``: made once per upsert, counted in reads."""
+        if "rec" not in single:
+            single["rec"] = self.client.get(entity, existing["id"]) or {}
+        return single["rec"]
+
+    def _untruncated(self, entity, existing, attr, new, text, single):
+        """CRM-009-I change 2: a list value of exactly LIST_TEXT_LIMIT characters that is a prefix of
+        a longer desired value may be the server's cut. The record is read once and the full stored
+        value replaces the cut one in the index. Returns ``new`` unchanged (the value to compare)."""
+        old = existing.get(attr)
+        want = as_stored(new, text)
+        if isinstance(old, str) and isinstance(want, str) and len(old) == LIST_TEXT_LIMIT and \
+                len(want) > LIST_TEXT_LIMIT and want.startswith(old):
+            existing[attr] = self._single(entity, existing, single).get(attr)
+        return new
+
     # ---------------------------------------------------------------- phones
-    def _phones_same(self, entity, existing, new):
+    def _phones_same(self, entity, existing, new, single=None):
         """CRM-008-F change 1: a list row has no phoneNumberData, only phoneNumber (the primary).
         A different primary needs a write; one source number equal to it needs none; with two or
         more numbers the record is read once (GET {Entity}/{id}) and the full set compared."""
@@ -400,7 +439,7 @@ class Loader:
             return False
         if len(numbers) <= 1:
             return True
-        stored = self.client.get(entity, existing["id"]).get("phoneNumberData")
+        stored = self._single(entity, existing, {} if single is None else single).get("phoneNumberData")
         existing["phoneNumberData"] = stored
         return same_value("phoneNumberData", new, stored)
 

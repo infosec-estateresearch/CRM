@@ -425,7 +425,12 @@ class FakeEspo:
             # A single-record read returns phoneNumberData (with optOut/invalid), as on crm-dev.
             self.single_reads.append((entity, parts[1]))
             rec = self.db[entity].get(parts[1])
-            return (200, json.loads(json.dumps(rec))) if rec is not None else (404, None)
+            if rec is None:
+                return 404, None
+            rec = json.loads(json.dumps(rec))
+            if entity == "Email" and "email_users_hidden" in self._checks():
+                rec.pop("usersIds", None)                # CRM-009-I fact 1: never returned
+            return 200, rec
         if method == "GET":
             q = dict(query or [])
             assert int(q["maxSize"]) <= 200
@@ -437,8 +442,11 @@ class FakeEspo:
             rows = [r for _, r in sorted(self.db[entity].items()) if r.get(attr) not in (None, "")]
             off, size = int(q["offset"]), int(q["maxSize"])
             # 10.0.12 list reads never return phoneNumberData, even when selected (CRM-008-F fact 1).
-            hidden = {"phoneNumberData"} if "phone_list" in self._checks() else set()
-            page = [{k: json.loads(json.dumps(r.get(k))) for k in select if k not in hidden}
+            checks = self._checks()
+            hidden = {"phoneNumberData"} if "phone_list" in checks else set()
+            if entity == "Email" and "email_users_hidden" in checks:
+                hidden.add("usersIds")                   # CRM-009-I fact 1: never returned
+            page = [{k: self._listed(k, r.get(k)) for k in select if k not in hidden}
                     for r in rows[off:off + size]]
             return 200, {"total": -1 if entity in self.uncounted else len(rows), "list": page}
         if method == "POST":
@@ -504,10 +512,14 @@ class FakeEspo:
     # completed_hook_api_recompletion (round 2: the hook also fires on a status change by the ER
     # Import user, i.e. the importer re-completing a Task staff reopened), import_user_identity
     # (round 3: only type api with userName er-import counts, not any API user).
+    # CRM-009-I: email_users_hidden (Email reads omit usersIds, fact 1), list_text_truncated
+    # (list reads cut text to 10,000 characters, fact 2), address_lower (Email to/cc/from stored
+    # lower case, to/cc reordered, fact 3).
     CHECKS = ("owner", "required", "max_length", "currency", "email",
               "phone_list", "title_account", "email_to",
               "date_completed_read_only", "date_completed_core", "completed_hook",
-              "completed_hook_api_recompletion", "import_user_identity")
+              "completed_hook_api_recompletion", "import_user_identity",
+              "email_users_hidden", "list_text_truncated", "address_lower")
     # The server clock the core DateCompleted hook stamps ("now"); never a source value.
     NOW = "2026-11-10 09:00:00"
 
@@ -529,6 +541,16 @@ class FakeEspo:
     def staff(self, method, path, body=None):
         """``send`` as a staff (regular) user; not recorded as an importer request or write."""
         return self.as_user(("regular", "staff.one"), method, path, body)
+
+    LIST_TEXT_LIMIT = 10000
+
+    def _listed(self, attr, value):
+        """A value as a 10.0.12 list read returns it: text cut to its first 10,000 characters
+        (CRM-009-I fact 2); the single read returns it whole."""
+        value = json.loads(json.dumps(value))
+        if "list_text_truncated" in self._checks() and attr in self.TEXT and isinstance(value, str):
+            return value[:self.LIST_TEXT_LIMIT]
+        return value
 
     def _checks(self):
         return set(self.CHECKS) - getattr(self, "disabled_checks", set())
@@ -683,6 +705,14 @@ class FakeEspo:
             stored["from"] = None                        # a display name in from is dropped
         if entity == "Email":
             stored.pop("messageId", None)                # cannot be set through the API
+        if entity == "Email" and "address_lower" in self._checks():
+            # CRM-009-I fact 3: addresses stored lower case; a list may come back reordered.
+            for attr in ("to", "cc"):
+                if isinstance(stored.get(attr), str):
+                    stored[attr] = ";".join(sorted((a.strip().lower() for a in stored[attr].split(";")
+                                                    if a.strip()), reverse=True))
+            if isinstance(stored.get("from"), str):
+                stored["from"] = stored["from"].lower()
         return stored, bad
 
     ROLE_OPTIONS = ("", "Business User", "Decision Maker", "Economic Buyer", "Economic Decision Maker",
