@@ -1,6 +1,7 @@
 # Product Backlog — Estate Research CRM
 
 - **Status:** DRAFT. This needs Matt's explicit approval. Backlog items are not Work Orders and grant no authority (FND-009, FND-012).
+- **Revision 2026-11-13 (CANDIDATE):** CRM-PBI-018 to 029 added for Firm Groups and the WIP/Revenue module (FOUNDRY Stage 1 v0.4 existing-product reassessment, [`docs/initiation/2026-11-13-existing-product-reassessment.md`](docs/initiation/2026-11-13-existing-product-reassessment.md)). CRM-PBI-001 to 017 are unchanged. A delivery-evidence table is added at the end. **This exact version needs Matt's explicit approval.** New IDs were collision-checked against `main` at `330978598ac6`.
 - **Ordering:** smallest useful increment first. Each later item depends on the ones above it unless it says otherwise.
 - **Traceability:** requirement IDs (R*, M*) are listed in `docs/REQUIREMENTS-TRACEABILITY.md`.
 - **Release path:** CRM-001 dev instance → pseudonymised sample → **container release, accepted on a clean host** → **customer beta on approved Salesforce data** → cutover. Salesforce remains the system of record until cutover (CRM-D014).
@@ -24,5 +25,63 @@
 | CRM-PBI-014 | PROVISIONAL | **Production email filing** (Outlook "File to CRM") | Production authorisation, de-duplication, audit, deployment to staff mailboxes (R10). **Required for cutover, not for the beta.** | 006, 011 |
 | CRM-PBI-008 | PROVISIONAL | **Staff rollout:** training and all users | Every user on a named login, trained; timed scenarios confirmed across teams | 013, 014 |
 | CRM-PBI-015 | PLACEHOLDER | **Cutover and Salesforce switch-off** | Production deployed from the accepted container release; rehearsed full reload and reconciliation; final delta; parallel run with Salesforce read-only; ERic switched to the CRM adapter (007); switch-off before summer 2027, timed to the contract renewal (M6) | 007, 008, 013, 014 |
+| CRM-PBI-018 | DEFINED | **P0.** Independent **FirmGroup** entity with Account belongsTo relationship, CRUD membership by manager, peer-firm grouping, clickable Account Group Members tab, current group name, audited moves, server ACL | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | Current Account UI inspection, full regression and browser audit; no source seeding |
+| CRM-PBI-019 | DEFINED | **P0.** **CRM–WIP boundary contract** and module scaffolding: CRM authoritative firms/contacts/groups, WIP financial entities, distinct code ownership, no WIP core writes, finance ACL and change isolation | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | Approved Vision/decision, real Espo packaging check |
+| CRM-PBI-020 | DEFINED | **P0.** **WIP/Revenue Account tab and manual entry MVP**: Account-specific WIP list, clear empty state, add/edit validated WipCase + first financial observation, permissions, audit, correct immutable account reference, no billing logic inventions | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | WIP entities/ACL; can ship with synthetic/manual UAT independent of XLSX migration |
+| CRM-PBI-021 | DEFINED | **P0.** **WIP identity & current FirmGroup visibility**: read-only `firmId`/derived `groupId`, group retrieval by CRM membership, no duplicate counting or stale group copies, group move behaviour tested | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | FirmGroup entity, WipCase Account link; group totals only when metric semantics established |
+| CRM-PBI-022 | DEFINED | **P1.** **WIP module workspace/navigation skeleton**: left menu WIP/Revenue opens a functional landing page; reuse WIP entity forms, begin cross-firm filtered case list; no fake dashboard or revenue metrics | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | Account-tab MVP accepted; menu not an inert placeholder in live UI |
+| CRM-PBI-023 | DEFINED | **P1.** **Transitional source investigation and verified importer**: XLSX/CSV interface verification, all valid month tabs, source IDs, Decimal-safe mapping, provenance, idempotent batches, rejects, signed-off reconciliation | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | HELM evidence; separate operator data access; do not block manual entry |
+| CRM-PBI-024 | PROVISIONAL | **P1.** **FirmGroup curated mapping and controlled population**: inspect 36 approved legacy groups, conflicts/unmatched, protect manually changed membership, verified idempotent seed, review queue | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | Independent PO approval of group-membership mapping; never seed all 1,366 hierarchy trees automatically |
+| CRM-PBI-025 | PROVISIONAL | **P2.** **Legacy WIP case & financial history transition**: source-to-CRM reconciled import; unmatched 18 case assignments not guessed; multiple cohort revisions preserved; workbook remains source until cutover | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | Import contract, source authority, financial data and cutover decisions |
+| CRM-PBI-026 | PROVISIONAL | **P2.** **Revenue definitions and calculation rules**: decide recognised revenue vs fees invoiced vs revised/actual yield; period treatment; reconcile against business-approved reference | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | PO definition; neither WIP & Rev nor summaries proves revenue |
+| CRM-PBI-027 | PROVISIONAL | **P2.** **Group-level financial reporting** and optional historical membership-as-of views with correct case revision selection, controlled access and no double counting | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | FirmGroup data, WIP MVP, approved metric semantics; historical basis undecided |
+| CRM-PBI-028 | PLACEHOLDER | **P3.** Advanced cross-firm workflow, business reports, exception-review cockpit, optional Case/Enquiry linkage after evidence | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | Later Agile refinement; not implementation-ready |
+| CRM-PBI-029 | DEFINED | **P0.** **Documentation/provenance reconciliation**: update Vision/Backlog/README/decisions/PIM amendment/requirements/security register to truthful current product and beta evidence | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | Stage 1 reassessment, exact PO artifact approval, docs-only GitHub gate |
 
 CRM-PBI-009 (full migration and switch-off) is replaced by PBI-005, PBI-012 and PBI-015.
+
+
+## Expanded scope (2026-11-13): Firm Groups and WIP/Revenue
+
+- **Release priority (recommended):**
+  1. documentation alignment (029);
+  2. FirmGroup, unseeded, with its UI (018);
+  3. WIP module skeleton, entities and financial permissions (019);
+  4. Account WIP/Revenue read/create/edit MVP (020);
+  5. group-aware WIP retrieval (021);
+  6. sidebar workspace (022);
+  7. importer and validated migration (023, 025);
+  8. formal Revenue and advanced group reporting (026, 027).
+- **Data definitions:**
+  - `WipCase`: financial case reference, linked to its Account identity;
+  - `WipFinancialPeriod`: a source observation with provenance, not a month-end ledger;
+  - later, `WipImportBatch` and `WipImportReject`.
+
+  There is no additional WIP firm master. An operational Case Manager is not assumed to be superseded.
+- **Explicit MVP exclusions:**
+  - no WIP source imports;
+  - no live revenue or fiscal-flow claims;
+  - no full spreadsheet rewrite;
+  - no unapproved group mass seeding;
+  - no automatic Account creation;
+  - no automatic Enquiry link.
+
+  Financial access defaults to denial until explicitly assigned. Beta data entry is UAT until production cutover is separately approved.
+- **Work Orders:** each item is delivered through its own exact-version Work Order on its own Issue. Candidate briefs are in [`docs/delivery/forge-wo-intake-briefs.md`](docs/delivery/forge-wo-intake-briefs.md); they grant no authority.
+
+## Delivery evidence at 2026-11-13 (CRM-PBI-001 to 017)
+
+Recorded facts only. The **State** column above shows refinement readiness and is unchanged. "Engineered" means a ForgeV2 outcome recorded in `.forge/<WO>/REPORT.md`. Product acceptance by Matt (CRM-D013) is not recorded for any item.
+
+| PBI | Work Orders | Evidence |
+|---|---|---|
+| 001 | CRM-001 (+C1, C2, LAN) | ESCALATED (browser and live checks only); on `main` (#5, #43); `crm-dev` running on synthetic data |
+| 002 | CRM-003, CRM-003-F | CRM-003 ESCALATED (browser and live only); 003-F DELIVERED; provisioned on beta |
+| 003 | CRM-005 | DELIVERED; activities loaded on beta |
+| 004 | CRM-004 | DELIVERED; enquiries loaded on beta. R8 (phone enquiry under 60 s) is not yet measured |
+| 005 | CRM-002 (+S to W), CRM-006R/006S, CRM-008 (+F, G), CRM-009-H, CRM-009-I | Extractor and loader DELIVERED. The real extract reconciled with drift (1 accepted EmailMessage). No pseudonymised-sample run is evidenced in this repository; real extraction proceeded under the PO priority override (Issue #9) |
+| 011 | CRM-007/007R, CRM-009 (+F, G) | Beta in **UAT mode** (plain HTTP, LAN-only, PO risk acceptance). TLS/production mode is retained as the default but **not** in use; named logins exist with a common UAT password |
+| 012 | Operator load (CRM-009 direction) | BETA_POPULATED reported on Issue #9; 160 write rejections (0.08%) and 1 recurring Contact update are open. Full-volume p95 search (R6) is not measured. Reconciliation with "every mismatch explained" is incomplete: the rejection field reasons are not captured |
+| 013 | — | UAT in progress (Matt) |
+| 016, 017 | CRM-007/007R | Release bundles built reproducibly (`scripts/release.sh`); clean-host deploy evidence is per CRM-007R. **Deviation to review:** beta runs the pinned upstream image with `custom/` deployed into the runtime, not a baked `crm-espocrm` image (PBI-016 text, CRM-D017) |
+| 006, 007, 008, 010, 014, 015 | — | Not started |

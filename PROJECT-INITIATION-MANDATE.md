@@ -1,6 +1,7 @@
 # Estate Research CRM — Project Initiation Mandate (PIM)
 
 - **Status:** DRAFT for Architect review. Not approved, and grants no implementation authority.
+- **Reassessment (2026-11-13):** the product scope is being expanded (Firm Groups, WIP/Revenue module) under a FOUNDRY Stage 1 v0.4 existing-product reassessment. The dated addendum [`docs/initiation/2026-11-13-existing-product-reassessment.md`](docs/initiation/2026-11-13-existing-product-reassessment.md) records the current product truth, including stale statements in this file such as B1. This file is otherwise unchanged and keeps its historical content.
 - **Prepared by:** Rogue (Orchestrator), 2026-11-06, from the evidence listed in section 8.
 - **Governing FOUNDRY:** `maff0000/foundry` at `5f5e4a51f8909d134c46ef8b43a9bd20d086fcc0`: `stages/01-product-discovery.md`, `standards/project-scaffolding.md`, `standards/product-records.md`, `standards/secure-engineering.md` and `standards/work-order-contract.md`.
 - **Naming:** this is the FOUNDRY PIM, which the Product Owner calls the "PID". It is not a ForgeV1 `PID.md` (FND-043).

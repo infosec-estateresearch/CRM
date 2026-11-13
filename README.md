@@ -2,15 +2,28 @@
 
 Estate Research's self-hosted replacement for Salesforce. It is delivered incrementally under [FOUNDRY](https://github.com/maff0000/foundry) governance, starting with law firms (head office and branches) and their contacts.
 
-**Status: initiation.** Nothing is installed or released. EspoCRM is the leading candidate and has not been selected.
+**Status (2026-11-13): customer beta under UAT; scope reassessment in progress.**
+- EspoCRM 10.0.12 is built and running (see *Usage*).
+- `crm-dev` holds synthetic data.
+- `crm-beta` runs release `crm-release-330978598ac6` in **UAT mode** (CRM-009): plain HTTP, reachable only from the authorised internal networks. It holds the beta copy of approved Salesforce data, reported BETA_POPULATED on Issue #9 on 2026-11-11.
+- Salesforce remains the system of record (CRM-D014).
+- No WO has Matt's recorded product acceptance yet, and production cutover is not authorised.
+- A FOUNDRY Stage 1 existing-product reassessment (2026-11-13) proposes Firm Groups and a WIP/Revenue module. It is a candidate only: see [docs/initiation/2026-11-13-existing-product-reassessment.md](docs/initiation/2026-11-13-existing-product-reassessment.md).
+- The bootstrap status "nothing is installed, EspoCRM not selected" is historical. EspoCRM is the build in use (CRM-D010, still PROPOSED).
 
 | Record | Purpose |
 |---|---|
-| [PROJECT-INITIATION-MANDATE.md](PROJECT-INITIATION-MANDATE.md) | Identity, execution target, scope, security context, blockers |
+| [PROJECT-INITIATION-MANDATE.md](PROJECT-INITIATION-MANDATE.md) | Identity, execution target, scope, security context, blockers (2026-11-06, historical) |
+| [docs/initiation/2026-11-13-existing-product-reassessment.md](docs/initiation/2026-11-13-existing-product-reassessment.md) | Stage 1 existing-product reassessment: current truth, reconciliation log, decisions needing approval |
 | [PRODUCT-VISION.md](PRODUCT-VISION.md) | Why, for whom, and the Product Goal |
 | [PRODUCT-BACKLOG.md](PRODUCT-BACKLOG.md) | Ordered increments. These are not Work Orders. |
 | [DECISIONS.md](DECISIONS.md) | Proposed and approved decisions |
 | [docs/BUILD.md](docs/BUILD.md) | How the CRM is built, where it runs, its isolation boundary and how it is verified |
+| [docs/REQUIREMENTS-TRACEABILITY.md](docs/REQUIREMENTS-TRACEABILITY.md) | Requirements traced to backlog items |
+| [docs/architecture/crm-wip-module-boundary.md](docs/architecture/crm-wip-module-boundary.md) | CRM core, FirmGroup and WIP module ownership boundary (candidate) |
+| [docs/requirements/](docs/requirements/) | FirmGroup and WIP/Revenue requirements, UX contract and field contract (candidate) |
+| [docs/discovery/wip-evidence-status.md](docs/discovery/wip-evidence-status.md) | HELM legacy-WIP evidence reconciliation |
+| [docs/delivery/](docs/delivery/) | Delivery sequence and draft WO intake briefs (no authority) |
 | [security/EXTERNAL_CODE_REGISTER.yaml](security/EXTERNAL_CODE_REGISTER.yaml) | External code and images |
 | [work-orders/](work-orders/) | Work Orders. Each is approved by exact version on its own Issue. |
 
@@ -47,7 +60,7 @@ The CRM-001 dev stack is EspoCRM 10.0.12 plus MariaDB 11.4.13, both pinned by di
   - build and verify the bundle with `scripts/release.sh <commit>` and `python3 scripts/release.py verify <bundle> --sha256 <hex>`;
   - deploy, as root, with `scripts/deploy_release.sh beta <bundle> --sha256 <hex> [--upgrade]`.
 
-  It runs as Compose project `crm-beta` behind the edge proxy `crm-beta-edge`. The edge is reached only by the PO's TLS-terminating HAProxy; crm-app itself listens only on `127.0.0.1`.
+  It runs as Compose project `crm-beta` behind the edge proxy `crm-beta-edge`, and crm-app itself listens only on `127.0.0.1`. The default (production) mode admits only the PO's TLS-terminating HAProxy. **UAT mode** (CRM-009, `CRM_BETA_MODE=uat`), which is the mode in use now, serves plain HTTP directly to the authorised internal networks under a PO risk acceptance for UAT only. See docs/BETA.md.
 
   The other scripts take `beta` as their target: `up.sh`, `backup.sh`, `restore.sh`, `export.sh`, `deploy_custom.sh`, `provision_access.py` and `provision_users.py`. `restore.sh beta --restoretest <backup>` restores a backup into the throwaway project `crm-beta-restoretest`, prints record counts and tears it down. Backups carry a checksummed `TARGET` marker and `restore.sh` accepts only its own target's marked backups from its own backup directory; a legacy unmarked dev backup needs `restore.sh dev --legacy-unmarked <backup>`. The provisioning scripts accept only the target's own base URL (beta `http://127.0.0.1:<CRM_BETA_APP_PORT>`, dev `http://<CRM_BIND_IP>:8180`). See [docs/BETA.md](docs/BETA.md). `tests/acceptance/test_beta_safe.py` is the read-only (GET-only) suite for a live beta.
 

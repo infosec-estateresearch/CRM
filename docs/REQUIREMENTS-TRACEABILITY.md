@@ -14,6 +14,8 @@
 
 Nothing is built yet. "Planned" therefore means traced to a backlog item, not delivered.
 
+*Note (2026-11-13):* the sentence above is historical, written at bootstrap. Implementation now exists on `main` and on the beta (see the Backlog's *Delivery evidence* table). The per-requirement status column below has **not** been re-assessed against that evidence; that needs a separate evidence pass. Statuses are left as written rather than claimed.
+
 ## Business requirements
 
 | ID | Requirement (source) | Backlog | Status |
@@ -71,3 +73,33 @@ Nothing is built yet. "Planned" therefore means traced to a backlog item, not de
 | Storing email attachments | D5: body only. Attachments would be a new capability. |
 | Dashboards, forecasting, leads, campaigns, quotes, products, the social feed | Unused in Salesforce |
 | Legal-entity firm model (D4) | Office-level records with a parent, as today; revisit only if billing or reporting needs it |
+
+## Expanded scope (2026-11-13): Firm Groups and WIP/Revenue
+
+- **Status:** CANDIDATE (2026-11-13), from the CGPT delivery package. It is merged here rather than kept as a separate addendum.
+- **IDs:** collision-checked against `main` at `330978598ac6`; none of them is in use. The requirements themselves are in [`docs/requirements/crm-modules-requirements.md`](requirements/crm-modules-requirements.md).
+- **Gate names:** CRM-FG-001 and CRM-WIP-001 to 004 are candidate WO titles. Their numbering is an open Architect decision (see the reassessment record, §7 row 8).
+
+| Requirement family | Business intent | Proposed PBIs | Acceptance owner / delivery gate |
+|---|---|---|---|
+| FG-01..FG-10 | Group peers independent of parent, browse and edit membership, secure audit | 018 | CRM-FG-001; independent browser/API and PO UAT |
+| FG-11 | Curated group population, no automatic tree seeding | 024 | Later mapping/seed operator gate and Matt decision |
+| WIP-01..WIP-03 | CRM master identity, WIP domain model, derived group ID | 019, 021 | CRM-WIP-001, domain/API checks |
+| WIP-04..WIP-19 | Simple Account WIP tab, validated manual entry, isolated finance permissions, no fabricated revenue | 020 | CRM-WIP-002, browser + backend + Matt UAT |
+| GRP-01..GRP-04 | Query WIP across member firms using current CRM Group; no duplicate counts | 021, 027 | CRM-WIP-003, data/permissions/relationship evidence |
+| MOD-01..MOD-02 | Dedicated left menu WIP/Revenue workspace after MVP | 022 | CRM-WIP-004, live functional navigation |
+| IMP-01..IMP-08 | Reuse/transition current spreadsheet with reliable source data, reconciled history | 023, 025 | Later WOs, restricted operator import; source decisions |
+| REV-01..REV-02 | Define and evidence real revenue and group financial calculations | 026, 027 | PO business semantics then independent financial validation |
+| Foundry record reconciliation | Truthful Vision/PBI/status/provenance/external-code coverage | 029 | Next Rogue docs-only, exact candidate review |
+
+### Existing requirement compatibility
+
+- R1–R5 (firm/address/contact) remain CRM authority; FirmGroup does not replace R1 branch parent relation.
+- R7–R11 (Enquiries/activities/email) remain unchanged and need regression, not reimplementation.
+- R12 (staff generally read CRM) must **not** be interpreted as unrestricted WIP finance read; explicit WIP ACL exception in expanded product scope.
+- R15, R19–R27 (upgradeability, pinned release, rollback, Docker) apply to every WIP/Group release.
+- M1–M6 Salesforce migration remains separately bounded; WIP never writes Salesforce.
+
+### Status mapping
+
+Every PBI/requirement and release acceptance record must distinguish proposal, reviewed draft, exact approved, engineered/tested, operator deployed, Matt UAT accepted and production cutover. 'Delivered' in an agent report is not synonymous with product acceptance. Existing CRM repo documents have stale status claims; update based on exact GitHub/runtime evidence and preserve earlier historical text in Git history.
