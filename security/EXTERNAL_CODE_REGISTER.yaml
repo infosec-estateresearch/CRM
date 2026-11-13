@@ -35,3 +35,11 @@ candidates:
     usage: crm-beta edge proxy (crm-beta-edge), beta environment, CRM-007
     usage_confirmed: "deploy/beta/compose.json service crm-beta-edge, pinned to this digest, network_mode host, read-only, cap_drop ALL, no-new-privileges, user haproxy; checked by tests/unit/test_beta.py (CRM-007)."
     approval: none
+  - name: python
+    origin: https://hub.docker.com/_/python   # image: docker.io/library/python
+    version: "3.13.9-slim-trixie"
+    digest: "sha256:326df678c20c78d465db501563f3492d17c42a4afe33a1f2bf5406a1d56b0e86"   # pinned in deploy/migrate/compose.json
+    licence: PSF-2.0
+    usage: crm-migrate extractor (CRM-002)
+    approval: none
+    notes: "Used unmodified; no image is built. Runs python -I -B with the read-only migrate/ mount; standard library only."

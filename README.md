@@ -14,6 +14,20 @@ Estate Research's self-hosted replacement for Salesforce. It is delivered increm
 | [security/EXTERNAL_CODE_REGISTER.yaml](security/EXTERNAL_CODE_REGISTER.yaml) | External code and images |
 | [work-orders/](work-orders/) | Work Orders. Each is approved by exact version on its own Issue. |
 
+## Migration extractor
+
+`crm-migrate` (CRM-002) is a read-only, containerised Salesforce extractor. Run it as root on DOCKER1, and only at a stage that has been authorised. See [docs/MIGRATION.md](docs/MIGRATION.md).
+
+```sh
+sudo scripts/migrate.sh selftest            # synthetic only, no network (O1)
+sudo scripts/migrate.sh credentials         # prompts silently, writes /srv/CRM/runtime/migrate/env
+sudo scripts/migrate.sh contract-check      # L1: metadata only
+sudo scripts/migrate.sh count               # L2: counts only
+sudo scripts/migrate.sh extract             # L3: reconciled baseline, sealed root-only
+sudo scripts/migrate.sh reconcile <snapshot-id> [<previous-id>]   # counts-only report
+python3 -I -B -m unittest discover -s tests/migrate -t . -v      # tests: no network, no Docker
+```
+
 Rules:
 - GitHub is the authoritative record.
 - This repository is public, so it must not contain secrets, host addresses, staff names, customer or firm names, or Salesforce identifiers.

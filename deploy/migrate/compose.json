@@ -1,0 +1,73 @@
+{
+  "name": "crm-migrate",
+  "services": {
+    "crm-migrate": {
+      "image": "python:3.13.9-slim-trixie@sha256:326df678c20c78d465db501563f3492d17c42a4afe33a1f2bf5406a1d56b0e86",
+      "pull_policy": "missing",
+      "user": "64021:64021",
+      "read_only": true,
+      "cap_drop": ["ALL"],
+      "security_opt": ["no-new-privileges:true"],
+      "pids_limit": 128,
+      "tmpfs": ["/tmp:noexec,nosuid,size=64m"],
+      "working_dir": "/tmp",
+      "entrypoint": ["python", "-I", "-B", "/opt/crm-migrate/bin/crm-migrate.py"],
+      "command": ["contract-check", "--out", "/out"],
+      "env_file": ["/srv/CRM/runtime/migrate/env"],
+      "networks": ["crm-migrate-net"],
+      "restart": "no",
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "../../migrate",
+          "target": "/opt/crm-migrate",
+          "read_only": true,
+          "bind": {"create_host_path": false}
+        },
+        {
+          "type": "bind",
+          "source": "${CRM_MIGRATE_RUN_DIR:?CRM_MIGRATE_RUN_DIR is set per run by scripts/migrate.sh}",
+          "target": "/out",
+          "read_only": false,
+          "bind": {"create_host_path": false}
+        }
+      ]
+    },
+    "crm-migrate-selftest": {
+      "image": "python:3.13.9-slim-trixie@sha256:326df678c20c78d465db501563f3492d17c42a4afe33a1f2bf5406a1d56b0e86",
+      "pull_policy": "missing",
+      "user": "64021:64021",
+      "read_only": true,
+      "cap_drop": ["ALL"],
+      "security_opt": ["no-new-privileges:true"],
+      "pids_limit": 128,
+      "tmpfs": ["/tmp:noexec,nosuid,size=64m"],
+      "working_dir": "/tmp",
+      "entrypoint": ["python", "-I", "-B", "/opt/crm-migrate/bin/crm-migrate.py"],
+      "command": ["selftest", "--out", "/out"],
+      "network_mode": "none",
+      "restart": "no",
+      "volumes": [
+        {
+          "type": "bind",
+          "source": "../../migrate",
+          "target": "/opt/crm-migrate",
+          "read_only": true,
+          "bind": {"create_host_path": false}
+        },
+        {
+          "type": "bind",
+          "source": "${CRM_MIGRATE_RUN_DIR:?CRM_MIGRATE_RUN_DIR is set per run by scripts/migrate.sh}",
+          "target": "/out",
+          "read_only": false,
+          "bind": {"create_host_path": false}
+        }
+      ]
+    }
+  },
+  "networks": {
+    "crm-migrate-net": {
+      "driver": "bridge"
+    }
+  }
+}

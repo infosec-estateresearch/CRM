@@ -1,0 +1,225 @@
+{
+  "base": "main",
+  "base_sha": "fa1ed80eed749cb2c0e7908ff72ad60a793e3e24",
+  "branch": "forge/CRM-002",
+  "candidate": "29c74a2936e2f3d6ea7c7fb04c88f8040cdb4c36",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 2,
+    "tester": 1
+  },
+  "created": "2026-11-10T17:17:00Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-10T17:18:10Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 124,
+      "output": "dispatch/0-engineer.json",
+      "reported": null,
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-10T17:48:10Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "specialist exit 124, no usable result: forge-dispatch: no result within 1800s; stopped",
+      "outcome": "void",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-10T17:48:10Z",
+      "type": "result"
+    },
+    {
+      "candidate": null,
+      "id": 3,
+      "n": 2,
+      "role": "engineer",
+      "round": 2,
+      "t": "2026-11-10T17:48:38Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/3-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 3,
+      "t": "2026-11-10T17:50:13Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "round-1 work completed in round 2 (round 1 timed out); 159 tests OK; non-vacuity M1-M4",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 2,
+      "spawn": 3,
+      "t": "2026-11-10T17:50:55Z",
+      "type": "result"
+    },
+    {
+      "round": 2,
+      "sha": "29c74a2936e2f3d6ea7c7fb04c88f8040cdb4c36",
+      "t": "2026-11-10T17:50:56Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "29c74a2936e2f3d6ea7c7fb04c88f8040cdb4c36",
+      "id": 7,
+      "n": 1,
+      "role": "auditor",
+      "round": 2,
+      "t": "2026-11-10T17:51:12Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "29c74a2936e2f3d6ea7c7fb04c88f8040cdb4c36",
+      "id": 8,
+      "n": 1,
+      "role": "tester",
+      "round": 2,
+      "t": "2026-11-10T17:51:12Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "29c74a2936e2f3d6ea7c7fb04c88f8040cdb4c36",
+      "id": 9,
+      "n": 1,
+      "role": "devsecops",
+      "round": 2,
+      "t": "2026-11-10T17:51:12Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/7-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 7,
+      "t": "2026-11-10T17:58:16Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/8-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 8,
+      "t": "2026-11-10T17:58:16Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/9-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 9,
+      "t": "2026-11-10T17:58:16Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "29c74a2936e2f3d6ea7c7fb04c88f8040cdb4c36",
+      "findings": [
+        {
+          "key": "egress-not-https-only",
+          "severity": "advisory"
+        },
+        {
+          "key": "regex-dollar-anchor",
+          "severity": "advisory"
+        },
+        {
+          "key": "redundant-checks-untested",
+          "severity": "advisory"
+        },
+        {
+          "key": "runtime-path-tautology",
+          "severity": "advisory"
+        }
+      ],
+      "note": "PASS; advisories carried to CRM-002-S",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 2,
+      "spawn": 7,
+      "t": "2026-11-10T17:59:10Z",
+      "type": "result"
+    },
+    {
+      "candidate": "29c74a2936e2f3d6ea7c7fb04c88f8040cdb4c36",
+      "findings": [
+        {
+          "key": "anchor-trailing-newline",
+          "severity": "advisory"
+        },
+        {
+          "key": "egress-not-https-only",
+          "severity": "advisory"
+        }
+      ],
+      "note": "159 tests OK",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 2,
+      "spawn": 8,
+      "t": "2026-11-10T17:59:10Z",
+      "type": "result"
+    },
+    {
+      "candidate": "29c74a2936e2f3d6ea7c7fb04c88f8040cdb4c36",
+      "findings": [
+        {
+          "key": "regex-dollar-anchor",
+          "severity": "advisory"
+        },
+        {
+          "key": "egress-not-https-only",
+          "severity": "advisory"
+        }
+      ],
+      "note": "30-case policy probe all refused; gitleaks clean",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 2,
+      "spawn": 9,
+      "t": "2026-11-10T17:59:10Z",
+      "type": "result"
+    },
+    {
+      "note": "Candidate 29c74a2936e2f3d6ea7c7fb04c88f8040cdb4c36: Auditor/Tester/DevSecOps PASS, advisories only (carried to CRM-002-S). O1/L1-L3 not executed.",
+      "outcome": "DELIVERED",
+      "t": "2026-11-10T17:59:10Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-002",
+  "host": "docker1",
+  "known_commit": "0b954dcdb2bcaeed57184c92c264e604a651e374",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-002",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 2,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-002",
+  "wo": "CRM-002",
+  "worktree": "/srv/CRM/worktrees/CRM-002"
+}
