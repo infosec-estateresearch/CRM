@@ -31,3 +31,34 @@ Business decisions needed before PBI-005 can close:
 - whether to archive firms with no recorded activity;
 - how to treat the legacy notes;
 - how to resolve the flagged duplicate sets.
+
+## Expanded scope — proposed decisions (2026-11-13)
+
+These come from the CGPT Architect delivery package of 2026-11-13 (`CRM-D-W01` to `W13`; mapping in [`docs/initiation/2026-11-13-existing-product-reassessment.md` §9](docs/initiation/2026-11-13-existing-product-reassessment.md#9-decision-id-mapping)).
+- **Status:** all are PROPOSED. PO-agreed concepts still need Matt's exact-version approval, recorded on GitHub.
+- **Earlier rows:** none of the rows above is rewritten. CRM-D004 and CRM-D006 are amended by CRM-D031, not edited.
+- **Doctrine:** these are CRM product decisions, not FOUNDRY or ForgeV2 doctrine.
+
+| ID | Decision | Status | Source |
+|---|---|---|---|
+| CRM-D020 | CRM owns Accounts, Contacts, Firm Groups, Enquiries, staff identities and their relationships. WIP reads these and never becomes a competing master. | PROPOSED | PO direction (conversation), 2026-11-13 |
+| CRM-D021 | The new WIP is a **CRM functional module**: one CRM product and release, with WIP's domain and extension code kept separate and independently testable. Ordinary CRM work must survive a WIP failure. This is logical separation, not process isolation. | PROPOSED | PO direction, 2026-11-13 |
+| CRM-D022 | New WIP code and documentation live in this repository. The legacy WIP repository, database, workbook and source history stay unchanged: no submodule, subtree, cross-repo runtime dependency or history merge. | PROPOSED | Architect, 2026-11-13 |
+| CRM-D023 | An independent `FirmGroup` entity with an optional Account `firmGroup` link (zero or one group per firm), not a designated group-Account. Peer firms can share a group without a parent. ER Managers and Admins change membership; ER Staff and Intake view. The Salesforce-derived `parent`/`branches` link (CRM-D004) is kept and stays independent. | PROPOSED | PO and Architect, 2026-11-12/13 |
+| CRM-D024 | **No blanket seeding** of Firm Groups from the 1,366 Salesforce parent trees. Rogue proposed this on 2026-11-12; it is withdrawn on HELM evidence (the 36 curated WIP groups are mostly subsets of a tree or cross several trees). Population is a separate, reviewed, PO-authorised data operation (CRM-PBI-024). | PROPOSED | Architect correction on HELM evidence, 2026-11-13 |
+| CRM-D025 | The first WIP capability is an **Account WIP/Revenue tab**: a list for that firm only, validated add/edit, and the correct Account link. A broad dashboard or an importer is not a prerequisite. | PROPOSED | PO MVP scope, 2026-11-13 |
+| CRM-D026 | A left-hand **WIP/Revenue** navigation workspace comes only *after* the Account MVP is accepted. It must be functional, never an inert placeholder. | PROPOSED | PO, 2026-11-13 |
+| CRM-D027 | `WipCase` has a required CRM `accountId` (exposed as `firmId`). WIP exposes the current, **derived, read-only** `firmGroupId` (`groupId`) from CRM. WIP never stores or edits group membership. A group move changes current views, not financial rows. | PROPOSED | PO identity requirement, 2026-11-13 |
+| CRM-D028 | **Revenue is not defined.** Workbook month sheets are instruction cohorts and revisions, and `actual_yield` is a blended field. There is no automatic revenue, period-flow, snapshot or group-sum interpretation until the PO defines revenue (CRM-PBI-026). | PROPOSED | Architect, financial integrity, 2026-11-13 |
+| CRM-D029 | WIP financial access is **deny-by-default**, separate from general CRM Account read (R12), and enforced in the server, the API and the GUI, with attributable change history. | PROPOSED | Architect, security, 2026-11-13 |
+| CRM-D030 | The interim workbook/CSV path stays separate from the manual MVP. A later importer needs a verified source contract, recovery of the skipped sheets, a deterministic Salesforce-id crosswalk, rejects, provenance and an approved real-data migration. | PROPOSED | Architect, import, 2026-11-13 |
+| CRM-D031 | **Amends CRM-D004 and CRM-D006.** D004 (parent/head-office link) stays valid for the historical branch hierarchy, alongside Firm Groups (D023). D006's "WIP owns financial WIP" now means the CRM's WIP module owns financial case *references* and observations. Case Manager remains the operational and legal case master; WIP does not replace it. | PROPOSED | Architect, 2026-11-13 |
+| CRM-D032 | Work proceeds through the FOUNDRY Stage 1 existing-product reassessment, the revised living Vision and Backlog, and separately exact-approved, bounded WOs. No broad approval substitutes for any WO. | PROPOSED | FOUNDRY Stage 1 v0.4 |
+
+Questions held for later PO decisions; they do not block the synthetic MVP:
+- which staff may read, add or edit WIP financials (proposed start: a dedicated WIP Finance grant, admins for operator UAT, everyone else denied);
+- the live transitional exchange format (XLSX or CSV);
+- what qualifies as revenue;
+- source correction of the skipped sheets, impossible or missing dates, the reject backlog and the summary-formula typo;
+- whether Case Manager keeps the operational case records (default: yes);
+- whether group financial reporting uses current or historical membership (current for the MVP; historical deferred).

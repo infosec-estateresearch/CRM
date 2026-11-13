@@ -1,13 +1,17 @@
 # External software register — Estate Research CRM
-# Coverage: the repository holds no incorporated code at bootstrap.
-# The entries below are CANDIDATES, not approvals. Approval of CRM-001 approves their use
-# in the dev environment only (FOUNDRY secure-engineering).
-# CRM-001 adds no other dependency: scripts and tests use the Python standard library only,
-# and custom/ is Estate Research's own EspoCRM metadata and PHP (no third-party code).
+# History: at bootstrap (2026-11-09) this register declared "no-incorporated-code"; that is no longer true.
+# Reconciled 2026-11-13 (FOUNDRY Stage 1 v0.4 existing-product reassessment, docs/initiation/
+# 2026-11-13-existing-product-reassessment.md section 10) from the repository at 330978598ac6 and the deployed beta.
+# The list key stays "candidates" because scripts/release.py and tests/unit/compose_policy.py parse it
+# (name/version/digest lines); every entry below is INCORPORATED (in use), and none carries a recorded approval.
+# Scripts, the crm-load importer and the tests use the Python standard library only (import scan of
+# scripts/, load/ and tests/); custom/ is Estate Research's own EspoCRM metadata and PHP (no third-party code).
 coverage:
-  status: no-incorporated-code
-  basis: "Bootstrap commit contains documentation only."
-  assessed: 2026-11-09
+  status: partial
+  basis: "Top-level images verified against deploy/compose.json, deploy/beta/compose.json and deploy/beta/restoretest/compose.json (pinned by digest, checked by scripts/release.py and tests/unit/test_compose_policy.py); Python imports scanned. The contents of the upstream images (PHP, Apache, EspoCRM bundled PHP/JS libraries, OS base layers) are NOT inventoried: no SBOM."
+  assessed: 2026-11-13
+  previous: {status: no-incorporated-code, basis: "Bootstrap commit contains documentation only.", assessed: 2026-11-09}
+  approval_evidence: "No component approval is recorded in this register. Use in dev and beta followed Architect-approved WOs (CRM-001, CRM-007/007R); whether that constitutes component approval is for the Architect to confirm."
 candidates:
   - name: espocrm
     origin: https://github.com/espocrm/espocrm   # image: docker.io/espocrm/espocrm
@@ -18,6 +22,7 @@ candidates:
     usage: CRM application and job daemon (same image), dev environment, CRM-001
     usage_confirmed: "deploy/compose.json services crm-app and crm-daemon (entrypoint docker-daemon.sh), pinned to this exact tag and digest; checked by tests/unit/test_compose_policy.py (CRM-001)."
     approval: none
+    incorporated: true
     notes: "Bus factor ~1 upstream; regular security advisories; patch routine required (CRM-PBI-002/008)."
   - name: mariadb
     origin: https://hub.docker.com/_/mariadb   # image: docker.io/library/mariadb
@@ -27,6 +32,7 @@ candidates:
     usage: CRM database, dev environment, CRM-001
     usage_confirmed: "deploy/compose.json service crm-db, pinned to this exact tag and digest, no published port; checked by tests/unit/test_compose_policy.py (CRM-001)."
     approval: none
+    incorporated: true
   - name: haproxy
     origin: https://hub.docker.com/_/haproxy   # image: docker.io/library/haproxy, tag 3.2-alpine
     version: "3.2.26 (3.2 LTS, alpine)"
@@ -35,3 +41,17 @@ candidates:
     usage: crm-beta edge proxy (crm-beta-edge), beta environment, CRM-007
     usage_confirmed: "deploy/beta/compose.json service crm-beta-edge, pinned to this digest, network_mode host, read-only, cap_drop ALL, no-new-privileges, user haproxy; checked by tests/unit/test_beta.py (CRM-007)."
     approval: none
+    incorporated: true
+# Not incorporated: legacy WIP (infosec-estateresearch/WIP@91b2af19877b498ed307ee9f1218b3243b2b60ba) dependencies,
+# recorded so they are not mistaken for CRM components. Any future reuse needs its own WO with ownership,
+# licence and provenance assessment and exact-commit pinning (CRM-D022).
+not_incorporated:
+  - component: legacy-wip-python-runtime
+    detail: "PyMySQL, PyYAML, openpyxl, FastAPI, uvicorn (legacy WIP application only)"
+    status: not-incorporated
+  - component: legacy-wip-web-cdn
+    detail: "Bootstrap and htmx loaded from CDNs by the legacy WIP UI"
+    status: not-incorporated
+  - component: legacy-wip-and-eric-parser-source
+    detail: "Workbook header/alias parser concepts; repository has no LICENSE file, so Estate Research ownership/right to reuse must be confirmed"
+    status: not-incorporated
