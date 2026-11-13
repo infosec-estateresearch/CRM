@@ -42,6 +42,7 @@
 | WIP-16 | WIP record never writes CRM master attributes | Before/after fingerprint of Account/Contact/FirmGroup/Opportunity/master fields unchanged after create/update/import failures |
 | WIP-17 | Correct display labels, no invented revenue | WIP and fees invoiced labelled as source/manual values; `revisedOrActualYield` not called actual revenue; no Revenue KPI until PO definition |
 | WIP-18 | Manual form protects against spreadsheet-era input defects | Invalid years, malformed dates, repeat headers where relevant, currency precision and cross-field validation are rejected or flagged clearly |
+| WIP-19 | An Account with linked WIP records keeps its WIP history intact | Deleting, merging or reassigning an Account never silently orphans, reassigns or cascade-deletes its WipCase or WipFinancialPeriod records. **Default:** a destructive Account operation (delete, merge into another Account, or a mass action that would remove it) is **refused** while linked WIP records exist, unless a separately approved, audited business workflow explicitly preserves them. Tested through the API, the GUI and with **administrator** privileges, including EspoCRM's merge and mass-delete paths. WIP case and observation counts and hashes are unchanged after every refused attempt. The existing protection that a firm with Enquiries cannot be deleted, even by an admin (CRM-003), is preserved and regression-tested. |
 
 ## Group-WIP and subsequent workspace requirements
 

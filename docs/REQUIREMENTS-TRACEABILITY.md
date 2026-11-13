@@ -85,7 +85,7 @@ Nothing is built yet. "Planned" therefore means traced to a backlog item, not de
 | FG-01..FG-10 | Group peers independent of parent, browse and edit membership, secure audit | 018 | CRM-FG-001; independent browser/API and PO UAT |
 | FG-11 | Curated group population, no automatic tree seeding | 024 | Later mapping/seed operator gate and Matt decision |
 | WIP-01..WIP-03 | CRM master identity, WIP domain model, derived group ID | 019, 021 | CRM-WIP-001, domain/API checks |
-| WIP-04..WIP-18 | Simple Account WIP tab, validated manual entry, isolated finance permissions, no fabricated revenue | 020 | CRM-WIP-002, browser + backend + Matt UAT |
+| WIP-04..WIP-19 | Simple Account WIP tab, validated manual entry, isolated finance permissions, no fabricated revenue | 020 | CRM-WIP-002, browser + backend + Matt UAT |
 | GRP-01..GRP-04 | Query WIP across member firms using current CRM Group; no duplicate counts | 021, 027 | CRM-WIP-003, data/permissions/relationship evidence |
 | MOD-01..MOD-02 | Dedicated left menu WIP/Revenue workspace after MVP | 022 | CRM-WIP-004, live functional navigation |
 | IMP-01..IMP-08 | Reuse/transition current spreadsheet with reliable source data, reconciled history | 023, 025 | Later WOs, restricted operator import; source decisions |

@@ -44,9 +44,22 @@ Separate group mapping/seed, legacy financial historical import, actual revenue 
 
 - Unique PBI/WO ID, exact GitHub Issue, immutable artifact (path/commit), timestamped CGPT approval and Matt decision when required.
 - Verified CRM repository main SHA, DOCKER1 host/root, canonical checkout and isolated worktree parent; actual Forge engine revision and protected path, remote route if needed. Do not use an inherited path without proof.
+- **ForgeV2 sandbox entry gate (verified separately for each WO).**
+  - The only recorded sandbox acceptance, `maff0000/forgev2#5` comment 6746699026 (2026-11-09), was **accepted for CRM-001 only**, against engine `63b6b8ab6c6d3c12d1ef3f0aeabe2ca22fbefb82`. It was explicitly not a general ForgeV2 certification.
+  - Later WOs (CRM-002 to CRM-009-I) **ran** on that engine under exact-version WO approvals. That is execution evidence, not sandbox acceptance.
+  - General sandbox acceptance (ENGINE-SANDBOX-TEST-001, forgev2#5, still open) is **unverified**.
+  - Before the next FirmGroup WO is dispatched, the PL must show a sandbox entry gate that CGPT accepts as applying to that WO. Without one, the WO is **BLOCKED**, with evidence and escalation to CGPT.
+  - The original PIM blocker B1 is **not** globally cleared. No ForgeV2 change is authorised.
+- **Unit-suite baseline defect.** `tests/unit/test_beta.py` `TestBetaRuntimePinned.test_shell_guard` fails on `main` at `330978598ac6` because the real beta runtime now exists on the host. It is unresolved pre-existing evidence, not a passing test.
+  - The unit suite cannot be claimed green for the next release until a narrowly bounded repair WO, or an independently accepted resolution, closes it.
+  - The repair is not to be mixed into FirmGroup or WIP functionality.
+- **Release-packaging compatibility (PBI-016/017).**
+  - The current beta release deviates from PBI-016: it runs the pinned upstream EspoCRM image with `custom/` deployed into the runtime, not a baked `crm-espocrm` image (CRM-D017).
+  - A working beta release is **not** evidence that the baked-image or clean-host packaging requirements are met.
+  - Every FirmGroup/WIP release keeps the verified existing release process (`scripts/release.sh` and `release.py verify`, `deploy_release.sh --sha256 --upgrade`, the beta-safe suite), and must not claim full PBI-016/017 acceptance without that evidence.
 - Bounded component/file allowlist and exclusions including FOUNDRY, ForgeV2, legacy WIP repo, Salesforce, CRM beta data and unrelated services; no silent change to application core.
 - Explicit positive/negative acceptance criteria, synthetic fixtures and reproducible tests; every UI WO includes independent *real-browser* journeys and screenshots or equivalent recorded evidence.
-- Engineer → independent Auditor → independent Tester → independent DevSecOps on **same unchanged candidate**; changed candidate resets evidence gates, not role execution limits. Four executions per specialist/WO (absent separately authorised exception), documented exact log paths and owner; FAIL/BLOCKED on exhausted counter or missing entry gate.
+- Engineer → independent Auditor → independent Tester → independent DevSecOps on **same unchanged candidate**; changed candidate resets evidence gates, not role execution limits. **Hard maximum of four executions per specialist per WO, including the first** (FOUNDRY). No WO, approval or exception can authorise a fifth: an exhausted limit is **FAIL** with escalation to CGPT. Documented exact log paths and owner; a missing entry gate is **BLOCKED**, with evidence and escalation to CGPT.
 - Test role/REST/API denial, dependencies and supply-chain provenance, no customer/financial data in GitHub or specialists, master field fingerprints and backup/rollback. Skipped acceptance check is **not PASS**.
 - After independent PASS Rogue returns exact reviewed head/evidence to CGPT for architectural acceptance, then operator release with explicit appropriate authorisation, then Matt UAT. Do not treat PR/green tests as business acceptance.
 

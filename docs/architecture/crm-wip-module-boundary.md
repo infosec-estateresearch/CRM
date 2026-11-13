@@ -47,7 +47,7 @@ Each module has its own data models, migrations, service functions, tests, exten
 - Manual forms may capture values directly (validated Decimal GBP); do not force the historic workbook formula on manual entries without the business approving its interpretation.
 - Observations should preserve source date/sheet/row and import batch where applicable; manual entry records provenance type, author and edit audit. Distinguish empty/not known from zero.
 - `WipFinancialPeriod` is a provisional technical name: field semantics are observations associated with an instruction/source period, **not guaranteed monthly snapshots**. Do not impose unique(case,year,month) if repeated observations legitimately exist without a revision identity.
-- No reliable Case↔Opportunity match exists; optional link empty unless confirmed by business evidence. External operational/legal case master remains outside scope.
+- No reliable Case↔Opportunity match exists; optional link empty unless confirmed by business evidence. Case Manager's ownership of operational and legal cases is a *proposed* boundary (CRM-D006 and D031), not a verified integration: HELM could not inspect Case Manager, and the WIP module must not replace its functions without separate product authority. That external operational/legal case master remains outside scope.
 
 ## Failure containment and authorisation
 

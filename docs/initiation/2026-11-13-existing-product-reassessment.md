@@ -49,10 +49,20 @@ These facts replace the bootstrap statements "nothing is installed" and "no inco
   - Most WO PRs remain open because their branches reached `main` through `release/beta-1` (#43).
   - Matt's per-WO walkthrough and acceptance (CRM-D013) is not recorded for any WO.
   - Customer-beta UAT (CRM-PBI-013) is in progress.
-- **Stale blocker:**
-  - The PIM's B1 says ForgeV2 sandbox acceptance is BLOCKED (forgev2#5), with the stop rule "no ForgeV2 application WO runs while B1 is BLOCKED".
-  - forgev2#5 is still **open** on 2026-11-13, yet application WOs from CRM-002 onwards were dispatched under Architect exact-version approvals recorded on Issue #9.
-  - The Architect must confirm how B1 was superseded, or record it as an accepted exception. This addendum does not resolve it.
+- **ForgeV2 sandbox gate (PIM B1). Not globally cleared.** The evidence has four parts, kept apart:
+  1. **Historical CRM-001 acceptance.** CGPT accepted the host sandbox gate **for CRM-001 only** (`maff0000/forgev2#5`, comment 6746699026, 2026-11-09), against engine `63b6b8ab6c6d3c12d1ef3f0aeabe2ca22fbefb82` and HELM's run 2 evidence. It was explicitly "not a general ForgeV2 release certification".
+  2. **Later execution evidence.** WOs CRM-002 to CRM-009-I ran on the same engine revision under exact-version WO approvals recorded on Issue #9. Each has a `.forge/<WO>/REPORT.md`. This shows the engine executed; it is **not** sandbox acceptance for those WOs.
+  3. **General sandbox acceptance: unverified.** ENGINE-SANDBOX-TEST-001 (forgev2#5) is still open on 2026-11-13.
+  4. **Entry gate for the next WO.** Before the first FirmGroup WO is dispatched, a sandbox entry-gate verification that CGPT accepts as applying to that WO is required. If it is missing, the WO is **BLOCKED**, with evidence and escalation to CGPT.
+
+  No ForgeV2 change is authorised by this record.
+- **Unit-suite baseline defect (unresolved).**
+  - `tests/unit/test_beta.py` `TestBetaRuntimePinned.test_shell_guard` **fails** on `main` at `330978598ac6`, run as the non-root PL identity (560 of 561 pass). The test assumes the real beta runtime directory is absent from the host, and it now exists.
+  - This is pre-existing evidence, not a passing test, and not caused by this documentation candidate.
+  - The unit suite cannot be claimed green for the next release until a narrowly bounded repair, or an independently accepted resolution, closes it. That repair is not to be mixed into FirmGroup or WIP work.
+- **Release-packaging deviation (PBI-016/017).**
+  - Beta runs the pinned upstream EspoCRM image with `custom/` deployed into the runtime, not a baked `crm-espocrm` image (CRM-D017).
+  - The working beta release does not prove the baked-image or clean-host packaging requirements. These are recorded as delivery gates in `docs/delivery/crm-module-sequencing.md`.
 
 ## 3. Reason for reassessment and the proposed direction
 
@@ -122,7 +132,9 @@ The package was reconciled, not copied:
 | 8 | Candidate WO names `CRM-FG-001`, `CRM-WIP-001` and later | Kept as *candidate titles*. The existing WO series is `CRM-0NN[-X]` (latest CRM-009-I). **Decision for the Architect:** keep the new prefixes, or number them CRM-010 onwards. | Naming is an Architect choice |
 | 9 | `wip-evidence-status.md`: host paths, legacy database name, workbook filename, root Git-config path | Generalised ("legacy WIP application and database on the development host", "master WIP workbook (restricted)") | CRM-D011: host details beyond the bare hostname are not published |
 | 10 | Package PIM addendum: "`main/` and `worktrees/` under root" | Corrected: owned by the multi-project PL identity; only runtime state is root-owned | Host evidence |
-| 11 | Package: "prior PIM records ForgeV2 `63b6b8ab…`, not proof of current installed state" | Verified that the installed revision equals the pin (§1). Recorded B1 and forgev2#5 still open (§2). | Truthful engine state |
+| 11 | Package: "prior PIM records ForgeV2 `63b6b8ab…`, not proof of current installed state" | Verified that the installed revision equals the pin (§1). The sandbox gate is split into CRM-001-only acceptance, later execution evidence, unverified general acceptance and the next-WO entry gate (§2; Architect review of PR #55, item 3) | Truthful engine state |
+| 17 | Case Manager ownership in CRM-D006 and D031 | Recorded as a **proposed** ownership boundary (PoC D6), not a verified operational integration. HELM could not inspect Case Manager. The WIP module needs separate product authority to replace any Case Manager function (Architect review of PR #55, item 6) | Provenance |
+| 18 | Account deletion, merge or reassignment with linked WIP records | New requirement WIP-19: refused by default, tested through the API, the GUI and as admin; the existing Enquiry deletion protection is kept (Architect review of PR #55, item 2) | Referential integrity |
 | 12 | Original Vision constraint "WIP … not affected by CRM work" and CRM-D006 "WIP owns financial WIP" | Kept for the **legacy** WIP system. Superseded for the new WIP module by CRM-D020 to D022 and CRM-D031 (amendment, not rewrite) | Explicit supersession |
 | 13 | Original Vision "Out of scope: Dashboards, forecasting" | Still out of scope. WIP/Revenue reporting is a separate, gated capability (CRM-PBI-026/027); no Revenue KPI until defined | Avoid contradiction |
 | 14 | README "Status: initiation. Nothing is installed or released" and "edge reached only by the PO's TLS HAProxy" | Updated to the current state (beta in UAT mode, CRM-009); production HTTPS stays the default mode | Stale |
@@ -148,7 +160,7 @@ The package was reconciled, not copied:
    - the status, fee-type and case-type vocabularies;
    - whether group reporting uses current or historical membership;
    - whether Case Manager keeps the operational case master.
-5. **For the Architect, not Matt:** WO numbering (§7 row 8), and how PIM B1 was superseded (§2).
+5. **For the Architect, not Matt:** WO numbering (§7 row 8), and the sandbox entry gate for the next WO (§2; B1 is not globally cleared).
 
 ## 9. Decision ID mapping
 
