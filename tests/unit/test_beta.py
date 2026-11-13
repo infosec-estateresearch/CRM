@@ -345,8 +345,13 @@ class TestEdgePolicy(unittest.TestCase):
 
 FAKE_STAT = """#!/usr/bin/env bash
 # Plays root ownership for paths under FAKE_ROOT_DIR (tests do not run as root).
+# FAKE_NONROOT_DIR (opt-in) plays a non-root owner (1000) for exactly that path,
+# over FAKE_ROOT_DIR, whatever the real owner looks like (CRM-TEST-001).
 if [ "$1" = -c ] && [ "$2" = '%u %a' ]; then
     real=$("$REAL_STAT" -c '%a' -- "$4")
+    if [ -n "${FAKE_NONROOT_DIR:-}" ] && [ "$4" = "$FAKE_NONROOT_DIR" ]; then
+        echo "1000 $real"; exit 0
+    fi
     case "$4" in "$FAKE_ROOT_DIR"*) echo "0 $real"; exit 0 ;; esac
 fi
 exec "$REAL_STAT" "$@"
@@ -561,38 +566,136 @@ class TestBetaRuntimePinned(ShellEnv):
                     self.assertEqual(ca.main(["beta"], environ), 2)
                 self.assertIn("refusing to run", err.getvalue())
 
-    def shell(self, target, environ):
-        code = (f"set -euo pipefail; . {SCRIPTS}/lib/common.sh; require_target {target}; "
+    BETA = "/srv/CRM/runtime/beta"  # the production constant (CRM_BETA_RUNTIME)
+    PINNED = "the beta runtime is " + BETA
+
+    def shell(self, target, environ, scripts=SCRIPTS):
+        code = (f"set -euo pipefail; . {scripts}/lib/common.sh; require_target {target}; "
                 'echo "RUNTIME=$CRM_RUNTIME_DIR"')
         env = {"PATH": self.bin + os.pathsep + os.environ["PATH"], "REAL_STAT": shutil.which("stat"),
                "FAKE_ROOT_DIR": os.path.join(self.tmp, "runtime"), **environ}
         return subprocess.run(["bash", "-c", code], capture_output=True, text=True, env=env)
+
+    def assert_no_seam_refused(self, res):
+        """T-a: without the seam, beta is the constant and it is refused."""
+        self.assertEqual(res.returncode, 2, res.stdout + res.stderr)
+        self.assertIn("refusing to run", res.stderr)
+        self.assertIn(self.BETA, res.stderr)
+        self.assertNotIn("RUNTIME=", res.stdout)
 
     def test_shell_guard(self):
         root = os.path.join(self.tmp, "runtime")
         res = self.shell("beta", {"CRM_TEST_ROOT": root})
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn(f"RUNTIME={self.runtime}", res.stdout)
-        # No seam: the constant (absent in the sandbox, so the private-runtime guard names it).
-        res = self.shell("beta", {})
+        # No seam: the constant. It is refused whatever the host holds there: the
+        # fake stat plays a non-root owner for it, so a real root-owned 0700
+        # runtime (as on DOCKER1) is refused at the ownership branch, and an
+        # absent one at the not-a-real-directory branch (CRM-TEST-001).
+        res = self.shell("beta", {"FAKE_NONROOT_DIR": self.BETA})
         self.assertEqual(res.returncode, 2)
         self.assertIn("/srv/CRM/runtime/beta", res.stderr)
-        for label, environ in {
-                "tmp runtime without seam": {"CRM_RUNTIME_DIR": self.runtime},
-                "other runtime": {"CRM_RUNTIME_DIR": "/srv/CRM/other/beta"},
-                "seam outside /tmp": {"CRM_TEST_ROOT": "/srv/CRM/runtime"},
-                "seam with ..": {"CRM_TEST_ROOT": root + "/../../../../srv/CRM/runtime"},
-                "seam missing": {"CRM_TEST_ROOT": root + "/nope"}}.items():
+        self.assert_no_seam_refused(res)
+        for label, environ, message in (
+                ("tmp runtime without seam", {"CRM_RUNTIME_DIR": self.runtime}, self.PINNED),
+                ("other runtime", {"CRM_RUNTIME_DIR": "/srv/CRM/other/beta"}, self.PINNED),
+                ("seam outside /tmp", {"CRM_TEST_ROOT": "/srv/CRM/runtime"}, None),
+                ("seam with ..", {"CRM_TEST_ROOT": root + "/../../../../srv/CRM/runtime"}, None),
+                ("seam missing", {"CRM_TEST_ROOT": root + "/nope"}, None)):
             with self.subTest(case=label):
                 res = self.shell("beta", environ)
                 self.assertEqual(res.returncode, 2, res.stdout)
                 self.assertIn("refusing to run", res.stderr)
                 self.assertNotIn("RUNTIME=", res.stdout)
+                if message:  # T-a': refused by the pinning guard itself
+                    self.assertIn(message, res.stderr)
         # dev is unchanged: CRM_RUNTIME_DIR is honoured without any seam.
         dev = os.path.join(self.tmp, "elsewhere", "dev")
         res = self.shell("dev", {"CRM_RUNTIME_DIR": dev})
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertIn(f"RUNTIME={dev}", res.stdout)
+
+    def test_shell_guard_refuses_a_present_non_private_runtime(self):
+        """T-b: an existing (synthetic) beta runtime under the seam that is not
+        root-owned 0700 is refused at the ownership/mode branch."""
+        seam = {"CRM_TEST_ROOT": os.path.join(self.tmp, "runtime")}
+        cases = (("non-root owner", {"FAKE_NONROOT_DIR": self.runtime}, 0o700, "1000 700"),
+                 ("root owner, mode 0750", {}, 0o750, "0 750"))
+        for label, extra, mode, shown in cases:
+            with self.subTest(case=label):
+                os.chmod(self.runtime, mode)
+                self.assertTrue(os.path.isdir(self.runtime) and not os.path.islink(self.runtime))
+                res = self.shell("beta", {**seam, **extra})
+                self.assertEqual(res.returncode, 2, res.stdout + res.stderr)
+                self.assertIn(f"refusing to run: {self.runtime} must be owned by root with mode 0700",
+                              res.stderr)
+                self.assertIn(f"(is uid/mode {shown})", res.stderr)
+                self.assertNotIn("RUNTIME=", res.stdout)
+        os.chmod(self.runtime, 0o700)  # control: the same runtime, private, passes
+        res = self.shell("beta", seam)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn(f"RUNTIME={self.runtime}", res.stdout)
+
+    def fake_stat(self, path, **environ):
+        env = {"PATH": os.environ["PATH"], "REAL_STAT": shutil.which("stat"), **environ}
+        res = subprocess.run([os.path.join(self.bin, "stat"), "-c", "%u %a", "--", path],
+                             capture_output=True, text=True, env=env)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        return res.stdout.strip()
+
+    def test_fake_stat_plays_the_requested_owner(self):
+        """T-c: the fixture really presents the ownership the tests rely on."""
+        root = os.path.join(self.tmp, "runtime")
+        other = os.path.join(self.tmp, "other")
+        os.mkdir(other, 0o700)
+        os.chmod(other, 0o700)
+        self.assertEqual(self.fake_stat(self.runtime, FAKE_NONROOT_DIR=self.runtime,
+                                        FAKE_ROOT_DIR="/nonexistent"), "1000 700")
+        # FAKE_NONROOT_DIR wins over FAKE_ROOT_DIR covering the same path.
+        self.assertEqual(self.fake_stat(self.runtime, FAKE_NONROOT_DIR=self.runtime,
+                                        FAKE_ROOT_DIR=root), "1000 700")
+        self.assertEqual(self.fake_stat(self.runtime, FAKE_ROOT_DIR=root), "0 700")
+        # Exact path only: a parent, a prefix sibling or an empty value does not match.
+        self.assertEqual(self.fake_stat(self.runtime, FAKE_NONROOT_DIR=root,
+                                        FAKE_ROOT_DIR=root), "0 700")
+        self.assertEqual(self.fake_stat(self.runtime, FAKE_NONROOT_DIR=self.runtime[:-1],
+                                        FAKE_ROOT_DIR=root), "0 700")
+        self.assertEqual(self.fake_stat(self.runtime, FAKE_NONROOT_DIR="",
+                                        FAKE_ROOT_DIR=root), "0 700")
+        # Unset, outside FAKE_ROOT_DIR: the real stat answers (unchanged behaviour).
+        self.assertEqual(self.fake_stat(other, FAKE_ROOT_DIR=root),
+                         f"{os.stat(other).st_uid} 700")
+        os.chmod(self.runtime, 0o750)
+        self.assertEqual(self.fake_stat(self.runtime, FAKE_NONROOT_DIR=self.runtime,
+                                        FAKE_ROOT_DIR=root), "1000 750")
+
+    def test_no_seam_assertions_detect_a_disabled_private_runtime_guard(self):
+        """T-d (in-suite M1): with require_private_runtime disabled in a copy of
+        common.sh, the T-a no-seam case is accepted, so T-a would fail."""
+        copy = os.path.join(self.tmp, "defective")
+        for rel in ("scripts/lib/common.sh", "deploy/env.example", "deploy/beta/env.example"):
+            os.makedirs(os.path.dirname(os.path.join(copy, rel)), exist_ok=True)
+            shutil.copyfile(os.path.join(REPO, rel), os.path.join(copy, rel))
+        lib = os.path.join(copy, "scripts", "lib", "common.sh")
+        original = read(os.path.join(SCRIPTS, "lib", "common.sh"))
+        environ = {"FAKE_NONROOT_DIR": self.BETA}
+        # Control: the unmodified copy refuses exactly as T-a requires.
+        self.assert_no_seam_refused(self.shell("beta", environ, scripts=os.path.join(copy, "scripts")))
+        head = "require_private_runtime() {\n"
+        self.assertEqual(original.count(head), 1)
+        defective = original.replace(head, head + "    return 0\n")
+        self.assertEqual(defective.count(head + "    return 0\n"), 1)
+        self.assertEqual(len(defective), len(original) + len("    return 0\n"))
+        with open(lib, "w") as fh:
+            fh.write(defective)
+        res = self.shell("beta", environ, scripts=os.path.join(copy, "scripts"))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn(f"RUNTIME={self.BETA}", res.stdout)
+        self.assertNotIn("refusing to run", res.stderr)
+        with self.assertRaises(AssertionError):
+            self.assert_no_seam_refused(res)
+        # The repository's guard is only read.
+        self.assertEqual(read(os.path.join(SCRIPTS, "lib", "common.sh")), original)
 
 
 class BetaStackEnv(ShellEnv):

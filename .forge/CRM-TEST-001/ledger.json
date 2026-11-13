@@ -1,0 +1,182 @@
+{
+  "base": "main",
+  "base_sha": "c5a8cc3f78aae5f6b100c53ed9430d031e36c441",
+  "branch": "forge/CRM-TEST-001",
+  "candidate": "f514f55e9143067f92e61ecc806508332f183dde",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-13T15:11:24Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-13T15:12:44Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-13T15:17:04Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r1: FAKE_NONROOT_DIR fixture, T-a/T-a'/T-b/T-c/T-d; deviation: metadata-only stat of /srv/CRM/runtime(/beta) in sandbox (65534 overflow uid)",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-13T15:17:52Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "f514f55e9143067f92e61ecc806508332f183dde",
+      "t": "2026-11-13T15:17:52Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "f514f55e9143067f92e61ecc806508332f183dde",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-13T15:20:27Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-13T15:22:10Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "f514f55e9143067f92e61ecc806508332f183dde",
+      "findings": [],
+      "note": "",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-13T15:22:39Z",
+      "type": "result"
+    },
+    {
+      "candidate": "f514f55e9143067f92e61ecc806508332f183dde",
+      "id": 7,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-13T15:22:39Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/7-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 7,
+      "t": "2026-11-13T15:26:26Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "f514f55e9143067f92e61ecc806508332f183dde",
+      "findings": [
+        {
+          "key": "ac4-record-completeness",
+          "severity": "advisory"
+        },
+        {
+          "key": "t-a-touches-real-runtime-metadata",
+          "severity": "advisory"
+        },
+        {
+          "key": "tester-forge-listing",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 1,
+      "spawn": 7,
+      "t": "2026-11-13T15:28:32Z",
+      "type": "result"
+    },
+    {
+      "candidate": "f514f55e9143067f92e61ecc806508332f183dde",
+      "id": 10,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-13T15:28:32Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/10-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 10,
+      "t": "2026-11-13T15:31:05Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "f514f55e9143067f92e61ecc806508332f183dde",
+      "findings": [
+        {
+          "key": "engineer-runtime-stat",
+          "severity": "advisory"
+        },
+        {
+          "key": "t-a-real-path-metadata",
+          "severity": "advisory"
+        }
+      ],
+      "note": "",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 10,
+      "t": "2026-11-13T15:31:42Z",
+      "type": "result"
+    },
+    {
+      "note": "Architect accepted with recorded limitations (Issue #56); Tester reassessment refused by engine at DELIVER",
+      "outcome": "DELIVERED",
+      "t": "2026-11-13T16:15:15Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-TEST-001",
+  "host": "docker1",
+  "known_commit": "c5a8cc3f78aae5f6b100c53ed9430d031e36c441",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-TEST-001",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-TEST-001",
+  "wo": "CRM-TEST-001",
+  "worktree": "/srv/CRM/worktrees/CRM-TEST-001"
+}
