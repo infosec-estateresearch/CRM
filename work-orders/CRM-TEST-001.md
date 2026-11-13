@@ -8,7 +8,7 @@ BROWSER: no (NOT APPLICABLE for this exact test-fixture-only scope; CGPT decisio
 
 # CRM-TEST-001: hermetic `test_shell_guard` (baseline unit-test repair)
 
-- **Version:** v1.1 DRAFT, 2026-11-13. This is not approved. It identifies its own immutable version only by the commit that adds it; approval must name that commit.
+- **Version:** v1.2 DRAFT, 2026-11-13. This is not approved. It identifies its own immutable version only by the commit that adds it; approval must name that commit.
 - **Issue:** https://github.com/infosec-estateresearch/CRM/issues/56
 - **Prepared by:** Rogue (Orchestrator), under the CGPT Architect's *Step 2A: Baseline Test Repair Work Order* assignment. That assignment authorises preparation only.
 - **History:**
@@ -21,6 +21,13 @@ BROWSER: no (NOT APPLICABLE for this exact test-fixture-only scope; CGPT decisio
     - the conditions for the host evidence are added;
     - browser N/A is recorded;
     - the annex gains a fresh per-WO gate assessment.
+  - v1.1 was commit `a8e95319a58e84577d1add09b267ecf81444f6ae`.
+  - v1.2 answers *CGPT Architect review of `a8e95319`: CHANGES REQUESTED, one procedural correction* (2026-11-13):
+    - specialists no longer use Git; the PL provides a manifest-verified candidate source snapshot (§6b);
+    - every sandbox step that relied on specialist Git use is made consistent with that (AC3, AC5, AC6, AC8, §6a, §8);
+    - the decisions in that review are recorded in §12.
+
+    The AC1 to AC9 objectives are unchanged.
 - **Approval:** none yet. Dispatch needs a CGPT approval comment on Issue #56 that names this path and the immutable commit containing this version (FOUNDRY `standards/work-order-contract.md`, *Approval provenance*).
 - **Sandbox entry gate:** not yet accepted for this WO. See `work-orders/CRM-TEST-001-sandbox-annex.md` §7. The CRM-001 acceptance is **not** transferable automatically. If no CRM-TEST-001-specific acceptance exists, the WO is **BLOCKED** before dispatch.
 
@@ -140,21 +147,22 @@ Each criterion needs evidence that names the exact candidate commit. Every execu
 |---|---|---|
 | AC1 | **Baseline failure reproduced, in two separate parts.** **(a) Actual host baseline reproduction:** on DOCKER1, an isolated temporary source copy of the WO base runs as `nobody` (§7) and shows the `0 != 2` failure. This is already evidenced at `8a40862` (§2, item 2) and is repeated at the WO base in §7. **(b) Sandbox negative-path verification:** controlled synthetic directories and fixtures (T-b, T-c, T-d) prove the guard branches involved. This **does not** represent, and is not claimed to reproduce, the host's actual visibility of the beta runtime. No synthetic reproduction of the host condition is required. | (a) Orchestrator. (b) Engineer, then Tester independently. Logs: command, uid, source SHA, output tail. |
 | AC2 | **Host dependency identified:** the evidence names the guard lines, the fixture lines and the real path state (owner, mode, type) that cause the failure (§2, item 3). | Engineer report; confirmed by Auditor. |
-| AC3 | **Narrow fixture correction:** the diff from the base touches only `tests/unit/test_beta.py`. `FAKE_STAT` is unchanged when `FAKE_NONROOT_DIR` is unset. No original assertion is removed or weakened: exit `2`, `/srv/CRM/runtime/beta` named, the five wrong-path subtests, the private test runtime passing, and the dev case. T-a′ only adds assertions. | Auditor (`git diff --name-status <base> <candidate>`, a reading of the diff). |
+| AC3 | **Narrow fixture correction:** the diff from the base touches only `tests/unit/test_beta.py`. `FAKE_STAT` is unchanged when `FAKE_NONROOT_DIR` is unset. No original assertion is removed or weakened: exit `2`, `/srv/CRM/runtime/beta` named, the five wrong-path subtests, the private test runtime passing, and the dev case. T-a′ only adds assertions. | Auditor, reading the PL-provided diff record (§6b, step 6), not running Git. |
 | AC4 | **Targeted regression on a host with an existing beta runtime.** On DOCKER1 (where the real runtime exists, root-owned, 0700), `TestBetaRuntimePinned` passes with the candidate and fails at the base (§7). The base and candidate run from separate immutable temporary copies, as `nobody`. The real runtime's metadata is identical before and after. Commands, identity, source SHA and outcomes are recorded. **The independent Tester critically evaluates this host record and reports whether it supports AC4.** Operator evidence is not, by itself, a Tester PASS. | Orchestrator (§7 record on Issue #56 and in the PL record). Tester (evaluation). |
-| AC5 | **Full suites:** `python3 -B -m unittest discover -s tests/unit -v` and `python3 -I -B -m unittest discover -s tests/load -t . -v` pass. They are run non-root, both in the sandbox (Engineer, Tester and DevSecOps, from the worktree or a scratch `git archive`) and on DOCKER1 (§7). Reports state the counts. The only acceptable skip is the known `no Git metadata` skip in a `git archive` copy. The corrected test passes in both contexts. | Engineer, Tester, DevSecOps, Orchestrator. |
-| AC6 | **Negative security assertions preserved and proven sensitive:** T-a to T-d pass on the unmutated candidate. Each mutation M1 to M4 in §6a, applied only to a temporary copy, is detected by its named test with the stated signal, in the stated context. Each mutation run is paired with a control run of the same named tests on an unmutated copy of the same candidate in the same context, which must pass. | Engineer (sandbox), Tester (independent sandbox re-run of M1 to M4), Orchestrator (host, §7). |
+| AC5 | **Full suites:** `python3 -B -m unittest discover -s tests/unit -v` and `python3 -I -B -m unittest discover -s tests/load -t . -v` pass. They are run non-root, both in the sandbox and on DOCKER1 (§7). In the sandbox, the Engineer runs them from the worktree, and the Tester and DevSecOps from an unmutated copy of the PL snapshot (§6b). Reports state the counts. The only acceptable skip is the known `no Git metadata` skip in a snapshot or `git archive` copy. The corrected test passes in both contexts. | Engineer, Tester, DevSecOps, Orchestrator. |
+| AC6 | **Negative security assertions preserved and proven sensitive:** T-a to T-d pass on the unmutated candidate. Each mutation M1 to M4 in §6a, applied only to a temporary copy, is detected by its named test with the stated signal, in the stated context. Each mutation run is paired with a control run of the same named tests on an unmutated copy of the same candidate in the same context, which must pass. **The final sandbox AC6 evidence is tied to the immutable reviewed candidate through the PL snapshot (§6b).** | Engineer (development diagnostics only, on a working-source copy, §6b step 8). Tester (the final, independent sandbox evidence for M1 to M4, from the PL snapshot). Orchestrator (host, §7). |
 | AC7 | **Independent Auditor, Tester and DevSecOps PASS** on one unchanged candidate, in the order Engineer → Auditor → Tester → DevSecOps. The Tester executes and assesses the unit, regression and negative security tests itself. | Ledger `candidate` equals the SHA each reviewer names. |
-| AC8 | **No change to live beta, CRM application code or host security controls:** the diff is limited per AC3. The real runtime's metadata is unchanged (AC4). No process reads `/srv/CRM/runtime/beta/env`. No container, compose or network command runs. No test runs as root. Mutations never touch the worktree: after the review, `git status` is clean and the candidate is unchanged. | DevSecOps; Orchestrator before/after stat. |
-| AC9 | **Provenance:** the completion report gives the base SHA, candidate SHA, final merge SHA, the WO artifact commit and its approval comment, the CRM-TEST-001 sandbox-gate acceptance reference, per-role verdicts with their candidate SHA, execution counts, commands, uids and outputs, the §6a matrix results, changed paths, deviations and limitations. gitleaks (the approved build) is clean on `<base>..<candidate>`. | PL. |
+| AC8 | **No change to live beta, CRM application code or host security controls:** the diff is limited per AC3. The real runtime's metadata is unchanged (AC4). No process reads `/srv/CRM/runtime/beta/env`. No container, compose or network command runs. No test runs as root. Mutations never touch the worktree or the snapshot: the PL verifies, with Git outside the sandbox, that the worktree is clean at the candidate after every review. It also verifies that the snapshot still matches its manifest (§6b, step 7). | DevSecOps (assesses the PL's records); PL (Git and manifest verification); Orchestrator (before/after stat). |
+| AC9 | **Provenance:** the completion report gives the base SHA, candidate SHA, final merge SHA, the WO artifact commit and its approval comment, the CRM-TEST-001 sandbox-gate acceptance reference, per-role verdicts with their candidate SHA, execution counts, commands, uids and outputs, the §6a matrix results, the §6b snapshot record (candidate SHA, manifest hash, verifications), changed paths, deviations and limitations. gitleaks (the approved build) is clean on `<base>..<candidate>`. | PL. |
 
 ### 6a. Mutation matrix (AC6)
 
 **General rules:**
 - Every mutation is applied only to a temporary copy, never to the worktree, the canonical checkout or the production guard.
-  - In the sandbox, the copy is `git -C <worktree> archive <candidate> | tar -x -C <scratch>/mut-<Mn>`, under `/srv/CRM/worktrees/.forge-scratch/CRM-TEST-001/`.
+  - In the sandbox, the copy is made from the PL's candidate source snapshot by a plain file copy, never with Git (§6b).
   - On the host, it is a fresh `/tmp/crm-test001-<sha12>-<Mn>`, owned by `nobody` (§7).
 - The person applying a mutation records three things: the exact edit, proof that it applied exactly once (a `grep -c` before and after, and a non-empty `diff` against the unmutated copy), and the named test's output.
+- **Control:** a successful run of the same named tests on an unmutated copy is required for every mutation.
 - "Detected" means the named test fails with the stated signal. A mutation whose named test passes, or fails for a different reason, is **not** evidence.
 
 | ID | Security property under test | Isolated mutation (in the copy only) | Detecting test (exact) | Expected failure signal | Context |
@@ -168,6 +176,52 @@ Each criterion needs evidence that names the exact candidate commit. Every execu
 - No mutation and no fixture can make the sandbox present the host's actual accepted runtime state.
 - The real-path behaviour is evidenced only by the host procedure (AC1(a), AC4, and the host-only rows for M2 and M4).
 - The seam-validation subtests (outside `/tmp`, `..`, missing, symlink) keep their existing coverage. They are not part of the mutation matrix, because a deterministic seam mutation would need a canonical directory outside `/tmp`, which the sandbox cannot provide within scope.
+
+### 6b. Candidate source snapshot for sandbox specialists (v1.2)
+
+Specialists have no Git access under the pinned ForgeV2 boundary. They are **not** given access to Git metadata or Git objects to work around this. Instead, the PL supplies a verified snapshot of the candidate.
+
+1. **When.** After `forge-commit` records the candidate SHA in the ledger, and before the first reviewer dispatch, the PL (`forgev2-pl`, outside the sandbox) creates the snapshot. If the candidate changes, the PL makes a new snapshot of the new SHA, and earlier snapshots are not used as evidence.
+2. **How.** `git -C /srv/CRM/worktrees/CRM-TEST-001 archive --format=tar <candidate> -- . ':(exclude).forge' | tar -x -C <scratch>/snapshot-<sha12>/`.
+   - `<scratch>` is `/srv/CRM/worktrees/.forge-scratch/CRM-TEST-001`, the WO's permitted project-specific scratch location.
+   - `git archive` writes no `.git`.
+   - The pathspec excludes `.forge`.
+   - The candidate tree holds no secrets, logs or runtime data. The PL verifies this in step 4.
+3. **Manifest.**
+   - The PL writes the sorted `sha256sum` of every file in the snapshot to `<scratch>/snapshot-<sha12>.sha256`.
+   - It cross-checks that manifest against the candidate commit: the file set must equal `git ls-tree -r --name-only <candidate> | grep -v '^\.forge/'` (`ls-tree` does not accept the exclude pathspec), and each file's sha256 must equal that of `git cat-file blob <candidate>:<path>`. There must be no extra or missing files.
+   - The authoritative copy of the manifest, its sha256, and the candidate SHA are recorded in the PL record. Specialists cannot read that record.
+   - The manifest's sha256 and the candidate SHA are written into every reviewer prompt.
+4. **Exclusion check.** No path in the snapshot may be:
+   - `.git` or `.forge`;
+   - a `*.log` file;
+   - an `env` file other than an `*.example` template;
+   - under a runtime directory.
+
+   gitleaks (the approved build) must report the snapshot directory clean. If any check fails, the snapshot is not used, and the PL reports BLOCKED.
+5. **Use by specialists, without Git.**
+   - Each specialist first checks that the manifest's own sha256 equals the value in its prompt. It then runs `sha256sum -c --strict ../snapshot-<sha12>.sha256` from inside `<scratch>/snapshot-<sha12>/`; the manifest uses paths relative to that directory.
+   - It then makes its own copies with `cp -a <scratch>/snapshot-<sha12>/. <scratch>/work/<role>-<n>/<copy>/`:
+     - one `control` copy;
+     - one copy per mutation, `M1` to `M4`.
+     - `<n>` is the specialist's execution number.
+   - It edits only its own mutation copies.
+   - It never writes the snapshot, the worktree, or another specialist's directory, and never uses another specialist's copies as evidence.
+   - Each mutation copy is independent of the candidate worktree and of every other copy.
+6. **Diff record for review.**
+   - The PL also writes `git diff --name-status <base> <candidate>` and `git diff <base> <candidate>` to `<scratch>/diff-<sha12>/`, with their sha256 recorded in the PL record and in the prompts.
+   - The Auditor (AC3) and DevSecOps (AC8) assess the diff from this record. They do not run Git.
+7. **PL verification after each review.** With Git outside the sandbox, the PL checks that:
+   - the worktree HEAD equals the candidate, and `git status --porcelain` is empty;
+   - `sha256sum -c` of the authoritative manifest still passes on the snapshot.
+
+   A mismatch voids that review's evidence. It is reported, and the review does not count as a PASS.
+8. **Engineer development diagnostics.**
+   - Before a candidate is committed, the Engineer may copy its working files (not `.git` or `.forge`) into `<scratch>/dev/engineer-<n>/` and run mutations there, for diagnosis only.
+   - These results are not final AC6 evidence. The final sandbox AC6 evidence comes from the Tester's runs on the PL snapshot of the immutable reviewed candidate.
+9. **Cleanup.**
+   - At closure, the PL archives the snapshot manifest and the specialists' reported results in the PL record.
+   - It then removes `<scratch>/snapshot-*`, `<scratch>/work/` and `<scratch>/dev/`.
 
 ## 7. Orchestrator host procedure (AC1(a), AC4, AC5 host, AC6 host)
 
@@ -199,7 +253,7 @@ The Tester receives this record and evaluates it critically (AC4).
 - **Execution limit:** each specialist has a hard maximum of four executions in this WO, including the first. There is no fifth execution and no exception. Counts persist in the ledger across restarts. Exhaustion is a FAIL with its reason. The WO cannot be split, replaced or reopened to reset a counter.
 - **Skills:** Python `unittest`; bash; the CRM-007 r4 guard design; mutation testing on isolated copies; secure engineering (fail-closed guards, keeping production code out of scope). Reviewers need no network, credentials or real-environment access.
 - **Candidate identity:** the commit SHA at the head of `forge/CRM-TEST-001`, recorded by `forge-ledger` as `candidate`. Each reviewer states the SHA it assessed, and a mismatch is a FAIL. Any Engineer change invalidates earlier PASS results and restarts the sequence.
-- **Specialist inputs:** this WO; `tests/unit/test_beta.py`; `scripts/lib/common.sh` as read-only; the FOUNDRY sources in §1; and, for the Tester, the §7 host record. No customer data, credentials or host secrets.
+- **Specialist inputs:** this WO; `tests/unit/test_beta.py`; `scripts/lib/common.sh` as read-only; the FOUNDRY sources in §1. Reviewers also receive the §6b snapshot, its manifest hash and the diff record, and the Tester also receives the §7 host record. Specialists receive no Git access. No customer data, credentials or host secrets.
 
 ## 9. Real-browser assurance: NOT APPLICABLE (CGPT decision)
 
@@ -247,4 +301,14 @@ The PL verifies FOUNDRY entry gates 1 to 11 and records them in the PL record be
 - Browser is N/A (§9).
 - Run-2 may be reused as the basis for a CRM-TEST-001-specific sandbox decision (annex §7).
 
-**Open:** G1 and G2 (CGPT). Nothing else is outstanding for the Architect.
+**Decided in the v1.1 review (`a8e95319`):**
+- The scope, ACs, host procedure and the M1 to M4 matrix are accepted in principle.
+- Browser NOT APPLICABLE is confirmed for this exact scope.
+- The run-2 evidence is sufficient as the basis for a narrowly bounded, CRM-TEST-001-only sandbox acceptance, conditional on the G5 checks. No new smoke test or ForgeV2 change is needed.
+- The root-created bytecode cache is accepted as a documented, non-blocking deviation for this WO only; its creation remains a recorded boundary lapse.
+- The missing run-2 Claude binary hash is an accepted evidence limitation, not a claim of cryptographic continuity.
+- The specialist snapshot procedure is corrected in §6b.
+
+**Open:**
+- G1: exact-version approval of this version (CGPT).
+- G2: the explicit CRM-TEST-001 sandbox acceptance recorded on Issue #56 (CGPT). G5 is then verified in the actual dispatch environment, and if any check fails, the WO is BLOCKED.
