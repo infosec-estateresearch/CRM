@@ -1,7 +1,8 @@
-# CRM-CLIENT-001 annex B: real-browser runner, isolation, vulnerability gate, evidence and cleanup (v1.2)
+# CRM-CLIENT-001 annex B: real-browser runner, isolation, vulnerability gate, evidence and cleanup (v1.3)
 
-- **Status:** part of the CRM-CLIENT-001 v1.2 DRAFT. It is approved only together with the WO, by commit. History: v1.1 is in commit `0fba12cf5395800d02db5801e4772506c849cb1a`. v1.2 changes are B2.3, B3, B4 (wording and teardown), B6 (store and route), B8 (rewritten) and B9 (new). WO §13 maps them.
-- **Preparation constraints.** During preparation nothing was pulled, installed, scanned or run, and no Docker network was changed.
+- **Status:** part of the CRM-CLIENT-001 v1.3 DRAFT. It is approved only together with the WO, by commit. History: v1.1 is in commit `0fba12cf5395800d02db5801e4772506c849cb1a`. v1.2 is commit `793f69b04d860e3f82bbd39cbe08404f289ccbef`. v1.2 changes were B2.3, B3, B4, B6, B8 and B9.
+- **v1.3 changes** (CGPT *CRM/WIP Delivery Mission*, 2026-11-16): the browser executable is now **Chrome for Testing Stable 157.0.8103.78** (B1, B2a, B3); the lock is **Playwright 1.65.1** (B2, B2.3); the scan covers the new browser (B8.4); evidence is published in **public-safe** form only (B6). WO §13 maps them.
+- **Preparation constraints.** During preparation nothing was pulled, installed, scanned or run, and no Docker network was changed. The Chrome for Testing archives and the 1.65.1 wheel were downloaded only to compute hashes and were read as inert data.
   - Every value comes from public registry, PyPI, GitHub or OSV **metadata**, from read-only host inspection, or from reading the playwright wheel as inert data with `zipfile` (no code executed).
   - Each **VERIFY** item is re-checked by the operator at execution, and a mismatch is a stop.
 - **Framework.** FOUNDRY `84fedf0a…` for the v1.2 decisions; `5f5e4a51…` is the provenance of v1.0–v1.1.
@@ -18,51 +19,97 @@
 | Image defaults | `User` unset (root); `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`; `CMD ["/bin/bash"]`; user `pwuser` created; `/ms-playwright` is `chmod -R 777` | config history |
 | Python | Ubuntu noble `python3` 3.12; `pip` from `get-pip.py` at build time | config history |
 | Playwright Python package | **Not present in the final image.** It was installed only in a temporary venv that the build deleted | config history, last RUN step |
-| **Expected browser (v1.2)** | Installed by Playwright 1.64.1 into `/ms-playwright`. The wheel's `driver/package/browsers.json` pins `chromium` and `chromium-headless-shell` **revision 1248**, **browserVersion 156.0.8078.4**. **VERIFY** at S3 without running the image: `docker create` followed by `docker export … \| tar -t` must list `ms-playwright/chromium_headless_shell-1248/` and `ms-playwright/chromium-1248/` | wheel inspection (F12) |
-| Bundled Node.js | 24.22.1, inside the playwright wheel (`playwright/driver/node`) | wheel inspection (F12) |
+| **Image role (v1.3)** | **Operating-system and dependency base only.** The image's bundled Chromium 156.0.8078.4 (revision 1248, pre-stable) under `/ms-playwright` is **never executed**. `entry.sh` launches only the pinned Chrome for Testing binary (B2a), and the run records the launched executable path and the running process list | — |
+| **Browser executed (v1.3)** | **Google Chrome for Testing, Stable channel, `157.0.8103.78`**, linux64 `chrome`, mounted read-only from the host verified copy (B2a) | CfT last-known-good JSON (timestamp 2026-11-15T21:10:21Z): Stable = 157.0.8103.78, revision 1717349 |
 
-**Why 1.64.1.**
-- It was published on 2026-10-22, more than three weeks before preparation.
-- 1.65.0, 1.65.1 and 1.65.2 (2026-11-09 to 11-14) are younger than two weeks.
-- No newer Playwright removes the Chromium residual of B8.4: 1.65.0 pins Chromium 158.0.8127.18 and 1.65.1 pins 159.0.8154.6, which are also pre-stable builds.
+**Why Playwright 1.65.1 with Chrome 157 (v1.3).**
+- Playwright's release notes give the stable Chrome channel each version was tested against.
+  - **1.64.0 and 1.64.1: Google Chrome 155.** Chrome 157 is untested with 1.64.1, so 1.64.1 is **not selected**.
+  - **1.65.0 and 1.65.1: Google Chrome 157.** This is the documented compatible line.
+  - 1.65.2 moved its bundled Chromium to 159 and is not needed.
+- **1.65.1** (PyPI 2026-11-11) is the latest patch of the line tested with Chrome 157.
+- The earlier preference for packages at least two weeks old gives way to documented compatibility. The compensating controls are the hash pin, OSV and Grype scans, and the compatibility probe of B2.3.
+- **Fallback.** If the compatibility probe fails, the same-version **CfT `chrome-headless-shell` 157.0.8103.78** (B2a), which is the launch target Playwright prefers in headless mode, is used through the same mechanism. Any other version needs a new WO version.
 
 ## B2. Python dependency lock (no unpinned installation)
 
-`tests/browser/requirements.lock` holds exactly:
+`tests/browser/requirements.lock` holds exactly (v1.3; Playwright 1.65.1 requires only `greenlet>=3.1.1,<4`, so pyee and typing-extensions are no longer needed):
 
 | Distribution | File | sha256 (PyPI) | Published |
 |---|---|---|---|
-| playwright 1.64.1 | `playwright-1.64.1-py3-none-manylinux1_x86_64.whl` | `577b8d88778c245cfbd145ae17cf53044f084b1b46c55c69081d4069d56057e2` (re-verified 2026-11-16 by download) | 2026-10-22 |
-| pyee 13.0.0 (playwright requires `pyee>=13,<15`) | `pyee-13.0.0-py3-none-any.whl` | `48195a3cddb3b1515ce0695ed76036b5ccc2ef3a9f963ff9f77aec0139845498` | 2025-03-17 |
-| greenlet 3.5.6 (requires `greenlet>=3.1.1,<4`) | `greenlet-3.5.6-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl` | `975736b002ed080d124cf81a79cb7e05cb26d6b3f5c7a7b651c0fcce70353aa1` | 2026-09-14 |
-| typing-extensions 4.16.0 (required by pyee) | `typing_extensions-4.16.0-py3-none-any.whl` | `481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8` | 2026-07-02 |
+| playwright 1.65.1 | `playwright-1.65.1-py3-none-manylinux1_x86_64.whl` | `5660e0b050a5bd5672bf8e366ed2580288a3d3640ff9444436ed2d890d3dc442` (verified by download, 2026-11-16) | 2026-11-11 |
+| greenlet 3.5.6 | `greenlet-3.5.6-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl` | `975736b002ed080d124cf81a79cb7e05cb26d6b3f5c7a7b651c0fcce70353aa1` | 2026-09-14 |
+
+The 1.65.1 wheel (inspected as data) has **no** `playwright.__version__`. It carries `playwright-1.65.1.dist-info`, bundles **Node.js 26.13.1** as `playwright/driver/node`, and pins its own Chromium as revision 1254 / 158.0.8127.18. That Chromium is not installed and not used.
 
 **Install method (VERIFY at the first run).**
 
-1. **Download.** The operator, as root, fetches the four wheels with `curl` from the `files.pythonhosted.org` URLs listed by PyPI JSON. They go into a fresh root-owned directory and are checked against the lock; any mismatch stops the run. Nothing from the wheels is executed on the host.
+1. **Download.** The operator, as root, fetches the two wheels with `curl` from the `files.pythonhosted.org` URLs listed by PyPI JSON. They go into a fresh root-owned directory and are checked against the lock; any mismatch stops the run. Nothing from the wheels is executed on the host.
 2. **Install inside the container, offline:**
    `python3 -m pip install --no-index --find-links /wheels --require-hashes --only-binary=:all: --no-deps --target /tmp/pydeps -r /work/tests/browser/requirements.lock`
    - It installs to tmpfs, so nothing persists.
    - The container has no route to PyPI (B4).
-3. **Version checks (v1.2, replaces `playwright.__version__`).** `entry.sh` runs Python as `PYTHONPATH=/tmp/pydeps python3 -s -B …`. It must not use `-I` or `-E`, which would ignore `PYTHONPATH`. It asserts and records the following in `identity.json`:
-   - **Distribution.** `importlib.metadata.version("playwright") == "1.64.1"`. Exactly **one** distribution named `playwright` is visible in `importlib.metadata.distributions()`, and its `locate_file("")` resolves under `/tmp/pydeps`. `playwright.__file__` also resolves under `/tmp/pydeps/playwright/`. The same checks apply to `pyee` 13.0.0, `greenlet` 3.5.6 and `typing_extensions` 4.16.0.
-   - **Driver pin.** `/tmp/pydeps/playwright/driver/package/browsers.json` shows chromium revision `1248`, browserVersion `156.0.8078.4`.
-   - **Executable.** `p.chromium.executable_path` exists, is under `/ms-playwright/`, and has `-1248/` in its path.
-   - **Running browser, independently.** `browser.version` (CDP `Browser.getVersion` of the launched browser) equals `156.0.8078.4`.
-   - **Operator cross-check.** The operator records the `/ms-playwright` listing from the `docker export` of B1.
+3. **Version and compatibility checks (v1.3).** `entry.sh` runs Python as `PYTHONPATH=/tmp/pydeps python3 -s -B …`. It must not use `-I` or `-E`, which ignore `PYTHONPATH`. It asserts and records the following in `identity.json`:
+   - **Distribution.**
+     - `importlib.metadata.version("playwright") == "1.65.1"`;
+     - exactly **one** `playwright` distribution is visible, and its `locate_file("")` and `playwright.__file__` resolve under `/tmp/pydeps`;
+     - `greenlet` is 3.5.6.
+   - **Browser binary.**
+     - The sha256 of `/opt/cft/chrome-linux64/chrome` equals `f60cb86024464df9740504a1584b605c2b3cf107625ff11e1da22c875c1627e8`, or for the fallback, `/opt/cft/chrome-headless-shell-linux64/chrome-headless-shell` equals `8e4c5db8c070059cb570a05c171dfcaec022d46334722ec3a16376614d687a96`.
+     - `ldd` of that binary reports no `not found` library. The image supplies the dependencies.
+   - **Launch.** `p.chromium.launch(executable_path=<that binary>, headless=True)`.
+     - The **running browser's** `browser.version` equals `157.0.8103.78`.
+     - The launched process's `/proc/<pid>/exe` resolves to the pinned path.
+     - No process from `/ms-playwright` exists at any time during the run.
+   - **Compatibility probe** (before the isolation-gated journeys, against crm-app only), exercising every Playwright feature the journeys use:
+     - new context and page;
+     - navigation to the login page;
+     - request/response events with the `from-cache` flag and response bodies;
+     - console and page-error events;
+     - a `securitypolicyviolation` listener;
+     - tracing start and stop, with the trace written to `/evidence`;
+     - a screenshot.
 
-   `verify_evidence.py` recomputes each of these from `identity.json` (AC6a/AC6b). Any mismatch is a FAIL.
+     Any failure means the run is **BLOCKED** (then the B1 fallback, once).
 
-**External code register (§4 allowlist).**
-- The entry `playwright-python-browser-runner` records:
-  - the image tag and digests;
-  - the four wheels and their hashes;
-  - the bundled Node 24.22.1 and Chromium 156.0.8078.4 (revision 1248);
-  - licences: Apache-2.0, MIT, MIT and PSF-2.0, plus the Ubuntu, Chromium and Firefox licences in the image;
-  - `usage: test-only, operator-run, never in any release bundle or runtime`;
-  - the CL-D5 scan reference and `approval:` as recorded by CGPT.
-- The entry `grype-cl-d5-scanner` is described in B8.
-- `release.py verify` checks image digests only for the three compose files, so release bundles are unaffected.
+   `verify_evidence.py` recomputes each of these from `identity.json`, and any mismatch is a FAIL.
+
+**External code register (§4 allowlist).** The register gains three test-only, operator-run entries:
+- **`playwright-python-browser-runner`.** It records:
+  - the image tag and digests, with the role *OS and dependency base; bundled Chromium not executed*;
+  - the two wheels and their hashes, and the bundled Node 26.13.1;
+  - licences: Apache-2.0 (Playwright), MIT (greenlet), and the Ubuntu licences;
+  - `usage: test-only, operator-run, never in any release bundle or runtime`.
+- **`chrome-for-testing-stable`.** It records:
+  - version 157.0.8103.78 and the URL;
+  - the zip sha256, GCS md5 and binary sha256 of B2a;
+  - the fallback headless shell;
+  - licence: Chromium and Google Chrome for Testing terms;
+  - usage: test-only, mounted read-only into the runner and never installed on the host.
+- **`grype-cl-d5-scanner`** (B8).
+
+Each entry carries `approval:` as recorded by CGPT. `release.py verify` checks image digests only for the compose files, so release bundles are unaffected.
+
+## B2a. Chrome for Testing acquisition (v1.3)
+
+| Item | `chrome` (primary) | `chrome-headless-shell` (fallback) |
+|---|---|---|
+| URL | `https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.78/linux64/chrome-linux64.zip` | `…/157.0.8103.78/linux64/chrome-headless-shell-linux64.zip` |
+| Zip sha256 | `9223832977a13db3646201b1341c1f9cf08afa3ceae92540116d7b0c062364fb` | `f90329720fb61e5a76da9b6b509b6ad12a484c9c5df0359403e935177c6d153a` |
+| Size; GCS object md5 (`x-goog-hash`) | 203,266,906; `n3ml73xVw0ZMdH0ruvsZVg==` (matches the download) | 127,965,683; `+V2ivCON/pkNQRVG64AOKA==` (matches) |
+| Published (`last-modified`) | 2026-11-11T01:28:48Z | 2026-11-11T01:29:14Z |
+| Binary sha256 | `chrome-linux64/chrome` `f60cb86024464df9740504a1584b605c2b3cf107625ff11e1da22c875c1627e8` | `chrome-headless-shell-linux64/chrome-headless-shell` `8e4c5db8c070059cb570a05c171dfcaec022d46334722ec3a16376614d687a96` |
+| Embedded version string | `157.0.8103.78` | `157.0.8103.78` |
+
+- **Procedure (S3, operator).**
+  1. Download into a fresh root-owned 0700 directory. Verify the zip sha256 and the `x-goog-hash` md5, and re-read the CfT JSON to confirm that the version and URL are unchanged.
+  2. Unzip with `--no-same-owner`. Drop every setuid or setgid bit. The archive's `chrome_sandbox` has mode 0755, not setuid, and it is never used, because Chrome runs `--no-sandbox` under Playwright with all capabilities dropped (B3).
+  3. Make the tree root-owned and read-only (0555 directories, 0444/0555 files). Verify the binary sha256.
+  4. Mount it read-only at `/opt/cft`.
+- **No installation on the host.** The tree lives only under the run's operator directory and is deleted at WO closure (B9.4). Nothing from it is executed on the host.
+- **Freshness gate.** At S3 the operator re-reads the CfT JSON and the Chrome Releases blog.
+  - If Stable has moved past 157.0.8103.78 with **security fixes**, the run pauses and Rogue proposes a re-pin to CGPT: a new WO version with only the B2a constants changed.
+  - If Stable has moved for non-security reasons, the run proceeds with `.78`.
 
 ## B3. Container hardening (exact invocation template)
 
@@ -82,6 +129,7 @@ docker run --rm --pull never \
   --env-file <root-0600-tmp-file> \
   --mount type=bind,src=<archive-copy-of-candidate>,dst=/work,readonly \
   --mount type=bind,src=<verified-wheelhouse>,dst=/wheels,readonly \
+  --mount type=bind,src=<verified-cft-tree>,dst=/opt/cft,readonly \
   --mount type=bind,src=<evidence-out>,dst=/evidence \
   mcr.microsoft.com/playwright/python@sha256:7d030ac0638b279ecc72493f8b6706fecef80a893679a23b02f912905c4915c0 \
   /bin/bash /work/tests/browser/entry.sh
@@ -92,11 +140,11 @@ docker run --rm --pull never \
   - No Docker socket, no host networking, no privileged mode, no added capabilities and no device mounts.
   - The only writable paths are `/tmp` (tmpfs) and `/evidence`.
   - The default seccomp and AppArmor profiles apply.
-- **Chromium sandbox.** Playwright launches Chromium without its own sandbox (`chromiumSandbox: false`). Under `--cap-drop ALL` Chromium's namespace sandbox is unavailable, so the boundary is the container plus B4. This is an input to B8.4.
+- **Browser sandbox.** Playwright launches Chrome without its own sandbox (`chromiumSandbox: false`, so `--no-sandbox`). Under `--cap-drop ALL` the namespace sandbox is unavailable anyway, so the boundary is the container plus B4. Running a **patched stable** browser (B2a) is what makes this acceptable (B8.4).
 - **Image acquisition (S3 operator gate).**
   1. Pull by digest: `docker pull mcr.microsoft.com/playwright/python@sha256:7d030ac0…15c0`.
   2. `docker image inspect` must show that RepoDigest and config ID `sha256:b6862d30…60c0`.
-  3. Run the B8 scan, then the B1 export check.
+  3. Acquire Chrome for Testing (B2a), then run the B8 scan over the image, the wheels and the CfT tree.
   4. Use `--pull never` thereafter.
 - **Image removal.** The image is removed at **WO closure** (B9.4), not after each run, so that a bounded repeat (B6.4) uses the same bytes.
 - **`<evidence-out>`** is a fresh root-created `/tmp/crm-client001-browser-<run>/out`, owned by 65534 with mode 0700.
@@ -193,14 +241,29 @@ Teardown is defined in **B9** and always runs. No firewall rule is created or ch
 | `beta-before.json`, `beta-after.json`, `crmdev-before.json`, `cleanup.json` | *operator*: B9 |
 | `SHA256SUMS` | *operator*: covers every file above |
 
-**Store and route (v1.2; no Docker, network or Git for specialists).**
+**Public-safe publication (v1.3, CGPT finding).** The CRM repository is public.
+- The **raw package never enters Git.** It contains internal URLs, addresses, container and network details, and operational metadata, and it stays only in the restricted store (step 1).
+- **What may be committed** is the *public summary* `public-summary.json` and `EVIDENCE.md`, produced deterministically by `verify_evidence.py --public-summary` (AC6c). It contains only:
+  - the run id;
+  - `C`;
+  - the image index and amd64 digests, the wheel hashes, and the CfT version and binary sha256;
+  - the Grype version, the DB build time and checksum, and finding counts by severity and triage class;
+  - the per-journey and per-AC verdicts with assertion ids;
+  - the sha256 of each raw file **by relative path**, and the sha256 of `SHA256SUMS`;
+  - `cleanup.json` booleans, with labels only.
+- **Forbidden in the public summary:** IPv4 and IPv6 addresses, hostnames, URLs, ports, container, network or volume ids and names, env names and values, usernames and e-mail addresses (other than the literal `@example.test` domain), file-system paths outside the package, and free text from logs.
+  - AC6c's sanitiser test fails on each of these.
+  - The BA Auditor and DevSecOps check the committed summary against them.
+- **Reviewer outputs are public too.** Specialist final messages and PL prompts are committed to `.forge/<WO>/` on the branch. BA prompts therefore instruct every reviewer to cite raw evidence only by **relative path, line number and sha256**, and never to quote addresses, URLs or log content.
+
+**Store and route (no Docker, network or Git for specialists).**
 
 1. **Seal.** After S4 (including cleanup), root copies the package to `/srv/CRM/evidence/CRM-CLIENT-001/<run>/`, root-owned with group `forgev2-pl`, directories 0750 and files 0640. `SHA256SUMS` is written last and its own sha256 is recorded.
    - gitleaks (`dir --redact`) must report the package clean.
    - The package is never edited afterwards. A repeat gets a new `<run>`.
-2. **BA final WO version.** The sha256 of `SHA256SUMS` and `<run>` go into the final exact version of `CRM-CLIENT-001-BA.md`, which CGPT approves before dispatch. The sandboxed specialists of that WO can read the store (it is not a private path of the engine) but cannot write it.
+2. **BA final WO version.** It names the raw package by `<run>` and the sha256 of `SHA256SUMS` only. The sha256 of `SHA256SUMS` and `<run>` go into the final exact version of `CRM-CLIENT-001-BA.md`, which CGPT approves before dispatch. The sandboxed specialists of that WO can read the store (it is not a private path of the engine) but cannot write it.
 3. **Independent assessment.**
-   - The BA Tester verifies `SHA256SUMS` first.
+   - The BA Tester and DevSecOps **inspect the raw package directly in the restricted store** (read-only). The Tester verifies `SHA256SUMS` first.
    - It runs `verify_evidence.py` **from the candidate** on a copy in its scratch. The verifier recomputes every AC6b and AC12 verdict from the raw files and never trusts `result.json`.
    - It may unpack and inspect `trace.zip` and the screenshots.
    - It issues its own PASS or FAIL per journey.
@@ -234,7 +297,7 @@ A screenshot alone is never accepted as proof.
    - Expected: non-zero exit with `FAILED STEP: update-app-timestamp` and `RECOVERED`; the browser loads contract **1**; `r` has advanced; no console errors.
    - Beta is never touched.
 
-## B8. CL-D5: vulnerability assessment (v1.2, proposed)
+## B8. CL-D5: vulnerability assessment (decided as revised, v1.3)
 
 **B8.1 Scanner selection.**
 
@@ -257,15 +320,17 @@ A screenshot alone is never accepted as proof.
    - No firewall change is made.
 3. **Database.** `grype db update`, then `grype db status -o json` goes to `scan/db-status.json`.
 4. **Image scan.** `grype registry:mcr.microsoft.com/playwright/python@sha256:7d030ac0…15c0 --platform linux/amd64 -o json` goes to `scan/image.json`, with a table copy in `scan/image.txt`. The `registry:` source fetches layers directly, with no daemon.
-5. **Wheel scan.** The four verified wheels are unzipped as data into a fresh directory, and `grype dir:<that dir> -o json` goes to `scan/wheels.json`. This covers the Python dist-info and Grype's binary cataloguers, including the bundled Node.js.
-6. **OSV cross-check.** An OSV API query for the four `PyPI` versions goes to `scan/osv.json`. At preparation (2026-11-16 11:20 UTC) it returned **0 known vulnerabilities** for playwright 1.64.1, pyee 13.0.0, greenlet 3.5.6 and typing-extensions 4.16.0.
+5. **Wheel and browser scan.**
+   - The two verified wheels are unzipped as data into a fresh directory, and `grype dir:<that dir> -o json` goes to `scan/wheels.json`. This covers the dist-info and the bundled Node 26.13.1.
+   - `grype dir:<verified-cft-tree> -o json` goes to `scan/cft.json`.
+6. **OSV cross-check.** An OSV API query for the two `PyPI` versions goes to `scan/osv.json`. At preparation it returned **0 known vulnerabilities** for playwright 1.65.1 (queried 2026-11-16 ~11:55 UTC) and greenlet 3.5.6 (11:20 UTC).
 7. **Cleanup.** Remove the binary, DB cache and extracted files. Record the hashes of the reports in `SHA256SUMS`.
 
 **B8.3 Triage rules (recorded per finding in `scan/triage.json`).**
 - **Material, and a gate.** Any finding, whatever its fix state, in a component that *executes during the run* and that is reached by page content or network input:
-  - the Chromium or headless shell;
+  - the Chrome for Testing binary;
   - the bundled Node driver and its OpenSSL or undici;
-  - playwright, pyee or greenlet;
+  - playwright or greenlet;
   - python3 or the libc, TLS and font libraries loaded by Chromium.
 
   It must be at least High, or be KEV-listed, or have a known exploit. Such a finding blocks the run until one of three things happens:
@@ -273,29 +338,16 @@ A screenshot alone is never accepted as proof.
   - a documented mitigation that removes reachability;
   - explicit acceptance (CGPT, and Matt where the risk is material).
 - **Not material in this environment** (recorded, with the reason):
-  - packages present but not executed: Firefox and WebKit binaries (never launched), `apt` and `dpkg` tooling, `perl`, `openssh-client`, X11 or GUI libraries used only in headful mode, and ffmpeg;
+  - packages present but not executed: the image's bundled Chromium 156 and headless shell under `/ms-playwright` (proven not executed, B2.3), and the Firefox and WebKit binaries, `apt` and `dpkg` tooling, `perl`, `openssh-client`, X11 or GUI libraries used only in headful mode, and ffmpeg;
   - CVEs that need a listening network service, local privileged users, or a route to destinations that B4 proves unreachable;
   - kernel CVEs, which are reported to DevSecOps but belong to the host.
-- **Unscannable components** are listed explicitly and never counted as clean. The Chrome-for-Testing builds under `/ms-playwright` are not package-managed, so Grype cannot be relied on to match them (see B8.4).
+- **Unscannable components** are listed explicitly and never counted as clean. Chrome for Testing is not package-managed, so it is assessed by version against the Chrome Releases blog (B8.4).
 
-**B8.4 Known residual: Chromium 156.0.8078.4 (pre-stable).**
-- The pinned Playwright bundles Chromium **156.0.8078.4**. Chrome 156 then went to stable and received security updates:
-  - **156.0.8078.73/.74** (2026-10-27), reported as 52 fixes including four Critical, among them a sandbox escape;
-  - **156.0.8078.79/.80** (2026-10-29).
-
-  These are secondary reports, to be confirmed against the Chrome Releases blog at S3.
-- The pinned build is therefore **presumed affected**.
-- Playwright's own browsers are built from pre-stable branches (1.65.0 bundles 158.0.8127.18; 1.65.1 bundles 159.0.8154.6). Upgrading Playwright does not reliably close this.
-- **Mitigating facts:**
-  - the browser loads only the synthetic crm-dev application, first-party EspoCRM 10.0.12 code plus the reviewed candidate;
-  - it has no route to any other content (B4 probe);
-  - it holds only synthetic credentials;
-  - it runs as uid 65534 with no capabilities, `no-new-privileges`, a read-only rootfs and default seccomp/AppArmor, for minutes, and is then destroyed.
-- **Unmitigated:**
-  - Chromium's own sandbox is off (B3);
-  - a renderer exploit delivered *through crm-dev content* would execute as uid 65534 in the container. Exploiting this needs a prior compromise of crm-dev content.
-- **Recommendation.** Treat this as **material by rule** and accept it explicitly as a bounded residual for this test-only run (CGPT decision, recorded with Matt's material-risk acceptance). The alternative is to block the browser run.
-- At S3 the scan must still show no *other* unresolved material finding.
+**B8.4 Browser vulnerability position (v1.3).** The v1.2 residual is **removed**: the pre-stable Chromium 156.0.8078.4 is no longer executed. The executed browser is the current **Stable** Chrome for Testing, 157.0.8103.78.
+- The latest desktop Stable release notes found during preparation are 157.0.8103.50, from 2026-11-09. The `.78` artefacts were published by the CfT Stable channel on 2026-11-11, so they are later.
+- At S3 the B2a freshness gate re-confirms that no later Stable security release exists.
+- A Chrome CVE published after `.78` and fixed in a later Stable is a **material** finding under B8.3, and it triggers the re-pin route.
+- The unexecuted Chromium 156 files remain in the image's filesystem. They are classified *present, not executed*, and the process check proves it at runtime.
 
 **Register entry `grype-cl-d5-scanner`:**
 - the release, artefact digest, checksums sha256 and sigstore bundle sha256;
@@ -320,7 +372,7 @@ The operator script is root-owned and operator-authored, not part of the candida
    - `crmdev-before.json`: the env file sha256 and a byte copy (root 0600); the crm-app, crm-db and crm-daemon container IDs, images, networks, health and StartedAt; the HTTP status and body hash of `/` from loopback; the appTimestamp; the `client/custom` tree manifest;
    - `beta-before.json`: **metadata only**, with no file content read (and never the beta env file): `stat` of `/srv/CRM/runtime/beta` and `/srv/CRM/deploy`; the `find -printf '%p %u:%g %m %s %T@'` listing of both to depth 2; the crm-beta container IDs, images, StartedAt, RestartCount and health.
 6. **Absence of stale objects.** No `crm-client001-*` container or network, and the subnet is unused.
-7. **Gate.** The CL-D5 scan (B8) passes under its triage rules, with the B8.4 acceptance recorded.
+7. **Gate.** The CfT acquisition and freshness gate (B2a) and the CL-D5 scan (B8) pass under the triage rules.
 
 **B9.2 Cleanup (always run, in this order, each step idempotent and logged).**
 1. Stop and remove the `crm-client001-browser-<run>` container if present (`docker rm -f`).
