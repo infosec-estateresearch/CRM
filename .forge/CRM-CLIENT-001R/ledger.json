@@ -1,0 +1,195 @@
+{
+  "base": "main",
+  "base_sha": "6e1766980e24d781d498727d4fe5db43cdeadbb7",
+  "branch": "forge/CRM-CLIENT-001R",
+  "candidate": "9271b481e013d4ed76338b49d4f25b89ca79b126",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 2,
+    "tester": 1
+  },
+  "created": "2026-11-16T14:20:56Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-16T14:21:27Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-16T14:33:06Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "round 1 build; 642 tests OK in Engineer sandbox",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-16T14:33:08Z",
+      "type": "result"
+    },
+    {
+      "candidate": null,
+      "id": 3,
+      "n": 2,
+      "role": "engineer",
+      "round": 2,
+      "t": "2026-11-16T14:33:31Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/3-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 3,
+      "t": "2026-11-16T14:35:20Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "secret-scan false positive in test removed",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 2,
+      "spawn": 3,
+      "t": "2026-11-16T14:35:22Z",
+      "type": "result"
+    },
+    {
+      "round": 2,
+      "sha": "9271b481e013d4ed76338b49d4f25b89ca79b126",
+      "t": "2026-11-16T14:35:22Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "9271b481e013d4ed76338b49d4f25b89ca79b126",
+      "id": 7,
+      "n": 1,
+      "role": "auditor",
+      "round": 2,
+      "t": "2026-11-16T14:35:33Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "9271b481e013d4ed76338b49d4f25b89ca79b126",
+      "id": 8,
+      "n": 1,
+      "role": "tester",
+      "round": 2,
+      "t": "2026-11-16T14:35:33Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "9271b481e013d4ed76338b49d4f25b89ca79b126",
+      "id": 9,
+      "n": 1,
+      "role": "devsecops",
+      "round": 2,
+      "t": "2026-11-16T14:35:33Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/7-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 7,
+      "t": "2026-11-16T14:45:28Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/8-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 8,
+      "t": "2026-11-16T14:45:28Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/9-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 9,
+      "t": "2026-11-16T14:45:28Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "9271b481e013d4ed76338b49d4f25b89ca79b126",
+      "findings": [],
+      "note": "diff within \u00a74; 642 OK",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 2,
+      "spawn": 7,
+      "t": "2026-11-16T14:45:34Z",
+      "type": "result"
+    },
+    {
+      "candidate": "9271b481e013d4ed76338b49d4f25b89ca79b126",
+      "findings": [],
+      "note": "AC1-5,4b,4c,6a,6c,7-9,11 evidenced; 642 OK, load 223 OK",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 2,
+      "spawn": 8,
+      "t": "2026-11-16T14:45:34Z",
+      "type": "result"
+    },
+    {
+      "candidate": "9271b481e013d4ed76338b49d4f25b89ca79b126",
+      "findings": [
+        {
+          "key": "doc-register-approval-open",
+          "severity": "advisory"
+        }
+      ],
+      "note": "advisory: register entries await CGPT approval (G3), operator gate",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 2,
+      "spawn": 9,
+      "t": "2026-11-16T14:45:34Z",
+      "type": "result"
+    },
+    {
+      "note": "S2 complete; candidate 9271b481 frozen",
+      "outcome": "DELIVERED",
+      "t": "2026-11-16T14:45:42Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-CLIENT-001R",
+  "host": "docker1",
+  "known_commit": "6e1766980e24d781d498727d4fe5db43cdeadbb7",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-CLIENT-001R",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 2,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-CLIENT-001R",
+  "wo": "CRM-CLIENT-001R",
+  "worktree": "/srv/CRM/worktrees/CRM-CLIENT-001R"
+}
