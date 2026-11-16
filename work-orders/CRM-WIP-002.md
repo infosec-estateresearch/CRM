@@ -15,7 +15,7 @@ BASE: main — CONDITIONAL: the commit that delivers an accepted CRM-WIP-001 (do
 
 ## 1. Dependencies
 
-- **CRM-CLIENT-001:** client delivery, AMD modules, cache-bust, browser runner and evidence route.
+- **CRM-CLIENT-001** (delivered by its recovery WO **CRM-CLIENT-001R**, #65 / PR #66): client delivery, AMD modules, cache-bust, browser runner and evidence route.
 - **CRM-FG-001:** the Account page Group Members tab coexists with this tab.
 - **CRM-WIP-001:** entities, validation, guards and denial.
 - **PO-W1** stays open. Until it is decided, the only user who sees the tab in synthetic UAT is **Admin**, with deny-by-default for every staff role. Staff use needs PO-W1, which goes into the consolidated business-decision set before final acceptance.
