@@ -1,6 +1,6 @@
 # CRM-WIP-001 intake brief — WIP data foundation and financial ACL
 
-> **Not a Work Order. No implementation, approval or dispatch authority.** Preparatory brief by Rogue (Orchestrator), 2026-11-13, updated 2026-11-16 (WIP-D1 verification), under the CGPT *Extended Autonomous Delivery Run*, Phase D. It refines `docs/delivery/forge-wo-intake-briefs.md` *CRM-WIP-001* for a later WO draft.
+> **Not a Work Order. No implementation, approval or dispatch authority.** Preparatory brief by Rogue (Orchestrator), 2026-11-13, updated 2026-11-16 (WIP-D1 verification; v1.2 decimal and stream verification under the *Continuation Mission* Phase D), under the CGPT *Extended Autonomous Delivery Run*, Phase D. It refines `docs/delivery/forge-wo-intake-briefs.md` *CRM-WIP-001* for a later WO draft.
 
 ## 1. References
 
@@ -35,7 +35,13 @@ Sources are EspoCRM 10.0.12 in the pinned image, read via `docker export` with n
      - validate on the server that no amount has more than two fraction digits, and reject anything beyond that, because the database would otherwise round silently;
      - keep amounts as decimal strings end to end;
      - test that a null amount stays distinct from `"0.00"`.
-   - **UNVERIFIED:** the exact API serialisation of a decimal currency field with scale 2 in list, detail and export output. The WO tests it and stops if it ever yields a float.
+   - **Verified (v1.2): API serialisation.**
+     - With `decimal: true` the attribute is VARCHAR. `BaseEntity` keeps it a **string padded to `scale`**, not truncated (`ORM/BaseEntity.php` `6025aac7…dd`, lines 466–471 and 1081–1104), so list and detail JSON return e.g. `"123.45"` at scale 2.
+     - There is no float cast on the record output path, except the one below.
+     - Export is still to be tested.
+   - **Verified (v1.2): `<field>Converted` is a FLOAT.** It is a non-stored expression (`amount * rate`) and gets a `floatval` (`Currency.php` lines 120–206 and 236–270; BaseEntity line 501). The WO must keep GBP-only amounts, must not use or expose any `*Converted` attribute in layouts, exports or reports, and must test for its absence.
+   - **Verified (v1.2): the core validator is insufficient.** `Classes/FieldValidators/CurrencyType.php` (`410f4cfb…a10f`) checks a regex and `inPermittedRange` against **10^precision − 1, not 10^(precision − scale)**. A value can therefore pass and still not fit the column, and there is **no** decimal-places validator. The WO adds a server-side validator: non-negative, at most 2 fraction digits, an integer part that fits `precision − 2`, no exponent, NaN or ∞, and null kept distinct from `"0.00"`.
+   - **UNVERIFIED:** whether crm-db rounds or errors on surplus decimals under its `sql_mode`. Irrelevant once the validator refuses them first, but it is tested.
 3. **Deny-by-default must be explicit.**
    - The CRM runs EspoCRM in **non-strict ACL mode**: a scope that a role leaves unset is **allowed** (`docs/ACCESS.md`).
    - Every new `Wip*` scope must therefore be listed as `no` in every role (ER Staff, Intake, Manager and Import) and added to `tests/unit/access_policy.py`, so that an omission fails the policy test.
@@ -43,7 +49,20 @@ Sources are EspoCRM 10.0.12 in the pinned image, read via `docker export` with n
 4. **Dependency.** CRM-WIP-001 needs **CRM-FG-001** accepted, for the derived group (GRP-02). WIP-001 has no GUI, so it does not need CRM-CLIENT-001 itself; WIP-002 does, and its client code would go under `client/custom/src/wip/` (CL-D1).
 5. **Audit.**
    - WIP-12 relies on audited fields and the stream. Audited fields write notes on every save that is not `SILENT` (see CRM-FG-001 §2 P5).
-   - **UNVERIFIED:** whether stream notes for `Wip*` records could expose amounts to users who can read the parent Account. The WO must disable the stream or the Account-parent stream propagation for the `Wip*` entities, or prove that no such leak exists.
+   - **Verified (v1.2): stream exposure, source facts.**
+     - An audited-field `Update` note sets only `parent` (the WipCase), not `superParent`, so it does **not** appear in the Account stream.
+     - Create, CreateRelated and Assign notes may set `superParent = Account` (through `accountLink` or an `account` belongsTo). They carry the assigned user and status, **not** field values.
+     - The Account record stream filters out notes whose `parentType`/`relatedType` is a scope the user cannot read. That list is built **only from scopes with `entity` and `object` true** (`Tools/Stream/RecordService.php` `3efc0e61…e2ec` lines 303–335 and 495–525; `RecordService/Helper.php` `7a3006e5…3d72` lines 121–153).
+     - The global stream checks each note's parent stream access (`GlobalRecordService.php` `c493e305…14c5`).
+     - With `stream: false`, audited fields **still** write Update notes on update (`HookProcessor.php` lines 649–663).
+   - **Binding rules for the WO:**
+     - every `Wip*` scope keeps `entity: true` **and** `object: true`, so the ACL filter applies;
+     - `stream: false`;
+     - no `accountLink` scope parameter;
+     - the Account→WipCase link is **not** `audited`, so no CreateRelated note is written on Account;
+     - amount fields are not audited unless PO-W1 decides otherwise.
+
+     A negative test lists the Account stream, the global stream and notes search as an ER Staff user with Account read but WIP denied, and asserts that no `Wip*` note or amount is visible.
 6. **Rollback.** Removing an entity leaves its tables in place. The WO must document this, and test that core CRM works with the WIP metadata absent.
 
 ## 4. Missing PO business decisions (block parts of WIP-001/002, not the synthetic scaffold)
