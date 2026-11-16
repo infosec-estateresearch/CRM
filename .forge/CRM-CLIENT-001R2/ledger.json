@@ -1,0 +1,169 @@
+{
+  "base": "main",
+  "base_sha": "6e1766980e24d781d498727d4fe5db43cdeadbb7",
+  "branch": "forge/CRM-CLIENT-001R2",
+  "candidate": "07bfaf1c01c633d6c45aba16d6587733a8c7f6a1",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-16T17:27:31Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-16T17:28:03Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-16T17:30:01Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "R2 candidate built; 643 tests OK",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-16T17:30:04Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "07bfaf1c01c633d6c45aba16d6587733a8c7f6a1",
+      "t": "2026-11-16T17:30:10Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "07bfaf1c01c633d6c45aba16d6587733a8c7f6a1",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-16T17:30:26Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "07bfaf1c01c633d6c45aba16d6587733a8c7f6a1",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-16T17:30:26Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "07bfaf1c01c633d6c45aba16d6587733a8c7f6a1",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-16T17:30:26Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-16T17:35:17Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-16T17:35:17Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-16T17:35:17Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "07bfaf1c01c633d6c45aba16d6587733a8c7f6a1",
+      "findings": [],
+      "note": "diff in allowlist; pin verified; 643 OK",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-16T17:35:19Z",
+      "type": "result"
+    },
+    {
+      "candidate": "07bfaf1c01c633d6c45aba16d6587733a8c7f6a1",
+      "findings": [],
+      "note": "643 OK 2 skip; load 223 OK; 10 mutations caught",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-16T17:35:19Z",
+      "type": "result"
+    },
+    {
+      "candidate": "07bfaf1c01c633d6c45aba16d6587733a8c7f6a1",
+      "findings": [
+        {
+          "key": "doc-register-approval-open",
+          "severity": "advisory"
+        },
+        {
+          "key": "entry-sh-exec-bit",
+          "severity": "advisory"
+        }
+      ],
+      "note": "static review pass; gitleaks clean",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-16T17:35:19Z",
+      "type": "result"
+    },
+    {
+      "note": "Round 1; all three reviewers PASS on 07bfaf1c",
+      "outcome": "DELIVERED",
+      "t": "2026-11-16T17:35:25Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-CLIENT-001R2",
+  "host": "docker1",
+  "known_commit": "6e1766980e24d781d498727d4fe5db43cdeadbb7",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-CLIENT-001R2",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-CLIENT-001R2",
+  "wo": "CRM-CLIENT-001R2",
+  "worktree": "/srv/CRM/worktrees/CRM-CLIENT-001R2"
+}
