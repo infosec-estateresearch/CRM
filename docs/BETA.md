@@ -85,7 +85,7 @@ TLS ends at the PO's HAProxy. EspoCRM must still generate `https://` links, so `
    - unpacks to `/srv/CRM/deploy/<short>`, root-owned and read-only. The deploy root `/srv/CRM/deploy` is a constant (a `CRM_DEPLOY_ROOT` naming anything else is refused; the unit tests' only seam is `$CRM_TEST_ROOT/deploy` under `/tmp`). The deploy root, and on `--upgrade` an existing `<short>` directory before it is re-checked, must be owned by uid 0 and not group- or other-writable;
    - creates `db`, `data`, `custom`, `client/custom` and `backups` (`0700`);
    - renders the edge config;
-   - runs `up.sh beta` and `deploy_custom.sh beta`;
+   - runs `up.sh beta` and `deploy_custom.sh beta`. Since CRM-CLIENT-001R the latter also deploys `client/custom/src` and ends with `update-app-timestamp`; it keeps the previous trees until every step succeeds and reports `FAILED STEP: <step>` with recovery otherwise ([RELEASE.md](RELEASE.md)). CRM-CLIENT-001R itself changed nothing on beta: this behaviour reaches beta only through a separately authorised `deploy_release.sh` run of a later release;
    - sets `siteUrl` (`config:set ... --type=string`) and `phoneNumberInternational=false` (`config:set ... --type=bool`; `config:set` defaults to `--type=string`, which would store the string `'false'`), then reads `phoneNumberInternational` back with `php -r` + `var_export`. Only the PHP boolean `false` passes; the string `'false'` fails;
    - provisions the CRM-003 teams, roles and `ER Import` API user;
    - runs the beta-safe acceptance suite;

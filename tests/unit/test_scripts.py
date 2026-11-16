@@ -40,7 +40,36 @@ FAKE_DOCKER = """#!/usr/bin/env bash
 # `compose config --format json` through FAKE_COMPOSE_CONFIG.
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
 [ -z "${FAKE_DOCKER_ENV_LOG:-}" ] || env >> "$FAKE_DOCKER_ENV_LOG"
+# FAKE_DOCKER_FAIL="<call suffix>@<n>;...": the n-th call ending with that suffix fails.
+if [ -n "${FAKE_DOCKER_FAIL:-}" ]; then
+    IFS=';' read -ra specs <<< "$FAKE_DOCKER_FAIL"
+    for spec in "${specs[@]}"; do
+        suffix=${spec%@*}; nth=${spec##*@}
+        seen=$(grep -c -F -- "$suffix" "$FAKE_DOCKER_LOG" || true)
+        case "$*" in *"$suffix") [ "$seen" != "$nth" ] || { echo "fake docker: injected failure: $suffix" >&2; exit 1; } ;; esac
+    done
+fi
+# FAKE_DOCKER_SIGNAL="<call suffix>@<n>:<SIG>": on the n-th call ending with that suffix the
+# script that called docker receives the real signal (its trap runs when this call returns).
+if [ -n "${FAKE_DOCKER_SIGNAL:-}" ]; then
+    spec=${FAKE_DOCKER_SIGNAL%:*}; sig=${FAKE_DOCKER_SIGNAL##*:}
+    suffix=${spec%@*}; nth=${spec##*@}
+    seen=$(grep -c -F -- "$suffix" "$FAKE_DOCKER_LOG" || true)
+    case "$*" in *"$suffix") [ "$seen" != "$nth" ] || kill -s "$sig" "$PPID" ;; esac
+fi
 case "$*" in
+    *"php bin/command update-app-timestamp")
+        # Plays EspoCRM: appTimestamp in data/state.php advances by one (FAKE_APPTS=stuck: never,
+        # late: only from the second call on).
+        cur=$(sed -n "s/.*'appTimestamp' => \\([0-9]*\\).*/\\1/p" "$FAKE_STATE_FILE" 2>/dev/null | head -n 1)
+        cur=${cur:-1000}; new=$((cur + 1))
+        calls=$(grep -c -F -- "php bin/command update-app-timestamp" "$FAKE_DOCKER_LOG" || true)
+        case "${FAKE_APPTS:-advance}" in
+            stuck) new=$cur ;;
+            late) [ "$calls" -ge 2 ] || new=$cur ;;
+        esac
+        printf "<?php\\nreturn array (\\n  'appTimestamp' => %s,\\n  'cacheTimestamp' => 5,\\n);\\n" "$new" > "$FAKE_STATE_FILE" ;;
+
     *" config --format json") exec python3 -I "$FAKE_COMPOSE_CONFIG" "$@" ;;
     *mariadb-dump*) printf -- '-- fake dump\\nCREATE TABLE account (id int);\\n' ;;
     *"exec -T crm-db"*) cat > "$FAKE_DOCKER_STDIN" ;;
@@ -181,7 +210,7 @@ class ScriptEnv(unittest.TestCase):
             fh.write(text)
         return path
 
-    def run_script(self, name, *args, runtime=None, extra_env=None, umask=None):
+    def run_script(self, name, *args, runtime=None, extra_env=None, umask=None, scripts=None):
         env = {
             "PATH": self.bin + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"),
             "CRM_RUNTIME_DIR": runtime or self.runtime,
@@ -190,10 +219,11 @@ class ScriptEnv(unittest.TestCase):
             "HOME": self.tmp.name,
             "REAL_DATE": REAL_DATE,
             "FAKE_COMPOSE_CONFIG": self.compose_config,
+            "FAKE_STATE_FILE": os.path.join(runtime or self.runtime, "data", "state.php"),
         }
         env.update(extra_env or {})
         preexec = (lambda: os.umask(umask)) if umask is not None else None
-        res = subprocess.run(["bash", os.path.join(SCRIPTS, name), *args],
+        res = subprocess.run(["bash", os.path.join(scripts or SCRIPTS, name), *args],
                              capture_output=True, text=True, env=env, timeout=60,
                              preexec_fn=preexec)
         self.assertNotIn(FAKE_SECRET, res.stdout + res.stderr, "resolved config printed")
@@ -452,6 +482,7 @@ class TestDeployCustom(ScriptEnv):
             "up -d --wait crm-app crm-daemon",
             "exec -T -u www-data -w /var/www/html crm-app php bin/command clear-cache",
             "exec -T -u www-data -w /var/www/html crm-app php bin/command rebuild",
+            "exec -T -u www-data -w /var/www/html crm-app php bin/command update-app-timestamp",
         ])
 
     def test_missing_runtime_custom_dir_fails_and_writes_nothing(self):
@@ -1046,8 +1077,11 @@ class TestDeploySecuresCustomDirs(ScriptEnv):
         self.assert_private(self.custom)
         self.assert_private(self.espo)
         uid = os.getuid()
-        self.assertEqual(self.chown_calls(), [f"-h -- {uid} {self.custom}", f"-h -- {uid} {self.espo}"],
-                         "non-recursive, no-dereference chown of exactly the two directories")
+        client_custom = os.path.join(self.runtime, "client", "custom")
+        self.assertEqual(self.chown_calls(), [f"-h -- {uid} {self.custom}", f"-h -- {uid} {self.espo}",
+                                              f"-h -- {uid} {client_custom}"],
+                         "non-recursive, no-dereference chown of exactly the three directories "
+                         "(CRM-CLIENT-001R adds client/custom)")
         self.assertEqual(tree(os.path.join(self.espo, "Custom")), tree(REPO_CUSTOM))
 
     def test_created_parent_is_private(self):
@@ -1096,6 +1130,633 @@ class TestDeploySecuresCustomDirs(ScriptEnv):
                 self.assertEqual(res.returncode, 1)
                 self.assertIn(f"group- or world-writable (mode 757): {path}", res.stderr)
                 os.chmod(path, 0o755)
+
+
+# ---------------------------------------------------------------- CRM-CLIENT-001R
+REPO_SRC = os.path.join(REPO, "client", "custom", "src")
+APPTS = "php bin/command update-app-timestamp"
+UP = "up -d --wait crm-app crm-daemon"
+STOP = "stop crm-daemon crm-app"
+CLEAR = "php bin/command clear-cache"
+REBUILD = "php bin/command rebuild"
+CMD_PREFIX = "exec -T -u www-data -w /var/www/html crm-app "
+
+
+class ClientDeployBase(ScriptEnv):
+    """deploy_custom.sh with the client tree: runtime client/custom holds a stale src/,
+    EspoCRM's reserved modules/ and another entry that the deploy must never touch."""
+
+    STAMP = "20261116T120000Z"
+
+    def setUp(self):
+        super().setUp()
+        self.custom_live = os.path.join(self.runtime, "custom", "Espo", "Custom")
+        self.cc = os.path.join(self.runtime, "client", "custom")
+        self.live_src = os.path.join(self.cc, "src")
+        self.write("custom/Espo/Custom/marker.txt", "previous custom tree")
+        self.write("client/custom/src/crm/previous-only.js", "define([], function () { return {}; });\n")
+        self.write("client/custom/src/stale/old.txt", "stale\n")
+        self.write("client/custom/modules/Ext/ext.js", "// extension, not ours\n")
+        self.write("client/custom/other.txt", "not under src\n")
+        self.write("data/state.php", "<?php\nreturn array (\n  'appTimestamp' => 1000,\n);\n")
+        self.mvlog = os.path.join(self.tmp.name, "mv.log")
+        mv = os.path.join(self.bin, "mv")
+        # FAKE_MV_FAIL: every mv whose arguments contain it fails. FAKE_MV_FAIL_ONCE: only the
+        # first one does. FAKE_MV_SIGNAL="<pattern>:<SIG>": the first matching mv sends the real
+        # signal to the deploy script, then runs (the trap fires when mv returns).
+        with open(mv, "w") as fh:
+            fh.write('#!/usr/bin/env bash\nprintf "MV %s\\n" "$*" >> "$MV_LOG"\n'
+                     'if [ -n "${FAKE_MV_FAIL:-}" ]; then case "$*" in *"$FAKE_MV_FAIL"*) exit 1 ;; esac; fi\n'
+                     'if [ -n "${FAKE_MV_FAIL_ONCE:-}" ]; then case "$*" in *"$FAKE_MV_FAIL_ONCE"*)\n'
+                     '  [ -e "$MV_LOG.once" ] || { : > "$MV_LOG.once"; exit 1; } ;; esac; fi\n'
+                     'if [ -n "${FAKE_MV_SIGNAL:-}" ]; then pat=${FAKE_MV_SIGNAL%:*}; sig=${FAKE_MV_SIGNAL##*:}\n'
+                     '  case "$*" in *"$pat"*) [ -e "$MV_LOG.sig" ] || { : > "$MV_LOG.sig"; kill -s "$sig" "$PPID"; } ;; esac; fi\n'
+                     f'exec {shutil.which("mv")} "$@"\n')
+        os.chmod(mv, stat.S_IRWXU)
+        # FAKE_CP_SIGNAL="<pattern>:<SIG>": the first matching cp signals the deploy script, then copies.
+        cp = os.path.join(self.bin, "cp")
+        with open(cp, "w") as fh:
+            fh.write('#!/usr/bin/env bash\nif [ -n "${FAKE_CP_SIGNAL:-}" ]; then pat=${FAKE_CP_SIGNAL%:*}; '
+                     'sig=${FAKE_CP_SIGNAL##*:}\n  case "$*" in *"$pat"*) [ -e "$MV_LOG.cpsig" ] || '
+                     '{ : > "$MV_LOG.cpsig"; kill -s "$sig" "$PPID"; } ;; esac; fi\n'
+                     f'exec {shutil.which("cp")} "$@"\n')
+        os.chmod(cp, stat.S_IRWXU)
+        sleep = os.path.join(self.bin, "sleep")
+        with open(sleep, "w") as fh:
+            fh.write('#!/usr/bin/env bash\nprintf "SLEEP %s\\n" "$*" >> "$MV_LOG"\nexit 0\n')
+        os.chmod(sleep, stat.S_IRWXU)
+
+    def repo_copy(self, name="repo-b"):
+        dst = os.path.join(self.tmp.name, name)
+        for d in ("scripts", "deploy", "custom", "client"):
+            shutil.copytree(os.path.join(REPO, d), os.path.join(dst, d), symlinks=True,
+                            ignore=shutil.ignore_patterns("__pycache__"))
+        return dst
+
+    def deploy(self, repo=None, running=True, on_stop=None, umask=None, **env):
+        e = {"FAKE_DATE_STAMP": self.STAMP, "MV_LOG": self.mvlog}
+        if running:
+            e["FAKE_DOCKER_RUNNING"] = "1"
+        if on_stop:
+            e["FAKE_DOCKER_ON_STOP"] = on_stop
+        e.update(env)
+        return self.run_script("deploy_custom.sh", "dev", extra_env=e, umask=umask,
+                               scripts=os.path.join(repo, "scripts") if repo else None)
+
+    def non_src(self):
+        """Everything under client/custom except src/ and the deploy's own .src.* names."""
+        return {k: v for k, v in tree(self.cc).items()
+                if k.split("/")[0] != "src" and not k.split("/")[0].startswith(".src.")}
+
+    def appts(self):
+        with open(os.path.join(self.runtime, "data", "state.php")) as fh:
+            import re
+            return int(re.search(r"'appTimestamp' => (\d+)", fh.read()).group(1))
+
+    def mv_lines(self):
+        if not os.path.exists(self.mvlog):
+            return []
+        with open(self.mvlog) as fh:
+            return fh.read().splitlines()
+
+
+class TestDeployClientTree(ClientDeployBase):
+    """AC2 and AC3: client/custom/src is replaced as a whole, staged and renamed on the
+    same filesystem after the stop; modules/ and every other entry stay byte-identical."""
+
+    def test_src_replaced_as_a_whole_and_removed_files_disappear(self):
+        before_other = self.non_src()
+        self.deploy()
+        self.assertEqual(tree(self.live_src), tree(REPO_SRC))
+        self.assertFalse(os.path.exists(os.path.join(self.live_src, "crm", "previous-only.js")))
+        self.assertFalse(os.path.exists(os.path.join(self.live_src, "stale")))
+        self.assertEqual(self.non_src(), before_other, "modules/ and other entries untouched")
+        self.assertEqual(sorted(os.listdir(self.cc)), ["modules", "other.txt", "res.js", "src"],
+                         "no staging, old or failed tree left behind")
+        self.assertEqual(sorted(os.listdir(os.path.join(self.runtime, "custom", "Espo"))), ["Custom"])
+        self.assertEqual(tree(self.custom_live), tree(REPO_CUSTOM))
+        for dirpath, dirs, files in os.walk(self.live_src):
+            for name in dirs + files:
+                self.assertTrue(os.stat(os.path.join(dirpath, name)).st_mode & stat.S_IROTH, name)
+
+    def test_modules_and_other_entries_are_byte_identical_across_a_deploy(self):
+        modules = os.path.join(self.cc, "modules")
+        before = (tree_hash(modules), self.non_src())
+        self.deploy(umask=0o077)
+        self.assertEqual((tree_hash(modules), self.non_src()), before)
+
+    def test_first_deploy_creates_src_when_the_runtime_has_none(self):
+        shutil.rmtree(self.live_src)
+        self.deploy()
+        self.assertEqual(tree(self.live_src), tree(REPO_SRC))
+
+    def test_deploy_is_repeatable(self):
+        self.deploy()
+        first = tree(self.live_src)
+        self.deploy()
+        self.assertEqual(tree(self.live_src), first)
+
+    def test_staged_and_renamed_beside_the_live_tree_after_the_stop(self):
+        res = self.deploy(on_stop=f"echo STOP >> {shlex.quote(self.mvlog)}")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        lines = self.mv_lines()
+        self.assertEqual(lines[0], "STOP", "the stack is stopped before anything is swapped")
+        staging = os.path.join(self.cc, f".src.deploy-{self.STAMP}")
+        old = os.path.join(self.cc, f".src.old-{self.STAMP}")
+        self.assertIn(f"MV -T -- {self.live_src} {old}", lines)
+        self.assertIn(f"MV -T -- {staging} {self.live_src}", lines)
+        self.assertLess(lines.index(f"MV -T -- {self.live_src} {old}"),
+                        lines.index(f"MV -T -- {staging} {self.live_src}"))
+        self.assertEqual(os.path.dirname(staging), os.path.dirname(self.live_src), "same filesystem")
+        # the custom/Espo/Custom tree is swapped first
+        self.assertLess([i for i, l in enumerate(lines) if ".Custom.deploy-" in l][0],
+                        lines.index(f"MV -T -- {staging} {self.live_src}"))
+
+    def test_repository_without_client_source_is_refused_before_any_docker_call(self):
+        repo = self.repo_copy()
+        shutil.rmtree(os.path.join(repo, "client", "custom", "src"))
+        before = (tree_hash(self.live_src), tree_hash(self.custom_live))
+        res = self.deploy(repo)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("repository client customisation missing", res.stderr)
+        self.assertEqual(self.docker_calls(), [])
+        self.assertEqual((tree_hash(self.live_src), tree_hash(self.custom_live)), before)
+
+    def test_symlink_in_the_repository_source_is_refused(self):
+        repo = self.repo_copy()
+        os.symlink("/etc", os.path.join(repo, "client", "custom", "src", "crm", "link.js"))
+        before = (tree_hash(self.live_src), tree_hash(self.custom_live))
+        res = self.deploy(repo)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("symlink in", res.stderr)
+        self.assertEqual(self.docker_calls(), [])
+        self.assertEqual((tree_hash(self.live_src), tree_hash(self.custom_live)), before)
+
+    def test_missing_runtime_client_custom_is_refused_and_writes_nothing(self):
+        shutil.rmtree(os.path.join(self.runtime, "client"))
+        res = self.deploy()
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("runtime client/custom directory missing", res.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.runtime, "client")))
+        self.assertEqual(self.docker_calls(), [])
+
+
+class TestDeployClientPathSafety(ClientDeployBase):
+    """AC2: a symlinked or redirected client, client/custom or src, or a planted working
+    name, stops the deploy before any swap, whether planted before or while the stack stops."""
+
+    COMPONENTS = ["client", "client/custom", "client/custom/src"]
+    NAMES = [(".src.deploy-", "client/custom"), (".src.old-", "client/custom"),
+             (".src.failed-", "client/custom"), (".Custom.failed-", "custom/Espo")]
+
+    def setUp(self):
+        super().setUp()
+        self.sentinel = os.path.join(self.tmp.name, "sentinel")
+
+    def redirect_cmd(self, rel):
+        path = os.path.join(self.runtime, rel)
+        return f"mv -T -- {shlex.quote(path)} {shlex.quote(self.sentinel)} && " \
+               f"ln -s -- {shlex.quote(self.sentinel)} {shlex.quote(path)}"
+
+    def plant_cmd(self, prefix, where):
+        link = os.path.join(self.runtime, where, prefix + self.STAMP)
+        return f"mkdir -p {shlex.quote(self.sentinel)} && echo keep > {shlex.quote(self.sentinel)}/keep.txt && " \
+               f"ln -s -- {shlex.quote(self.sentinel)} {shlex.quote(link)}"
+
+    def fresh(self):
+        self.tearDown()
+        self.setUp()
+
+    def assert_refused_before_swap(self, res, at_stop):
+        self.assertNotEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertRegex(res.stderr, r"refusing to deploy|not canonical|resolves to|already exists")
+        self.assertNotIn("customisation deployed", res.stdout)
+        verbs = self.verbs()
+        self.assertFalse([v for v in verbs if v.startswith(("up", "exec"))], verbs)
+        self.assertFalse([l for l in self.mv_lines() if "deploy-" in l or "old-" in l],
+                         "no swap was attempted")
+        if at_stop:
+            self.assertEqual(verbs, ["ps --status running -q crm-app", STOP])
+        else:
+            self.assertEqual(verbs, [])
+
+    def test_symlinked_component_planted_before_the_run(self):
+        for rel in self.COMPONENTS:
+            with self.subTest(component=rel):
+                self.fresh()
+                subprocess.run(["bash", "-c", self.redirect_cmd(rel)], check=True)
+                before = tree_hash(self.sentinel)
+                custom_before = tree_hash(self.custom_live)
+                res = self.deploy()
+                self.assert_refused_before_swap(res, at_stop=False)
+                self.assertEqual(tree_hash(self.sentinel), before, "nothing written through the link")
+                self.assertEqual(tree_hash(self.custom_live), custom_before)
+
+    def test_symlinked_component_planted_while_the_stack_stops(self):
+        for rel in self.COMPONENTS:
+            with self.subTest(component=rel):
+                self.fresh()
+                path = os.path.join(self.runtime, rel)
+                before = tree_hash(path)
+                custom_before = tree_hash(self.custom_live)
+                res = self.deploy(on_stop=self.redirect_cmd(rel))
+                self.assertTrue(os.path.islink(path), "the plant happened")
+                self.assert_refused_before_swap(res, at_stop=True)
+                self.assertEqual(tree_hash(self.sentinel), before, "nothing written through the link")
+                self.assertEqual(tree_hash(self.custom_live), custom_before, "custom tree not swapped")
+
+    def test_planted_working_names_are_refused_before_and_while_stopping(self):
+        reference = os.path.join(self.tmp.name, "reference")
+        os.mkdir(reference)
+        with open(os.path.join(reference, "keep.txt"), "w") as fh:
+            fh.write("keep\n")
+        expected = tree_hash(reference)
+        for prefix, where in self.NAMES:
+            for at_stop in (False, True):
+                with self.subTest(name=prefix, at_stop=at_stop):
+                    self.fresh()
+                    src_before = tree_hash(self.live_src)
+                    custom_before = tree_hash(self.custom_live)
+                    if at_stop:
+                        res = self.deploy(on_stop=self.plant_cmd(prefix, where))
+                    else:
+                        subprocess.run(["bash", "-c", self.plant_cmd(prefix, where)], check=True)
+                        res = self.deploy()
+                    self.assert_refused_before_swap(res, at_stop=at_stop)
+                    self.assertEqual(tree_hash(self.sentinel), expected)
+                    self.assertEqual((tree_hash(self.live_src), tree_hash(self.custom_live)),
+                                     (src_before, custom_before), "live trees untouched")
+
+    def test_group_or_world_writable_client_custom_is_made_private_but_client_must_be_private(self):
+        os.chmod(os.path.join(self.runtime, "client"), 0o775)
+        before = tree_hash(self.live_src)
+        res = self.deploy()
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("group- or world-writable", res.stderr)
+        self.assertEqual(tree_hash(self.live_src), before)
+        self.assertEqual(tree(self.custom_live)["marker.txt"], b"previous custom tree")
+        self.assertFalse([l for l in self.mv_lines() if "deploy-" in l])
+        os.chmod(os.path.join(self.runtime, "client"), 0o755)
+        # the container re-opens client/custom while the stack stops: the deploy secures it
+        res = self.deploy(on_stop=f"chmod 0777 {shlex.quote(self.cc)}")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(os.stat(self.cc).st_mode & 0o022, 0)
+
+
+class TestDeployClientCacheBust(ClientDeployBase):
+    """AC4: up --wait, clear-cache, rebuild, update-app-timestamp, in that order, in crm-app
+    as www-data; the appTimestamp must advance strictly."""
+
+    def test_success_path_order_and_strict_advance(self):
+        res = self.deploy()
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.verbs(), [
+            "ps --status running -q crm-app", STOP, UP,
+            CMD_PREFIX + CLEAR, CMD_PREFIX + REBUILD, CMD_PREFIX + APPTS])
+        self.assertEqual(self.appts(), 1001)
+        self.assertIn("appTimestamp advanced: 1000 -> 1001", res.stdout)
+        self.assertIn("client cache-bust done", res.stdout)
+        self.assertEqual([l for l in self.mv_lines() if l.startswith("SLEEP")], [], "no retry needed")
+
+    def test_value_that_does_not_advance_is_retried_once_after_one_second(self):
+        res = self.deploy(FAKE_APPTS="late")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        calls = [v for v in self.verbs() if v.endswith(APPTS)]
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([l for l in self.mv_lines() if l.startswith("SLEEP")], ["SLEEP 1"])
+        self.assertEqual(self.appts(), 1001)
+
+    def test_value_that_never_advances_fails_the_step(self):
+        before = tree(self.live_src)
+        res = self.deploy(FAKE_APPTS="stuck")
+        self.assertEqual(res.returncode, 46, "recovery also cannot advance it")
+        self.assertIn("FAILED STEP: update-app-timestamp (not advanced)", res.stderr)
+        self.assertIn("RECOVERY FAILED", res.stderr)
+        self.assertNotIn("customisation deployed", res.stdout)
+        self.assertEqual(len([v for v in self.verbs() if v.endswith(APPTS)]), 4, "one retry each pass")
+        self.assertEqual(before, tree(os.path.join(self.cc, "src")), "previous src restored")
+
+    def test_an_unreadable_timestamp_is_not_success(self):
+        res = self.deploy(FAKE_STATE_FILE=os.path.join(self.tmp.name, "elsewhere.php"))
+        self.assertEqual(res.returncode, 46, res.stdout + res.stderr)
+        self.assertIn("FAILED STEP: update-app-timestamp (not advanced)", res.stderr)
+
+    def test_stopped_stack_prints_that_the_cache_bust_was_skipped(self):
+        res = self.deploy(running=False)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("clear-cache/rebuild skipped", res.stdout)
+        self.assertIn("client cache-bust (update-app-timestamp) was skipped", res.stdout)
+        self.assertIn("re-run this script", res.stdout)
+        self.assertEqual(self.verbs(), ["ps --status running -q crm-app", STOP])
+        self.assertEqual(tree(self.live_src), tree(REPO_SRC))
+        self.assertEqual(self.appts(), 1000)
+        self.assertEqual(sorted(os.listdir(self.cc)), ["modules", "other.txt", "res.js", "src"])
+
+
+class TestDeployClientFailureAndRecovery(ClientDeployBase):
+    """AC4b / annex B7: a failure after the swap names the step, restores the previous
+    trees byte for byte, keeps the new ones as .failed-<stamp>, and either recovers the
+    cache-bust or stops the stack."""
+
+    STEPS = [("up", UP, 21), ("clear-cache", CMD_PREFIX + CLEAR, 22),
+             ("rebuild", CMD_PREFIX + REBUILD, 23), ("update-app-timestamp", CMD_PREFIX + APPTS, 24)]
+    RECOVERY = [("stop", STOP, 41), ("up", UP, 43), ("clear-cache", CMD_PREFIX + CLEAR, 44),
+                ("rebuild", CMD_PREFIX + REBUILD, 45), ("update-app-timestamp", CMD_PREFIX + APPTS, 46)]
+    PASS = [UP, CMD_PREFIX + CLEAR, CMD_PREFIX + REBUILD, CMD_PREFIX + APPTS]
+
+    def snapshot(self):
+        return {"src": tree(self.live_src), "custom": tree(self.custom_live), "other": self.non_src(),
+                "modules": tree_hash(os.path.join(self.cc, "modules"))}
+
+    def assert_no_success(self, res):
+        self.assertNotIn("customisation deployed", res.stdout)
+        self.assertNotIn("cache-bust done", res.stdout)
+
+    def failed_dirs(self):
+        return (os.path.join(self.cc, f".src.failed-{self.STAMP}"),
+                os.path.join(self.runtime, "custom", "Espo", f".Custom.failed-{self.STAMP}"))
+
+    def test_failure_at_each_post_swap_step_recovers(self):
+        for step, suffix, code in self.STEPS:
+            with self.subTest(step=step):
+                self.tearDown()
+                self.setUp()
+                before = self.snapshot()
+                res = self.deploy(FAKE_DOCKER_FAIL=f"{suffix}@1")
+                self.assertEqual(res.returncode, code, res.stdout + res.stderr)
+                self.assertIn(f"FAILED STEP: {step}", res.stderr)
+                self.assertIn("RECOVERED: previous customisation restored", res.stderr)
+                self.assertNotIn("RECOVERY FAILED", res.stderr)
+                self.assert_no_success(res)
+                self.assertEqual(self.snapshot(), before, "previous trees restored byte for byte")
+                src_failed, custom_failed = self.failed_dirs()
+                self.assertEqual(tree(src_failed), tree(REPO_SRC), "the failed new tree is retained")
+                self.assertEqual(tree(custom_failed), tree(REPO_CUSTOM))
+                self.assertEqual(sorted(os.listdir(self.cc)),
+                                 sorted(["modules", "other.txt", "res.js", "src", f".src.failed-{self.STAMP}"]))
+                index = [s for s, _, _ in self.STEPS].index(step)
+                done = self.PASS[:index + 1]
+                self.assertEqual(self.verbs(), ["ps --status running -q crm-app", STOP, *done,
+                                                STOP, *self.PASS], "recovery re-runs the cache-bust")
+                self.assertEqual(self.appts(), 1001 if step != "update-app-timestamp" else 1001)
+
+    def test_failure_at_each_recovery_step_stops_the_stack(self):
+        for step, suffix, code in self.RECOVERY:
+            with self.subTest(step=step):
+                self.tearDown()
+                self.setUp()
+                before = self.snapshot()
+                nth = 2  # the recovery's call is the second one (the deploy's failed first)
+                res = self.deploy(FAKE_DOCKER_FAIL=f"{CMD_PREFIX + APPTS}@1;{suffix}@{nth}")
+                self.assertEqual(res.returncode, code, res.stdout + res.stderr)
+                self.assertIn("FAILED STEP: update-app-timestamp", res.stderr)
+                self.assertIn(f"RECOVERY FAILED: stack left stopped (step: {step})", res.stderr)
+                self.assertNotIn("RECOVERED", res.stderr)
+                self.assert_no_success(res)
+                self.assertEqual(self.verbs()[-1], STOP, "controlled stop of crm-app and crm-daemon")
+                src_failed, custom_failed = self.failed_dirs()
+                if step == "stop":  # nothing restored yet: new trees live, previous ones retained
+                    old_src = os.path.join(self.cc, f".src.old-{self.STAMP}")
+                    self.assertEqual(tree(old_src), before["src"])
+                    self.assertEqual(tree(self.live_src), tree(REPO_SRC))
+                else:
+                    self.assertEqual(self.snapshot(), before)
+                    self.assertEqual(tree(src_failed), tree(REPO_SRC))
+
+    def test_failure_to_restore_the_trees_retains_both(self):
+        before = self.snapshot()
+        res = self.deploy(FAKE_DOCKER_FAIL=f"{CMD_PREFIX + REBUILD}@1", FAKE_MV_FAIL=".failed-")
+        self.assertEqual(res.returncode, 42, res.stdout + res.stderr)
+        self.assertIn("FAILED STEP: rebuild", res.stderr)
+        self.assertIn("RECOVERY FAILED: stack left stopped (step: restore-trees)", res.stderr)
+        self.assertEqual(tree(self.live_src), tree(REPO_SRC), "the new tree is still live, not lost")
+        self.assertEqual(tree(os.path.join(self.cc, f".src.old-{self.STAMP}")), before["src"])
+        self.assertEqual(tree(os.path.join(self.runtime, "custom", "Espo", f".Custom.old-{self.STAMP}")),
+                         before["custom"])
+        self.assertEqual(self.verbs()[-1], STOP)
+        self.assertEqual(self.non_src(), before["other"])
+
+    def test_second_swap_failure_swaps_the_first_back(self):
+        before = self.snapshot()
+        res = self.deploy(FAKE_MV_FAIL=f".src.deploy-{self.STAMP}")
+        self.assertEqual(res.returncode, 20, res.stdout + res.stderr)
+        self.assertIn("FAILED STEP: swap", res.stderr)
+        self.assert_no_success(res)
+        self.assertEqual(self.snapshot(), before, "previous trees in place")
+        self.assertEqual(tree(self.failed_dirs()[1]), tree(REPO_CUSTOM))
+        self.assertEqual(self.verbs(), ["ps --status running -q crm-app", STOP], "stack left stopped")
+        self.assertFalse(os.path.exists(os.path.join(self.cc, f".src.deploy-{self.STAMP}")),
+                         "the staging tree is removed")
+
+    def test_modules_are_identical_through_success_failure_and_failed_recovery(self):
+        modules = tree_hash(os.path.join(self.cc, "modules"))
+        other = self.non_src()
+        cases = [{}, {"FAKE_DOCKER_FAIL": f"{CMD_PREFIX + REBUILD}@1"},
+                 {"FAKE_DOCKER_FAIL": f"{CMD_PREFIX + REBUILD}@1;{UP}@2"},
+                 {"FAKE_DOCKER_FAIL": f"{CMD_PREFIX + REBUILD}@1", "FAKE_MV_FAIL": ".failed-"}]
+        for env in cases:
+            with self.subTest(env=env):
+                self.tearDown()
+                self.setUp()
+                self.deploy(**env)
+                self.assertEqual(tree_hash(os.path.join(self.cc, "modules")), modules)
+                self.assertEqual(self.non_src(), other)
+
+
+class TestClientBackupRestoreRollback(ClientDeployBase):
+    """AC5: backup of A, deploy of B, restore gives A back byte for byte; redeploying A
+    over B removes B-only files; the deploy ends with a cache-bust."""
+
+    def test_backup_deploy_restore_and_rollback(self):
+        a = self.deploy()
+        self.assertEqual(a.returncode, 0, a.stderr)
+        tree_a = tree(self.live_src)
+        res = self.run_script("backup.sh", "dev")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        (name,) = os.listdir(os.path.join(self.runtime, "backups"))
+        repo_b = self.repo_copy()
+        only_b = os.path.join(repo_b, "client", "custom", "src", "crm", "only-in-b.js")
+        with open(only_b, "w") as fh:
+            fh.write("define([], function () { return 'b'; });\n")
+        b = self.deploy(repo_b, MV_LOG=self.mvlog)
+        self.assertEqual(b.returncode, 0, b.stderr)
+        self.assertIn("crm/only-in-b.js", tree(self.live_src))
+        self.assertNotEqual(tree(self.live_src), tree_a)
+        res = self.run_script("restore.sh", "dev", name)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(tree(self.live_src), tree_a, "restore gives A back byte for byte")
+        self.assertNotIn("crm/only-in-b.js", tree(self.live_src))
+        # rollback: B again, then A over B through the deploy
+        self.deploy(repo_b)
+        self.assertIn("crm/only-in-b.js", tree(self.live_src))
+        ts_before = self.appts()
+        open(self.log, "w").close()
+        res = self.deploy()
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(tree(self.live_src), tree_a, "redeploying A removes the files only B had")
+        self.assertEqual(self.verbs()[-1], CMD_PREFIX + APPTS, "followed by a cache-bust")
+        self.assertGreater(self.appts(), ts_before)
+
+    def test_restore_is_followed_by_the_documented_cache_bust(self):
+        with open(os.path.join(REPO, "docs", "RELEASE.md")) as fh:
+            doc = fh.read()
+        self.assertRegex(doc, r"```sh\n[^`]*restore\.sh dev [^`]*bin/command update-app-timestamp[^`]*```")
+
+
+
+class TestDeploySwapFailureLeftoversAndSignals(ClientDeployBase):
+    """AC4c (R5): a swap failure puts both trees back and leaves no staging; leftovers of
+    earlier runs are listed and never used; INT, TERM and HUP are handled with the real
+    signal, before and after the first swap."""
+
+    SIGNALS = ("INT", "TERM", "HUP")
+    LEFTOVER_NAMES = (".Custom.deploy-", ".Custom.old-", ".Custom.failed-",
+                      ".src.deploy-", ".src.old-", ".src.failed-")
+
+    def snapshot(self):
+        return {"src": tree(self.live_src), "custom": tree(self.custom_live), "other": self.non_src(),
+                "modules": tree_hash(os.path.join(self.cc, "modules"))}
+
+    def working_names(self):
+        espo = os.path.join(self.runtime, "custom", "Espo")
+        return sorted(n for d in (espo, self.cc) for n in os.listdir(d) if n.startswith((".Custom.", ".src.")))
+
+    def reset(self):
+        self.tearDown()
+        self.setUp()
+
+    def test_swap_failure_at_each_point_restores_both_trees_and_removes_staging(self):
+        points = [("custom: moving the live tree aside", f".Custom.old-{self.STAMP}"),
+                  ("custom: installing staging", f".Custom.deploy-{self.STAMP}"),
+                  ("src: moving the live tree aside", f".src.old-{self.STAMP}"),
+                  ("src: installing staging", f".src.deploy-{self.STAMP}")]
+        for label, pattern in points:
+            with self.subTest(point=label):
+                self.reset()
+                before = self.snapshot()
+                res = self.deploy(FAKE_MV_FAIL_ONCE=pattern)
+                self.assertEqual(res.returncode, 20, res.stdout + res.stderr)
+                self.assertIn("FAILED STEP: swap", res.stderr)
+                self.assertNotIn("customisation deployed", res.stdout)
+                self.assertEqual(self.snapshot(), before, "previous trees live and byte-identical")
+                self.assertFalse([n for n in self.working_names() if ".deploy-" in n],
+                                 "no staging directory remains for either tree")
+                self.assertEqual(self.verbs(), ["ps --status running -q crm-app", STOP], "stack left stopped")
+
+    def test_swap_failure_keeps_going_when_the_restore_also_fails_but_removes_staging(self):
+        res = self.deploy(FAKE_MV_FAIL=f".src.deploy-{self.STAMP}")
+        self.assertEqual(res.returncode, 20)
+        self.assertFalse([n for n in self.working_names() if ".deploy-" in n])
+
+    def test_leftovers_are_listed_never_used_and_never_touched(self):
+        old = "20250101T000000Z"
+        planted = {}
+        for name in self.LEFTOVER_NAMES:
+            base = os.path.join(self.runtime, "custom", "Espo") if name.startswith(".Custom") else self.cc
+            self.write(os.path.relpath(os.path.join(base, name + old, "marker.txt"), self.runtime),
+                       f"leftover {name}\n")
+            planted[name + old] = tree_hash(os.path.join(base, name + old))
+        before_other = self.non_src()
+        res = self.deploy()
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(tree(self.live_src), tree(REPO_SRC), "exactly the repository tree is live")
+        self.assertEqual(tree(self.custom_live), tree(REPO_CUSTOM))
+        for name, digest in planted.items():
+            self.assertIn(f"LEFTOVER: {name}\n", res.stderr)
+            base = os.path.join(self.runtime, "custom", "Espo") if name.startswith(".Custom") else self.cc
+            self.assertEqual(tree_hash(os.path.join(base, name)), digest, f"{name} neither moved nor changed")
+        self.assertEqual(res.stderr.count("LEFTOVER:"), len(planted), "every leftover, and only those")
+        self.assertEqual({k: v for k, v in self.non_src().items() if not k.startswith(".src.")},
+                         {k: v for k, v in before_other.items() if not k.startswith(".src.")})
+
+    def test_a_clean_runtime_lists_no_leftover(self):
+        res = self.deploy()
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertNotIn("LEFTOVER", res.stderr)
+
+    def test_signal_during_a_post_swap_step_recovers(self):
+        for sig in self.SIGNALS:
+            for step, suffix in (("up", UP), ("clear-cache", CMD_PREFIX + CLEAR),
+                                 ("rebuild", CMD_PREFIX + REBUILD), ("update-app-timestamp", CMD_PREFIX + APPTS)):
+                with self.subTest(signal=sig, step=step):
+                    self.reset()
+                    before = self.snapshot()
+                    res = self.deploy(FAKE_DOCKER_SIGNAL=f"{suffix}@1:{sig}")
+                    self.assertEqual(res.returncode, 47, res.stdout + res.stderr)
+                    self.assertIn(f"INTERRUPTED: {sig}", res.stderr)
+                    self.assertIn("RECOVERED: previous customisation restored", res.stderr)
+                    self.assertNotIn("RECOVERY FAILED", res.stderr)
+                    self.assertNotIn("customisation deployed", res.stdout)
+                    self.assertEqual(self.snapshot(), before, "previous trees restored byte for byte")
+                    self.assertEqual(tree(os.path.join(self.cc, f".src.failed-{self.STAMP}")), tree(REPO_SRC))
+                    self.assertFalse([n for n in self.working_names() if ".deploy-" in n])
+                    self.assertEqual(self.verbs()[-5:], [STOP, *TestDeployClientFailureAndRecovery.PASS],
+                                     "recovery stops, then re-runs the cache-bust")
+                    self.assertGreater(self.appts(), 1000)
+
+    def test_signal_during_each_swap_move_recovers(self):
+        moves = [f".Custom.old-{self.STAMP}", f".Custom.deploy-{self.STAMP}",
+                 f".src.old-{self.STAMP}", f".src.deploy-{self.STAMP}"]
+        for sig in self.SIGNALS:
+            for pattern in moves:
+                with self.subTest(signal=sig, move=pattern):
+                    self.reset()
+                    before = self.snapshot()
+                    res = self.deploy(FAKE_MV_SIGNAL=f"{pattern}:{sig}")
+                    self.assertEqual(res.returncode, 47, res.stdout + res.stderr)
+                    self.assertIn(f"INTERRUPTED: {sig}", res.stderr)
+                    self.assertIn("RECOVERED", res.stderr)
+                    self.assertEqual(self.snapshot(), before, "previous trees restored byte for byte")
+                    self.assertFalse([n for n in self.working_names() if ".deploy-" in n])
+                    self.assertEqual(self.verbs()[-5:], [STOP, *TestDeployClientFailureAndRecovery.PASS])
+
+    def test_signal_before_the_first_swap_removes_staging_and_leaves_the_stack_stopped(self):
+        for sig in self.SIGNALS:
+            with self.subTest(signal=sig, where="after staging"):
+                self.reset()
+                before = self.snapshot()
+                res = self.deploy(FAKE_CP_SIGNAL=f".src.deploy-{self.STAMP}:{sig}")
+                self.assertEqual(res.returncode, 48, res.stdout + res.stderr)
+                self.assertIn(f"INTERRUPTED: {sig}", res.stderr)
+                self.assertNotIn("customisation deployed", res.stdout)
+                self.assertEqual(self.snapshot(), before, "previous trees untouched")
+                self.assertEqual(self.working_names(), [], "staging removed for both trees")
+                self.assertEqual(self.verbs(), ["ps --status running -q crm-app", STOP])
+            with self.subTest(signal=sig, where="during the stop"):
+                self.reset()
+                before = self.snapshot()
+                res = self.deploy(FAKE_DOCKER_SIGNAL=f"{STOP}@1:{sig}")
+                self.assertEqual(res.returncode, 48, res.stdout + res.stderr)
+                self.assertEqual(self.snapshot(), before)
+                self.assertEqual(self.working_names(), [])
+                self.assertEqual(self.verbs(), ["ps --status running -q crm-app", STOP])
+
+    def test_signal_with_the_stack_stopped_restores_and_leaves_it_stopped(self):
+        before = self.snapshot()
+        res = self.deploy(running=False, FAKE_MV_SIGNAL=f".src.deploy-{self.STAMP}:TERM")
+        self.assertEqual(res.returncode, 47, res.stdout + res.stderr)
+        self.assertIn("INTERRUPTED: TERM", res.stderr)
+        self.assertIn("RECOVERED", res.stderr)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.verbs(), ["ps --status running -q crm-app", STOP, STOP], "never started")
+
+    def test_signal_then_failed_recovery_stops_the_stack_and_retains_the_trees(self):
+        before = self.snapshot()
+        res = self.deploy(FAKE_DOCKER_SIGNAL=f"{CMD_PREFIX + REBUILD}@1:INT",
+                          FAKE_DOCKER_FAIL=f"{UP}@2")
+        self.assertEqual(res.returncode, 43, res.stdout + res.stderr)
+        self.assertIn("INTERRUPTED: INT", res.stderr)
+        self.assertIn("RECOVERY FAILED: stack left stopped (step: up)", res.stderr)
+        self.assertNotIn("customisation deployed", res.stdout)
+        self.assertEqual(self.verbs()[-1], STOP)
+        self.assertEqual(self.snapshot(), before, "the previous trees are back even though the start failed")
+        self.assertEqual(tree(os.path.join(self.cc, f".src.failed-{self.STAMP}")), tree(REPO_SRC))
+
+    def test_a_successful_deploy_leaves_no_working_tree_and_no_interruption(self):
+        res = self.deploy()
+        self.assertEqual(res.returncode, 0)
+        self.assertNotIn("INTERRUPTED", res.stderr)
+        self.assertEqual(self.working_names(), [])
 
 
 class FakeListTransport:
