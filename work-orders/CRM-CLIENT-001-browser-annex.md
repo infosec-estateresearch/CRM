@@ -1,59 +1,72 @@
-# CRM-CLIENT-001 annex B: real-browser runner, isolation and evidence (v1.1)
+# CRM-CLIENT-001 annex B: real-browser runner, isolation, vulnerability gate, evidence and cleanup (v1.2)
 
-- **Status:** part of the CRM-CLIENT-001 v1.1 DRAFT. It is approved only together with the WO, by commit.
-- **Preparation constraints (CGPT, 2026-11-16).** During preparation nothing was pulled, installed or run, and no Docker network was changed. Every value below comes from public registry or PyPI **metadata**, or from read-only host inspection.
-- **Values verified at execution.** Each item marked **VERIFY** must be re-checked by the operator at execution time. A mismatch is a stop.
+- **Status:** part of the CRM-CLIENT-001 v1.2 DRAFT. It is approved only together with the WO, by commit. History: v1.1 is in commit `0fba12cf5395800d02db5801e4772506c849cb1a`. v1.2 changes are B2.3, B3, B4 (wording and teardown), B6 (store and route), B8 (rewritten) and B9 (new). WO §13 maps them.
+- **Preparation constraints.** During preparation nothing was pulled, installed, scanned or run, and no Docker network was changed.
+  - Every value comes from public registry, PyPI, GitHub or OSV **metadata**, from read-only host inspection, or from reading the playwright wheel as inert data with `zipfile` (no code executed).
+  - Each **VERIFY** item is re-checked by the operator at execution, and a mismatch is a stop.
+- **Framework.** FOUNDRY `84fedf0a…` for the v1.2 decisions; `5f5e4a51…` is the provenance of v1.0–v1.1.
 
 ## B1. Component selection
 
 | Item | Value | Provenance |
 |---|---|---|
 | Image | `mcr.microsoft.com/playwright/python:v1.64.1-noble` (official Microsoft Playwright for Python image, Ubuntu 24.04) | MCR tag list, 2026-11-16 |
-| Multi-arch index digest | `sha256:330d401ae23c905896a0c26c66c36fc971b621519e7b11b435a8328d7bf6e031` (OCI image index) | `Docker-Content-Digest` header; equals sha256 of the fetched index body |
-| linux/amd64 manifest digest (DOCKER1 is x86_64) | **`sha256:7d030ac0638b279ecc72493f8b6706fecef80a893679a23b02f912905c4915c0`** (also tag `v1.64.1-noble-amd64`) | index entry; equals sha256 of the fetched manifest body |
-| linux/arm64 manifest digest (not used) | `sha256:e731c79aba1c9d777b77ed85f0c0111531cbaa24ecba90fe65ad7b7438e89c40` | index entry |
+| Multi-arch index digest | `sha256:330d401ae23c905896a0c26c66c36fc971b621519e7b11b435a8328d7bf6e031` | `Docker-Content-Digest` header; equals the sha256 of the fetched body |
+| linux/amd64 manifest (DOCKER1 is x86_64) | **`sha256:7d030ac0638b279ecc72493f8b6706fecef80a893679a23b02f912905c4915c0`** | index entry; equals the sha256 of the fetched body |
+| linux/arm64 manifest (not used) | `sha256:e731c79aba1c9d777b77ed85f0c0111531cbaa24ecba90fe65ad7b7438e89c40` | index entry |
 | amd64 config blob | `sha256:b6862d3036a770b5c0e8a0987e9546dc1844f10ba70925f746e7a44ca84660c0`; created 2026-10-22T17:51:03Z; 4 layers, 1,032,349,420 bytes compressed | blob fetched, sha256 verified |
-| Image defaults | `User` unset (root); `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`; `CMD ["/bin/bash"]`; no entrypoint; the build creates the user `pwuser`; `/ms-playwright` is `chmod -R 777` | config history |
-| Python | Ubuntu noble `python3` 3.12 (the history removes `/usr/lib/python3.12/EXTERNALLY-MANAGED`); `pip` from `get-pip.py` at build time | config history |
-| **Playwright Python package** | **Not present in the final image.** The build installs the wheel only in a temporary venv (`/ms-playwright-agent/venv`), uses it to run `playwright install --with-deps`, then deletes that directory. This confirms the CGPT statement | config history, last RUN step |
-| Browser builds | Installed by Playwright 1.64.1 into `/ms-playwright`. They therefore match the 1.64.1 driver below | same step |
+| Image defaults | `User` unset (root); `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`; `CMD ["/bin/bash"]`; user `pwuser` created; `/ms-playwright` is `chmod -R 777` | config history |
+| Python | Ubuntu noble `python3` 3.12; `pip` from `get-pip.py` at build time | config history |
+| Playwright Python package | **Not present in the final image.** It was installed only in a temporary venv that the build deleted | config history, last RUN step |
+| **Expected browser (v1.2)** | Installed by Playwright 1.64.1 into `/ms-playwright`. The wheel's `driver/package/browsers.json` pins `chromium` and `chromium-headless-shell` **revision 1248**, **browserVersion 156.0.8078.4**. **VERIFY** at S3 without running the image: `docker create` followed by `docker export … \| tar -t` must list `ms-playwright/chromium_headless_shell-1248/` and `ms-playwright/chromium-1248/` | wheel inspection (F12) |
+| Bundled Node.js | 24.22.1, inside the playwright wheel (`playwright/driver/node`) | wheel inspection (F12) |
 
-**Why v1.64.1 and not v1.65.x.** 1.64.1 was published on 2026-10-22, more than three weeks before preparation. 1.65.0, 1.65.1 and 1.65.2 are less than a week old. The older release with no open regressions is chosen. Upgrading needs a register change.
+**Why 1.64.1.**
+- It was published on 2026-10-22, more than three weeks before preparation.
+- 1.65.0, 1.65.1 and 1.65.2 (2026-11-09 to 11-14) are younger than two weeks.
+- No newer Playwright removes the Chromium residual of B8.4: 1.65.0 pins Chromium 158.0.8127.18 and 1.65.1 pins 159.0.8154.6, which are also pre-stable builds.
 
 ## B2. Python dependency lock (no unpinned installation)
 
-The file `tests/browser/requirements.lock` (new, in the §4 allowlist) holds exactly the following entries:
+`tests/browser/requirements.lock` holds exactly:
 
 | Distribution | File | sha256 (PyPI) | Published |
 |---|---|---|---|
-| playwright 1.64.1 | `playwright-1.64.1-py3-none-manylinux1_x86_64.whl` | `577b8d88778c245cfbd145ae17cf53044f084b1b46c55c69081d4069d56057e2` | 2026-10-22 |
+| playwright 1.64.1 | `playwright-1.64.1-py3-none-manylinux1_x86_64.whl` | `577b8d88778c245cfbd145ae17cf53044f084b1b46c55c69081d4069d56057e2` (re-verified 2026-11-16 by download) | 2026-10-22 |
 | pyee 13.0.0 (playwright requires `pyee>=13,<15`) | `pyee-13.0.0-py3-none-any.whl` | `48195a3cddb3b1515ce0695ed76036b5ccc2ef3a9f963ff9f77aec0139845498` | 2025-03-17 |
 | greenlet 3.5.6 (requires `greenlet>=3.1.1,<4`) | `greenlet-3.5.6-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl` | `975736b002ed080d124cf81a79cb7e05cb26d6b3f5c7a7b651c0fcce70353aa1` | 2026-09-14 |
 | typing-extensions 4.16.0 (required by pyee) | `typing_extensions-4.16.0-py3-none-any.whl` | `481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8` | 2026-07-02 |
 
-**Install method (VERIFY at first run).**
+**Install method (VERIFY at the first run).**
 
-1. **Download (operator, as root, on the host).** The four wheels are fetched with `curl` from the `files.pythonhosted.org` URLs that the PyPI JSON lists for these files. The PyPI JSON and wheel URLs are recorded in the evidence. The wheels go into a fresh root-owned directory, and each file's sha256 is checked against the lock. Any mismatch stops the run. Nothing from the wheels is executed on the host.
-2. **Install (inside the container, offline).** The command is `python3 -m pip install --no-index --find-links /wheels --require-hashes --only-binary=:all: --no-deps --target /tmp/pydeps -r /work/tests/browser/requirements.lock`, followed by `PYTHONPATH=/tmp/pydeps`. The installation goes to a tmpfs, so nothing persists.
-   - `--no-deps` together with the complete lock means that nothing outside the lock is resolved.
-   - The container has no route to PyPI (B4), so any attempt to fetch from the network fails closed.
-3. **Driver and browser check.** The run asserts the following and records them:
-   - `playwright.__version__ == "1.64.1"`;
-   - the Chromium executable under `/ms-playwright` exists;
-   - the browser version reported by Playwright.
+1. **Download.** The operator, as root, fetches the four wheels with `curl` from the `files.pythonhosted.org` URLs listed by PyPI JSON. They go into a fresh root-owned directory and are checked against the lock; any mismatch stops the run. Nothing from the wheels is executed on the host.
+2. **Install inside the container, offline:**
+   `python3 -m pip install --no-index --find-links /wheels --require-hashes --only-binary=:all: --no-deps --target /tmp/pydeps -r /work/tests/browser/requirements.lock`
+   - It installs to tmpfs, so nothing persists.
+   - The container has no route to PyPI (B4).
+3. **Version checks (v1.2, replaces `playwright.__version__`).** `entry.sh` runs Python as `PYTHONPATH=/tmp/pydeps python3 -s -B …`. It must not use `-I` or `-E`, which would ignore `PYTHONPATH`. It asserts and records the following in `identity.json`:
+   - **Distribution.** `importlib.metadata.version("playwright") == "1.64.1"`. Exactly **one** distribution named `playwright` is visible in `importlib.metadata.distributions()`, and its `locate_file("")` resolves under `/tmp/pydeps`. `playwright.__file__` also resolves under `/tmp/pydeps/playwright/`. The same checks apply to `pyee` 13.0.0, `greenlet` 3.5.6 and `typing_extensions` 4.16.0.
+   - **Driver pin.** `/tmp/pydeps/playwright/driver/package/browsers.json` shows chromium revision `1248`, browserVersion `156.0.8078.4`.
+   - **Executable.** `p.chromium.executable_path` exists, is under `/ms-playwright/`, and has `-1248/` in its path.
+   - **Running browser, independently.** `browser.version` (CDP `Browser.getVersion` of the launched browser) equals `156.0.8078.4`.
+   - **Operator cross-check.** The operator records the `/ms-playwright` listing from the `docker export` of B1.
 
-**External code register (§4 allowlist).** The run adds one candidate entry to `security/EXTERNAL_CODE_REGISTER.yaml`, `playwright-python-browser-runner`. It records:
-- the image tag, the index digest and the amd64 digest;
-- the four wheels with their hashes;
-- licences: Apache-2.0 (Playwright), MIT (pyee, greenlet), PSF-2.0 (typing-extensions), plus the Ubuntu, Chromium and Firefox licences inside the image;
-- `usage: test-only, orchestrator-run, never in any release bundle or runtime`;
-- `approval:` set to whatever CGPT records.
+   `verify_evidence.py` recomputes each of these from `identity.json` (AC6a/AC6b). Any mismatch is a FAIL.
 
-`release.py verify` already refuses image digests that are not in the register only for the three compose files. The browser image appears in no compose file, so release bundles are unaffected.
+**External code register (§4 allowlist).**
+- The entry `playwright-python-browser-runner` records:
+  - the image tag and digests;
+  - the four wheels and their hashes;
+  - the bundled Node 24.22.1 and Chromium 156.0.8078.4 (revision 1248);
+  - licences: Apache-2.0, MIT, MIT and PSF-2.0, plus the Ubuntu, Chromium and Firefox licences in the image;
+  - `usage: test-only, operator-run, never in any release bundle or runtime`;
+  - the CL-D5 scan reference and `approval:` as recorded by CGPT.
+- The entry `grype-cl-d5-scanner` is described in B8.
+- `release.py verify` checks image digests only for the three compose files, so release bundles are unaffected.
 
 ## B3. Container hardening (exact invocation template)
 
-The orchestrator runs the container. Root prepares it; the processes inside run as uid/gid 65534.
+Root prepares the container. The processes inside run as uid/gid 65534.
 
 ```
 docker run --rm --pull never \
@@ -74,146 +87,272 @@ docker run --rm --pull never \
   /bin/bash /work/tests/browser/entry.sh
 ```
 
-- `<root-0600-tmp-file>` holds only the synthetic `@example.test` test-user credentials; it is created for the run and deleted afterwards, and is never in argv or evidence.
-- **No Docker socket, no host networking, no privileged mode, no added capabilities, no device mounts.** The only writable paths are `/tmp` (tmpfs) and `/evidence`. The default seccomp and AppArmor profiles apply (both are listed in `docker info`).
-- **Chromium sandbox.** Playwright launches Chromium with `chromiumSandbox: false` by default. Under `--cap-drop ALL` and the default seccomp profile, Chromium's own namespace sandbox is unavailable. The isolation boundary is therefore the container plus the network design in B4. The page under test is only the synthetic crm-dev application. This limitation is recorded for DevSecOps.
-- **Image acquisition (operator gate, not preparation).**
-  1. `docker pull mcr.microsoft.com/playwright/python@sha256:7d030ac0…15c0`.
-  2. `docker image inspect` must show that RepoDigest and the expected config ID `sha256:b6862d30…60c0`.
-  3. `--pull never` thereafter.
-  4. The image is removed when the WO closes. No permanent infrastructure is left.
-- **`<evidence-out>`** is a fresh root-created directory, `/tmp/crm-client001-browser-<run>/out`, owned by 65534 with mode 0700. Root copies it into the PL evidence store after the run (B6).
-- **`<archive-copy-of-candidate>`** is the `git archive` copy of the exact candidate (or of a B5 transition tree), root-owned and read-only. Engineer-authored code (`tests/browser/*.py`, `entry.sh`) therefore runs **only** inside this container as uid 65534. It never runs as root, as the PL, or on the host.
+- **`<root-0600-tmp-file>`** holds only the synthetic `@example.test` test-user credentials. It is created for the run and deleted in cleanup (B9), and is never in argv or evidence.
+- **Restrictions.**
+  - No Docker socket, no host networking, no privileged mode, no added capabilities and no device mounts.
+  - The only writable paths are `/tmp` (tmpfs) and `/evidence`.
+  - The default seccomp and AppArmor profiles apply.
+- **Chromium sandbox.** Playwright launches Chromium without its own sandbox (`chromiumSandbox: false`). Under `--cap-drop ALL` Chromium's namespace sandbox is unavailable, so the boundary is the container plus B4. This is an input to B8.4.
+- **Image acquisition (S3 operator gate).**
+  1. Pull by digest: `docker pull mcr.microsoft.com/playwright/python@sha256:7d030ac0…15c0`.
+  2. `docker image inspect` must show that RepoDigest and config ID `sha256:b6862d30…60c0`.
+  3. Run the B8 scan, then the B1 export check.
+  4. Use `--pull never` thereafter.
+- **Image removal.** The image is removed at **WO closure** (B9.4), not after each run, so that a bounded repeat (B6.4) uses the same bytes.
+- **`<evidence-out>`** is a fresh root-created `/tmp/crm-client001-browser-<run>/out`, owned by 65534 with mode 0700.
+- **`<archive-copy-of-candidate>`** is the verified `git archive` of `C` (or of the B5 transition tree `T`), root-owned and read-only. Engineer-authored code runs **only** inside this container as uid 65534, and never as root, as the PL or on the host. The one exception is the reviewed `deploy_custom.sh` (WO G2).
 
-## B4. Network isolation (A2)
+## B4. Network isolation
 
-**Verified host facts (read-only, 2026-11-16).**
+**Verified host facts (read-only, 2026-11-16):**
+- `crm-dev_crm-net` is a non-internal bridge on `172.16.10.0/24`. crm-db is on it, so the browser never joins it.
+- crm-beta uses its own `crm-beta_crm-beta-net`. Its app is published on `127.0.0.1:8280`, and the edge uses host networking.
+- crm-dev Apache admits only loopback and `CRM_ALLOWED_SOURCES` (`deploy/apache/crm-access.conf`).
+- `check_access.py dev` accepts RFC 1918 sources of /16 or longer that do not overlap crm-net.
+- Docker Engine is 24.0.5, and its binary contains `com.docker.network.bridge.inhibit_ipv4` (**VERIFY** effectiveness via the probe below).
 
-- crm-dev runs as Compose project `crm-dev`. `crm-dev_crm-net` is a bridge on `172.16.10.0/24` that is **not** internal. The database `crm-dev-crm-db-1` is on it, so the browser must **not** join it.
-- crm-beta runs on a separate network, `crm-beta_crm-beta-net`. Its app is published on `127.0.0.1:8280`, and its edge uses host networking.
-- crm-dev's Apache admits only loopback and `CRM_ALLOWED_SOURCES` (`deploy/apache/crm-access.conf`). A browser on any new network gets **403** unless its exact address is admitted.
-- `check_access.py dev` accepts sources that are RFC 1918, /16 or longer, and do not overlap crm-net.
-- The Docker Engine is 24.0.5. Its binary contains the bridge driver option `com.docker.network.bridge.inhibit_ipv4` (VERIFY that it is effective).
+**Design (per run, test-only).**
 
-**Design: a per-run, test-only internal network.**
-
-1. **Create the network.** The command is `docker network create --driver bridge --internal --subnet 172.31.250.0/29 -o com.docker.network.bridge.inhibit_ipv4=true -o com.docker.network.bridge.enable_ip_masquerade=false crm-client001-browser-<run>`.
-   - `--internal`: no default route, no NAT and no published ports.
-   - `inhibit_ipv4`: the host-side bridge gets **no** IPv4 address, so the container cannot reach any host listener, including the beta port on 127.0.0.1 (which is the container's own loopback anyway) or the LAN address.
-   - The subnet is checked first against `docker network ls` and `ip route` to confirm it is unused.
-2. **Admit the browser.** The browser's single address, `172.31.250.2/32`, is appended **temporarily** to crm-dev's `CRM_ALLOWED_SOURCES` in `/srv/CRM/runtime/dev/env`. The operator first saves a byte copy of the env file. `check_access.py dev` must pass; Matt's existing bind-only `172.16.10.1/32` entry is handled exactly as the recorded crm-dev procedure requires. crm-app is then recreated through `scripts/up.sh dev`.
-3. **Attach crm-app.** The command is `docker network connect --ip 172.31.250.3 crm-client001-browser-<run> crm-dev-crm-app-1`, so crm-app is temporarily on this network in addition to crm-net. crm-db and crm-daemon are **not** attached. crm-app does not forward IP traffic between its interfaces (VERIFY: `/proc/sys/net/ipv4/ip_forward` inside crm-app is 0).
-4. **Prove isolation before any journey.** `tests/browser/probe_isolation.py` runs in the same container, but it is a separate step from the journeys. The run must record the following, and each is a hard gate:
-   - `ip route` and `/etc/resolv.conf` (via Python `/proc/net/route`) show only `172.31.250.0/29`, with no default route;
+1. **Create the network.**
+   `docker network create --driver bridge --internal --subnet 172.31.250.0/29 -o com.docker.network.bridge.inhibit_ipv4=true -o com.docker.network.bridge.enable_ip_masquerade=false crm-client001-browser-<run>`
+   - `--internal` means no default route and no NAT.
+   - `inhibit_ipv4` gives the host-side bridge no IPv4 address.
+   - The subnet is first checked as unused against `docker network ls` and `ip route`.
+2. **Admit the browser.** Its single address, `172.31.250.2/32`, is appended **temporarily** to `CRM_ALLOWED_SOURCES` in `/srv/CRM/runtime/dev/env`.
+   - Before the change: a byte copy and the sha256 of the env file are saved (B9.1).
+   - `check_access.py dev` must pass.
+   - The existing bind-only entry is handled per the recorded crm-dev procedure.
+   - crm-app is then recreated with `scripts/up.sh dev`.
+3. **Attach crm-app.** `docker network connect --ip 172.31.250.3 crm-client001-browser-<run> crm-dev-crm-app-1`.
+   - crm-db and crm-daemon are **not** attached.
+   - **VERIFY:** `/proc/sys/net/ipv4/ip_forward` inside crm-app is 0.
+4. **Prove isolation before any journey.** `probe_isolation.py` runs as a separate step. Every item is a hard gate:
+   - the route table (`/proc/net/route`) shows only `172.31.250.0/29`, with no default route;
    - TCP to `172.31.250.3:80` succeeds;
-   - each of the following **fails** (connect error or timeout within 3 s):
-     - crm-dev db `172.16.10.x:3306` (its address is read from `docker inspect` by the operator and passed in as data);
-     - crm-dev app on crm-net `172.16.10.3:80`;
-     - host LAN `<dev bind IP>:8180` and `:8290` (beta);
-     - `127.0.0.1:8280` (beta, inside the container namespace);
-     - the crm-beta network gateway and its app container address;
+   - each of the following **fails** within 3 s:
+     - crm-db `<addr>:3306`, its address supplied as data from `docker inspect`;
+     - crm-app on crm-net `172.16.10.3:80`;
+     - the host LAN `<dev bind IP>:8180` and `:8290`;
+     - `127.0.0.1:8280`;
+     - the crm-beta network gateway and its app address;
      - a public address on 443;
      - DNS resolution of a public name.
 
-   **Any unexpected success stops the run before the journeys, and the WO reports BLOCKED. Host networking or a wider network is never used as a fallback.**
-5. **Teardown, always run, including on failure.**
-   1. Disconnect crm-app from the network.
-   2. Remove the network.
-   3. Restore the saved env file byte for byte, comparing with `cmp`.
-   4. Recreate crm-app through `up.sh dev`.
-   5. Record `docker network ls`, which must show no leftover network.
+   Any unexpected success stops the run before the journeys. The run then reports BLOCKED, and there is no fallback to a wider network.
 
-   No firewall rule is created or changed at any point (standing rule: no iptables, ufw or nftables).
+**What isolation does and does not mean (A5).**
+- The browser has **no intended direct network path** to crm-db, beta, the host or external destinations, and the probe demonstrates this for the listed targets only.
+- crm-app keeps its legitimate connection to crm-db. Anything the synthetic test user can do through the CRM application, the browser can do.
+- The design does not prevent application-layer access through crm-app and does not claim to. It is acceptable only because crm-dev is synthetic.
+- Steps 2 and 3 briefly change crm-dev's runtime configuration and recreate crm-app, under this WO's approval. B9 restores and verifies them.
 
-**Residual limitation (for DevSecOps and CGPT).** Steps 2 and 5 briefly change crm-dev's runtime configuration and recreate crm-app, which is a synthetic-only stack. This is an operator action under the WO's approval. It is not a change to the repository or to beta.
+Teardown is defined in **B9** and always runs. No firewall rule is created or changed at any point.
 
-## B5. Immutable canary versions and the cache-bust transition (A3)
+## B5. Immutable canary versions and the cache-bust transition
 
-- **Approach: committed synthetic fixtures** (not two ordered engineering commits). Ordered commits would cost an extra Engineer execution per fix round against the four-execution maximum. Fixtures keep every deployed byte inside **one** reviewed candidate `F`.
-  - `client/custom/src/crm/release-canary.js` in `F` declares **contract 1**.
-  - `tests/browser/fixtures/canary-transition/v2/crm/release-canary.js` in `F` is identical except that it declares **contract 2**. AC1 checks that the two files differ only in that value.
-- **Transition tree `T`.** The operator takes `git archive F` and replaces only `client/custom/src/crm/release-canary.js` with the v2 fixture blob, then:
-  - writes the manifest of `T`;
-  - verifies that every file in `T` equals the blob of `F` at the same path, except that the one replaced path equals the blob `F:tests/browser/fixtures/canary-transition/v2/crm/release-canary.js`.
+- **Committed fixtures** keep every deployed byte inside **one** reviewed candidate `C`:
+  - `client/custom/src/crm/release-canary.js` declares contract **1**;
+  - `tests/browser/fixtures/canary-transition/v2/crm/release-canary.js` is identical except for contract **2** (AC1).
+- **Transition tree `T`.** The operator builds it from the verified archive of `C`:
+  - only `client/custom/src/crm/release-canary.js` is replaced, with the v2 fixture blob;
+  - the manifest of `T` is written;
+  - every other file is verified equal to its `C` blob.
 
-  `T` is never committed, and `deploy_custom.sh` gains no seam: `T` is deployed with `T`'s own `scripts/deploy_custom.sh`, which is `F`'s blob.
-- **Deployment order and assertions** (one browser profile is kept across D1 to D3; a "fresh load" means a new page navigation, with no manual cache clear):
+  `T` is never committed, and it is deployed with its own (= `C`'s) `scripts/deploy_custom.sh`.
+- **Deployment order and assertions.** One browser profile is kept across D1–D3. A "fresh load" is a new navigation, with no manual cache clear.
 
-  | Step | Deploy | Expected browser result |
+  | Step | Deploy | Expected |
   |---|---|---|
-  | D0 | backup `backup.sh dev`; record the appTimestamp `a0` | none |
-  | D1 | `F` | J1: contract 1; resource URL `…/client/custom/src/crm/release-canary.js?r=a1` with `a1 > a0`; `a1` equals the appTimestamp read in crm-app |
-  | D2 | `T` (≥2 s after D1) | J2: contract 2; `r=a2`, `a2 > a1`; the browser fetched the new URL (network log), not a cached copy |
-  | D3 | `F` again (rollback, ≥2 s after D2) | J3: contract 1; `r=a3`, `a3 > a2` |
-  | D4 | failure injection (B7) | J4: as specified in B7 |
-  | D5 | `restore.sh dev` of the D0 backup; cache-bust | J5: the canary is absent (resolution fails cleanly with no console error outside the probe); `a5 > a4`; regression screens match D0 |
+  | D0 | `backup.sh dev`; record appTimestamp `a0` | — |
+  | D1 | `C` | J1: contract 1; `…/release-canary.js?r=a1`, `a1 > a0`; `a1` equals the crm-app value |
+  | D2 | `T` (≥2 s after D1) | J2: contract 2; `r=a2 > a1`; a new network fetch, not cached |
+  | D3 | `C` again (rollback, ≥2 s) | J3: contract 1; `r=a3 > a2` |
+  | D4 | failure injection (B7) | J4 per B7 |
+  | D5 | `restore.sh dev` of the D0 backup, then a cache-bust | J5: canary absent (clean resolution failure, no console error outside the probe); `a5 > a4`; regression screens match D0 |
 
-- **appTimestamp resolution.** `appTimestamp` is `time()`, in whole seconds (`DataManager::updateAppTimestamp`).
-  - `deploy_custom.sh` reads the value before and after `update-app-timestamp`. If the after value is not strictly greater, it waits one second and runs `update-app-timestamp` once more. If the value is still not greater, it fails with `FAILED STEP: update-app-timestamp (not advanced)`.
+- **appTimestamp resolution.** The value is in whole seconds.
+  - `deploy_custom.sh` re-reads after `update-app-timestamp`. If the value has not advanced, it waits 1 s and runs the update once more, and otherwise fails with `FAILED STEP: update-app-timestamp (not advanced)`.
   - The operator also waits at least 2 s between deploys.
-  - The browser asserts strict increase from the network URLs. Equality is a FAIL.
+  - The browser treats equality as a FAIL.
 
-## B6. Evidence package and its route to the Tester (CL-D3, Phase B)
+## B6. Evidence package, store and route to the Tester
 
-**Contents of the evidence for each run `<run>`.** Everything is written by the container to `/evidence`, except where marked *operator*.
+**Contents for each run `<run>`.** The container writes to `/evidence`, except files marked *operator*.
 
 | File | Content |
 |---|---|
-| `invocation.txt` | *operator*: the exact docker, network and deploy commands, with digests. Credentials are referenced only by file descriptor and never included |
-| `identity.json` | *operator*: candidate SHA; the `T` manifest sha256; the snapshot manifest sha256; the image RepoDigest and config ID; the wheel hashes; the Docker version; `docker inspect` of the browser container, restricted to Mounts, NetworkSettings, HostConfig.CapDrop, SecurityOpt, ReadonlyRootfs, User and Privileged (no Env) |
-| `isolation.json` | each probe target, the expected and actual results, and the route table |
-| `timestamps.json` | `a0`..`a5` as read by the operator in crm-app, and the `r` values observed by the browser |
-| `journeys/<J>/result.json` | for each assertion: id, AC, expected, observed, pass/fail |
-| `journeys/<J>/requests.jsonl` | every request (URL, method, status, from-cache flag, response sha256 for `client/custom` resources) |
-| `journeys/<J>/console.jsonl`, `csp.jsonl` | every console message, page error and `securitypolicyviolation` event |
-| `journeys/<J>/trace.zip` | the Playwright trace (DOM snapshots, network, console). It can be opened offline |
-| `journeys/<J>/*.png` | screenshots of synthetic records only |
+| `invocation.txt` | *operator*: the exact docker, network, deploy and cleanup commands, with digests. Credentials appear only as file references |
+| `identity.json` | `C`, the sha256 of the `T` manifest, the snapshot manifest, the image RepoDigest and config ID, the wheel hashes, the B2.3 version checks, the Docker version, and a `docker inspect` subset of the browser container (Mounts, NetworkSettings, CapDrop, SecurityOpt, ReadonlyRootfs, User, Privileged; no Env). The operator writes its parts |
+| `scan/` | *operator*: the B8 reports and the scanner and DB identity |
+| `isolation.json` | each probe target, expected and actual result, and the route table |
+| `timestamps.json` | `a0`..`a5` read in crm-app, and the `r` values the browser observed |
+| `journeys/<J>/result.json` | per assertion: id, AC, expected, observed, pass/fail |
+| `journeys/<J>/requests.jsonl` | every request: URL, method, status, from-cache flag, and the response sha256 for `client/custom` resources |
+| `journeys/<J>/console.jsonl`, `csp.jsonl` | console messages, page errors and `securitypolicyviolation` events |
+| `journeys/<J>/trace.zip`, `*.png` | the Playwright trace (offline-viewable) and screenshots of synthetic records |
+| `beta-before.json`, `beta-after.json`, `crmdev-before.json`, `cleanup.json` | *operator*: B9 |
 | `SHA256SUMS` | *operator*: covers every file above |
 
-**Route to the Tester (no Docker, network or Git for specialists).**
+**Store and route (v1.2; no Docker, network or Git for specialists).**
 
-1. Root copies `<evidence-out>` into `/srv/CRM/worktrees/.forge-scratch/CRM-CLIENT-001/browser-<sha12>-<run>/`, which is the WO's permitted scratch location, the same mechanism as the CRM-TEST-001 §6b snapshot. It sets ownership to `forgev2-pl`, read-only. gitleaks (`dir --redact`) must report it clean before it is used.
-2. The sha256 of `SHA256SUMS` and the run id are written into the Tester prompt. The Tester checks them first.
-3. The Tester runs the candidate's `tests/browser/verify_evidence.py` **in the sandbox, from its own copy of the PL snapshot**. This offline verifier only reads files. It recomputes every AC6 verdict independently from the raw `requests.jsonl`, `console.jsonl`, `csp.jsonl`, `timestamps.json` and `isolation.json`, and does not trust `result.json`. The Tester may also unpack and inspect `trace.zip` and the screenshots.
-4. The Tester issues its own PASS or FAIL for each journey. It can **challenge** the evidence by recording a finding `browser-rerun:<journey>:<reason>`. The PL then performs **one** bounded repeat under a new run id (same candidate, same procedure), and that repeat goes to the Tester's next execution, which counts toward the four-execution maximum. The PL cannot overrule a Tester FAIL.
+1. **Seal.** After S4 (including cleanup), root copies the package to `/srv/CRM/evidence/CRM-CLIENT-001/<run>/`, root-owned with group `forgev2-pl`, directories 0750 and files 0640. `SHA256SUMS` is written last and its own sha256 is recorded.
+   - gitleaks (`dir --redact`) must report the package clean.
+   - The package is never edited afterwards. A repeat gets a new `<run>`.
+2. **BA final WO version.** The sha256 of `SHA256SUMS` and `<run>` go into the final exact version of `CRM-CLIENT-001-BA.md`, which CGPT approves before dispatch. The sandboxed specialists of that WO can read the store (it is not a private path of the engine) but cannot write it.
+3. **Independent assessment.**
+   - The BA Tester verifies `SHA256SUMS` first.
+   - It runs `verify_evidence.py` **from the candidate** on a copy in its scratch. The verifier recomputes every AC6b and AC12 verdict from the raw files and never trusts `result.json`.
+   - It may unpack and inspect `trace.zip` and the screenshots.
+   - It issues its own PASS or FAIL per journey.
+4. **Challenge and bounded repeat.**
+   - The Tester may record a blocking finding with the key **`browser-rerun-<journey>`** (the ledger's `KEY[:severity]` syntax forbids `:` inside keys), with the reason in `--note`.
+   - BA then cannot deliver. The PL returns ESCALATED, because the Engineer cannot produce operator evidence.
+   - The Orchestrator performs **one** bounded repeat (same `C`, same procedure, new `<run>`).
+   - The repeat is assessed in **one** follow-on WO `CRM-CLIENT-001-BA2`, which is identical except for the run id and manifest and needs its own CGPT exact-version approval. No further repeat is permitted without a new CGPT decision.
+   - The PL can never overrule a Tester FAIL.
 
-A screenshot alone is never accepted as proof of any assertion.
+A screenshot alone is never accepted as proof.
 
-## B7. Failure after a successful swap (A4)
-
-`deploy_custom.sh` behaviour (tested in the unit suite with fake docker; on crm-dev with the operator wrapper below):
+## B7. Failure after a successful swap
 
 1. **Swap.** `custom/Espo/Custom` and `client/custom/src` are both staged, then swapped. The previous trees are kept as `.Custom.old-<stamp>` and `.src.old-<stamp>` until every later step succeeds. If the second swap fails, the first is swapped back before exit.
-2. **Post-swap steps** run in this order: `up --wait`, `clear-cache`, `rebuild`, `update-app-timestamp` (with the advance check). On the first failure the script:
-   - prints `FAILED STEP: <step>` to stderr;
+2. **Post-swap steps** run in order: `up --wait`, `clear-cache`, `rebuild`, then `update-app-timestamp` with the advance check. On the first failure the script:
+   - prints `FAILED STEP: <step>`;
    - never prints the success line;
-   - exits with a code specific to the step (documented);
+   - exits with a step-specific code;
    - **recovers**:
      1. stops crm-app and crm-daemon;
-     2. moves the new trees aside as `.failed-<stamp>` and swaps the previous trees back;
-     3. starts the stack and runs `clear-cache`, `rebuild` and `update-app-timestamp`, so browsers move to a new `r` and reload the previous code;
+     2. moves the new trees to `.failed-<stamp>` and swaps the previous trees back;
+     3. starts the stack and runs `clear-cache`, `rebuild` and `update-app-timestamp`;
      4. prints `RECOVERED: previous customisation restored`.
-   - If recovery itself fails, it stops crm-app and crm-daemon (controlled shutdown), prints `RECOVERY FAILED: stack left stopped`, and keeps both the previous and the failed trees for the operator.
-3. **Unit tests (AC4b).**
-   - A failure is injected at each of the four steps and at each recovery step.
-   - Each test asserts the exit code, the stderr markers and the absence of the success line.
-   - Each test checks the runtime tree contents byte for byte against the previous tree, and that the `.failed-*` tree is retained.
-   - Each test checks the recorded docker call order.
+
+   If recovery fails: a controlled stop of crm-app and crm-daemon, `RECOVERY FAILED: stack left stopped`, and both trees retained.
+3. **Unit tests (AC4b).** A failure is injected at every step and every recovery step. Each test asserts the exit code, the markers, byte equality with the previous tree, retention of `.failed-*`, and the docker call order.
 4. **On crm-dev (J4).**
-   - The operator prepends a test-only `docker` wrapper to `PATH`. The wrapper is written by the operator, recorded in `invocation.txt` and not part of the candidate. It passes every call to the real docker except `exec … bin/command update-app-timestamp`, which it makes fail once.
-   - It then deploys `T` over `F`.
-   - Expected results:
-     - the script exits non-zero with `FAILED STEP: update-app-timestamp` and `RECOVERED`;
-     - the browser loads contract **1** (the previous code);
-     - `r` has advanced past the last value;
-     - there are no console errors.
-   - beta is never touched.
+   - The operator prepends a test-only `docker` wrapper to `PATH`. It is recorded in `invocation.txt` and is not part of the candidate. It makes `exec … bin/command update-app-timestamp` fail once.
+   - The operator then deploys `T` over `C`.
+   - Expected: non-zero exit with `FAILED STEP: update-app-timestamp` and `RECOVERED`; the browser loads contract **1**; `r` has advanced; no console errors.
+   - Beta is never touched.
 
-## B8. Tool decisions still needed
+## B8. CL-D5: vulnerability assessment (v1.2, proposed)
 
-- **CL-D5 (vulnerability scanning).** No image or dependency vulnerability scanner is installed or approved on DOCKER1 (no trivy, grype, syft or docker scout). The proposal is that CGPT either approves a scanner pinned by checksum to run on the pulled image before first use, or records an accepted risk. The case for accepting the risk:
-  - the runner is ephemeral and test-only, with no route anywhere except synthetic crm-dev (B4);
-  - it is read-only and runs with no capabilities;
-  - it handles no customer data.
+**B8.1 Scanner selection.**
 
-  Secret scanning is covered: gitleaks runs on the candidate, on every evidence directory, and on the exported `/work` copy.
+| Item | Value | Provenance (read-only, 2026-11-16) |
+|---|---|---|
+| Scanner | **Grype `v0.121.0`** (Anchore), published 2026-10-19, more than two weeks old | GitHub release API: `immutable: true`, author `github-actions[bot]` |
+| Artefact | `grype_0.121.0_linux_amd64.tar.gz`, 32,504,199 bytes, **sha256 `64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519`** | GitHub asset digest; equals the line in `grype_0.121.0_checksums.txt` |
+| Checksums file | sha256 `938761709760ee0e94ebca564a757b6658ab4efddc0d19ecc6ede12f22d2fdd0`, with sigstore bundle `grype_0.121.0_checksums.txt.sigstore.json` (sha256 `76e0fda1979bdc991dcab685fd10ed59c704edcab083667684412527e35af0e9`) | downloaded and hashed (text only; no binary fetched) |
+| Signature verification | `gh release verify-asset v0.121.0 <file> -R anchore/grype`, using the **already installed** `gh` 2.103.3 (GitHub release attestation). No cosign installation is needed | `gh release verify-asset --help` |
+| Vulnerability data | The Grype DB (Anchore-built, from NVD, GitHub Advisory Database, Ubuntu OVAL/USN and other vendor feeds), downloaded at scan time. Its schema, build timestamp and checksum are recorded from `grype db status -o json`, so the data source of the verdict is identified | at S3 |
+| Why not Trivy | Trivy's release pipeline was compromised in March 2026: malicious v0.69.4 and rewritten trivy-action tags (GHSA-69fq-xp46-6x23, CVE-2026-33634). Trivy v0.76.x is also an immutable, signed release, but this preparation prefers the scanner with no such incident. No Grype release compromise was found in this preparation's searches (searched, not exhaustively verified) | Aqua advisory; OSV |
+
+**B8.2 Method (S3, operator).** It is temporary, non-root, has no Docker socket and leaves no service behind.
+
+1. **Fetch and verify.** Root downloads the tarball and the checksums into a fresh root-owned directory, checks the sha256 and `gh release verify-asset`, and extracts only the `grype` binary. Any mismatch stops the run.
+2. **Run unprivileged.** The scanner runs as uid/gid 65534:
+   `setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs env -i HOME=<tmp> TMPDIR=<tmp> GRYPE_DB_CACHE_DIR=<tmp>/db PATH=/usr/bin:/bin <tmp>/grype …`
+   - `<tmp>` is fresh, 0700 and owned by 65534.
+   - The scanner never receives the Docker socket. Its only network use is the DB download and the registry pull.
+   - No firewall change is made.
+3. **Database.** `grype db update`, then `grype db status -o json` goes to `scan/db-status.json`.
+4. **Image scan.** `grype registry:mcr.microsoft.com/playwright/python@sha256:7d030ac0…15c0 --platform linux/amd64 -o json` goes to `scan/image.json`, with a table copy in `scan/image.txt`. The `registry:` source fetches layers directly, with no daemon.
+5. **Wheel scan.** The four verified wheels are unzipped as data into a fresh directory, and `grype dir:<that dir> -o json` goes to `scan/wheels.json`. This covers the Python dist-info and Grype's binary cataloguers, including the bundled Node.js.
+6. **OSV cross-check.** An OSV API query for the four `PyPI` versions goes to `scan/osv.json`. At preparation (2026-11-16 11:20 UTC) it returned **0 known vulnerabilities** for playwright 1.64.1, pyee 13.0.0, greenlet 3.5.6 and typing-extensions 4.16.0.
+7. **Cleanup.** Remove the binary, DB cache and extracted files. Record the hashes of the reports in `SHA256SUMS`.
+
+**B8.3 Triage rules (recorded per finding in `scan/triage.json`).**
+- **Material, and a gate.** Any finding, whatever its fix state, in a component that *executes during the run* and that is reached by page content or network input:
+  - the Chromium or headless shell;
+  - the bundled Node driver and its OpenSSL or undici;
+  - playwright, pyee or greenlet;
+  - python3 or the libc, TLS and font libraries loaded by Chromium.
+
+  It must be at least High, or be KEV-listed, or have a known exploit. Such a finding blocks the run until one of three things happens:
+  - a re-pin through a register change and a new WO version;
+  - a documented mitigation that removes reachability;
+  - explicit acceptance (CGPT, and Matt where the risk is material).
+- **Not material in this environment** (recorded, with the reason):
+  - packages present but not executed: Firefox and WebKit binaries (never launched), `apt` and `dpkg` tooling, `perl`, `openssh-client`, X11 or GUI libraries used only in headful mode, and ffmpeg;
+  - CVEs that need a listening network service, local privileged users, or a route to destinations that B4 proves unreachable;
+  - kernel CVEs, which are reported to DevSecOps but belong to the host.
+- **Unscannable components** are listed explicitly and never counted as clean. The Chrome-for-Testing builds under `/ms-playwright` are not package-managed, so Grype cannot be relied on to match them (see B8.4).
+
+**B8.4 Known residual: Chromium 156.0.8078.4 (pre-stable).**
+- The pinned Playwright bundles Chromium **156.0.8078.4**. Chrome 156 then went to stable and received security updates:
+  - **156.0.8078.73/.74** (2026-10-27), reported as 52 fixes including four Critical, among them a sandbox escape;
+  - **156.0.8078.79/.80** (2026-10-29).
+
+  These are secondary reports, to be confirmed against the Chrome Releases blog at S3.
+- The pinned build is therefore **presumed affected**.
+- Playwright's own browsers are built from pre-stable branches (1.65.0 bundles 158.0.8127.18; 1.65.1 bundles 159.0.8154.6). Upgrading Playwright does not reliably close this.
+- **Mitigating facts:**
+  - the browser loads only the synthetic crm-dev application, first-party EspoCRM 10.0.12 code plus the reviewed candidate;
+  - it has no route to any other content (B4 probe);
+  - it holds only synthetic credentials;
+  - it runs as uid 65534 with no capabilities, `no-new-privileges`, a read-only rootfs and default seccomp/AppArmor, for minutes, and is then destroyed.
+- **Unmitigated:**
+  - Chromium's own sandbox is off (B3);
+  - a renderer exploit delivered *through crm-dev content* would execute as uid 65534 in the container. Exploiting this needs a prior compromise of crm-dev content.
+- **Recommendation.** Treat this as **material by rule** and accept it explicitly as a bounded residual for this test-only run (CGPT decision, recorded with Matt's material-risk acceptance). The alternative is to block the browser run.
+- At S3 the scan must still show no *other* unresolved material finding.
+
+**Register entry `grype-cl-d5-scanner`:**
+- the release, artefact digest, checksums sha256 and sigstore bundle sha256;
+- the verification command;
+- `usage: operator-run, temporary, removed after scan`;
+- licence Apache-2.0.
+
+## B9. Operator procedure: pre-root verification, cleanup, verification and manual recovery (v1.2)
+
+The operator script is root-owned and operator-authored, not part of the candidate. Its text and sha256 are recorded in `invocation.txt` before execution. It runs `set -Eeuo pipefail` and installs **`trap cleanup EXIT INT TERM HUP`** before the first state-changing step, so cleanup runs after a test failure, a deploy failure or an interruption. Every state change is journalled to `state.log` *before* it is made, which drives both automatic and manual recovery.
+
+**B9.1 Pre-root verification gate OP-V (S3; any failure means BLOCKED, with no state change made).**
+1. **Candidate.**
+   - `C` is the PL's delivered candidate: the PL JSON passes the `ORCHESTRATOR.md` §3 checks, and the committed ledger shows `DELIVERED` with `candidate = C`.
+   - The GitHub `forge/CRM-CLIENT-001` branch contains `C`.
+   - The archive tree manifest from GitHub (`tarball/<C>`) equals the manifest from a read-only `git archive C` of the canonical repository (`safe.directory` scoped, `GIT_OPTIONAL_LOCKS=0`).
+   - Both equal the PL snapshot manifest.
+2. **Deploy script.** `scripts/deploy_custom.sh` in the archive equals the blob of `C` that the S2 DevSecOps reviewed (its sha256 is recorded). It is run only from the root-owned 0700 archive directory under `/srv/CRM/releases`.
+3. **Root-execution boundary.** Only `deploy_custom.sh dev`, `backup.sh dev`, `restore.sh dev`, `up.sh dev`, `check_access.py dev` and the docker commands of B3, B4 and B8 run as root. Engineer browser code runs only in the container. The argument `beta` never appears; the script refuses it.
+4. **Synthetic backup.** `backup.sh dev` creates a fresh backup. Its manifest and sha256 are recorded, and a restore dry check confirms that the archive members are readable and include `client-custom.tar.gz`.
+5. **Snapshots before any change:**
+   - `crmdev-before.json`: the env file sha256 and a byte copy (root 0600); the crm-app, crm-db and crm-daemon container IDs, images, networks, health and StartedAt; the HTTP status and body hash of `/` from loopback; the appTimestamp; the `client/custom` tree manifest;
+   - `beta-before.json`: **metadata only**, with no file content read (and never the beta env file): `stat` of `/srv/CRM/runtime/beta` and `/srv/CRM/deploy`; the `find -printf '%p %u:%g %m %s %T@'` listing of both to depth 2; the crm-beta container IDs, images, StartedAt, RestartCount and health.
+6. **Absence of stale objects.** No `crm-client001-*` container or network, and the subnet is unused.
+7. **Gate.** The CL-D5 scan (B8) passes under its triage rules, with the B8.4 acceptance recorded.
+
+**B9.2 Cleanup (always run, in this order, each step idempotent and logged).**
+1. Stop and remove the `crm-client001-browser-<run>` container if present (`docker rm -f`).
+2. Disconnect crm-app from the test network, if attached.
+3. Remove the test network.
+4. Restore the env file from the byte copy, then run `cmp` and compare its sha256 with `crmdev-before.json`.
+5. If a deploy left the stack in a non-baseline state, run `restore.sh dev` of the B9.1 backup, and the cache-bust (D5 does this in the success path).
+6. Recreate crm-app with `scripts/up.sh dev` and wait until it is healthy.
+7. Remove the PATH wrapper directory, the env-file of test credentials and the temporary wheelhouse and output directories, after the evidence is copied.
+8. Write `cleanup.json`.
+
+**B9.3 Cleanup verification (G7). Each item is a boolean, and any false is a FAILED run, even if every journey passed.**
+- The env file is byte-identical to `crmdev-before.json`.
+- `docker ps -a` and `docker network ls` show no `crm-client001-*` object.
+- crm-app is attached to `crm-dev_crm-net` only.
+- crm-app, crm-db and crm-daemon are running, healthy where a healthcheck exists, and on the same images.
+- `/` returns the pre-test status.
+- The `client/custom` tree equals the D0 manifest after D5.
+- `beta-after.json` equals `beta-before.json` in every field.
+
+Cleanup failures are reported as `CLEANUP FAILED: <item>`, and a BA WO is not proposed.
+
+**B9.4 WO closure.**
+- After CGPT acceptance or a final ESCALATED, run `docker image rm` of the Playwright image by digest.
+- Record that `docker images --digests` no longer lists it.
+- Confirm that the Grype artefacts are absent.
+- Keep the evidence store (`/srv/CRM/evidence/CRM-CLIENT-001/`) as the delivery record until CGPT authorises archival.
+
+**B9.5 Manual recovery (interrupted procedure, e.g. host reboot or killed shell).** This is documented in `docs/RELEASE.md` (AC10) and works from `state.log` alone:
+1. `docker rm -f crm-client001-browser-<run>`.
+2. `docker network disconnect -f crm-client001-browser-<run> crm-dev-crm-app-1`, then `docker network rm crm-client001-browser-<run>`.
+3. `cp --preserve=mode,ownership <saved env copy> /srv/CRM/runtime/dev/env`, then `cmp` and sha256.
+4. If `state.log` records any deploy, or the runtime trees show `.Custom.old-*`, `.src.old-*` or `.failed-*`: stop crm-app and crm-daemon, run `restore.sh dev` of the recorded backup, then `up.sh dev`, `clear-cache`, `rebuild` and `update-app-timestamp`.
+5. Run every B9.3 check and record the result as `manual-recovery.json` in the run's evidence.
+6. An interrupted run is **never** evidence for BA. A new run id is required.

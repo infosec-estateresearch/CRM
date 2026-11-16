@@ -4,35 +4,35 @@ HOST: DOCKER1
 ROOT: /srv/CRM/main
 WORKTREES: /srv/CRM/worktrees
 BASE: main
-BROWSER: yes (orchestrator-run real-browser journeys on synthetic crm-dev, with independent Tester verification; CL-D3, annex B)
+KNOWN_COMMIT: 6e1766980e24d781d498727d4fe5db43cdeadbb7
 
 # CRM-CLIENT-001: version-controlled delivery of CRM-owned browser customisations (`client/custom/src/`)
 
-- **Version:** v1.1 DRAFT, 2026-11-16. Not approved. This version is identified only by the commit that adds it, and an approval must name that commit and this path. Annex `work-orders/CRM-CLIENT-001-browser-annex.md` (annex B) is part of this version.
+- **Version:** v1.2 DRAFT, 2026-11-16. **Not approved.**
+  - This version is identified only by the commit that adds it. An approval must name that commit and this path.
+  - Annex `work-orders/CRM-CLIENT-001-browser-annex.md` (annex B) and the companion assurance WO `work-orders/CRM-CLIENT-001-BA.md` are part of this version.
 - **History:**
   - v1.0 was commit `972b809ab36e8befbc6126a0649c6592d24694d3`.
-  - v1.1 answers the CGPT directive *Extended autonomous preflight and Work Order finalisation* (2026-11-16), Phase A (items A1–A5), Phase B and Phase C:
-    - it records CL-D1 and CL-D3 as decided;
-    - it adds the browser runner, the isolation design and the dependency lock (annex B1–B4);
-    - it adds immutable canary versions (annex B5), the evidence route (B6) and the post-swap failure semantics (B7);
-    - it resolves the module format (§2 F8);
-    - it adds the G2 assessment (§11).
-
-    The source allowlist and exclusions of v1.0 are kept. Additions are made only for the browser runner, the fixtures and the evidence (§4, marked **v1.1**).
+  - v1.1 was commit `0fba12cf5395800d02db5801e4772506c849cb1a`.
+  - v1.2 answers *CRM Architect Review and Continuation Mission* (CGPT, 2026-11-16, CHANGES REQUESTED), findings A1–A5. It also fixes three defects that the PL found in v1.1 while checking against the installed engine. §13 maps every finding to its correction.
+  - The source allowlist (§4) and the exclusions (§5) are **unchanged from v1.1**.
 - **Issue:** https://github.com/infosec-estateresearch/CRM/issues/59
-- **Prepared by:** Rogue (Orchestrator), under the CGPT Architect directives of 2026-11-13 and 2026-11-16. These authorise preparation only: **no dispatch, no deployment, no pull or run of the browser image.**
-- **Approval:** none. Dispatch needs a CGPT approval comment on Issue #59 that names this path and the immutable commit containing v1.1 (FOUNDRY `standards/work-order-contract.md`, *Approval provenance*).
+- **Prepared by:** Rogue (Orchestrator). This is preparation only: **no dispatch, no deployment, no pull or run of any image or scanner.**
+- **Approval:** none. Dispatch needs a CGPT approval comment on Issue #59 that names this path and the immutable commit containing v1.2.
+
+**Header note (engine semantics).** The header deliberately has **no `BROWSER: yes` line**. Under the installed ForgeV2 v0.3.0 `deliver` skill (§3, *Browser gate*), `BROWSER: yes` requires the Tester to drive the page itself. The sandboxed Tester has no network or Docker, so it would report INCONCLUSIVE and the PL would return ESCALATED. This WO changes nothing a user sees (AC7). Real-browser assurance is still mandatory (FOUNDRY WO contract, *Quality*), but it is delivered by the operator-run procedure of annex B and the independent Tester and DevSecOps verdicts of the companion WO `CRM-CLIENT-001-BA` (CL-D3, CL-D7).
 
 ## 1. Authority and governing records
 
 | Item | Value |
 |---|---|
-| Governing FOUNDRY | `5f5e4a51f8909d134c46ef8b43a9bd20d086fcc0` (`maff0000/foundry`) |
-| WO standard | `standards/work-order-contract.md` at that revision, sha256 `cbb6eb3ae62bf7877ae470abf2297a5af5ffb23ca617581a9a85077dd9a8ebcc` |
+| FOUNDRY provenance (v1.0–v1.1) | `5f5e4a51f8909d134c46ef8b43a9bd20d086fcc0`, preserved as the historical framework baseline |
+| FOUNDRY for the new v1.2 decisions | **`84fedf0a74017237aa1bd650d8560350c91c7f0e`** (adopted main, per CGPT 2026-11-16). `standards/work-order-contract.md` is byte-identical at both revisions (sha256 `cbb6eb3ae62bf7877ae470abf2297a5af5ffb23ca617581a9a85077dd9a8ebcc`). Also applied: `ROGUE.md` `5d7406a5…6aa5` (§A2/§H: PL Git authority, checkout gate) and `standards/project-scaffolding.md` `b52fdc3d…427c` |
+| Engine | ForgeV2 `63b6b8ab6c6d3c12d1ef3f0aeabe2ca22fbefb82`, plugin 0.3.0.<br>`skills/deliver/SKILL.md` `6a87998258a5a91e52f492fa35708432460ebc892fd4a103240fc130e370bd73`<br>`ORCHESTRATOR.md` `e0c529e26c33e5bea8ffa67b25dff18a19958bd24f216eb8d6d1e7c434a95c28`<br>`lib/forgelib.py` `6a7d587a79da13de733dc41a97e6f499c163062151175acda74918ca19f6dc55`<br>`bin/forge-start` `fdd23d5712817ebc707a04428fee123999366c96d28e487cd82cacccc96366d3` |
 | Product authority | Matt's PO approval of the Vision, the Backlog (PBI-018..029) and CRM-D020..D032 at `dc6fb4ced68d9139c2332af973084239492104b3` (Issue #54, 2026-11-13T12:04:29Z) |
-| Architect decisions | CL-D1 and CL-D3 (CGPT, 2026-11-16); see §12 |
+| Architect decisions | CL-D1 and CL-D3 (CGPT, 2026-11-16). CL-D5, CL-D7 and CL-D8 are proposed in §12 |
 | Parent PBI | **CRM-PBI-016** (container release packaging). It enables CRM-PBI-018 (CRM-FG-001) and CRM-PBI-020 |
-| Starting `main` | **`6e1766980e24d781d498727d4fe5db43cdeadbb7`**, re-verified on 2026-11-16 against the GitHub API |
+| **Engineering base (exact)** | **`6e1766980e24d781d498727d4fe5db43cdeadbb7`** (= `KNOWN_COMMIT`). On 2026-11-16 it equals GitHub `main` (API), the PL's local `main` and the local `origin/main`. The PL's checkout is clean, has no URL rewrites and has the canonical SSH origin. See §10 and CL-D8 |
 | Pinned EspoCRM | `espocrm/espocrm:10.0.12@sha256:b50245d1e291b2636116b0396ce0d06018ffcded6a6c61c7af2420443a20f3ec` |
 | Unit baseline | The `main` unit suite gives 564 OK and 1 skip, run as `nobody` from a `git archive` copy (Issue #56 comment 6858541012) |
 
@@ -44,198 +44,227 @@ The image was inspected by `docker create` followed by `docker export`; no conta
 
 | # | Fact | Evidence |
 |---|---|---|
-| F1 | On every start the entrypoint chowns `./data`, `./custom` and `./client/custom` to www-data. It recopies `client/` only when `/var/www/html/client` is itself a mount, which is not the case here, and it never touches `client/custom` | `/usr/local/bin/docker-entrypoint.sh` `9f0b70326ec5065e1358b782c39eb264e08cf14df01dfb8c41085fbec32020e2` |
+| F1 | On every start the entrypoint chowns `./data`, `./custom` and `./client/custom` to www-data. It recopies `client/` only when `/var/www/html/client` is itself a mount (not the case here) and never touches `client/custom` | `/usr/local/bin/docker-entrypoint.sh` `9f0b70326ec5065e1358b782c39eb264e08cf14df01dfb8c41085fbec32020e2` |
 | F2 | `client/custom/modules` is a **reserved** EspoCRM path, used for extensions | `Espo/Core/Utils/File/Manager.php` `RESERVED_CUSTOM_PATH_LIST`; `Permission.php` `687e8d73f3b4258ae66f69b91ef741eedad8c2335ad43250675558a4b847e161` |
-| F3 | **Cache invalidation.** Outside developer mode the loader versions module URLs with **`appTimestamp`** (`?r=<appTimestamp>`). `clear-cache` changes only `cacheTimestamp`. `appTimestamp` changes only through `bin/command update-app-timestamp`, an upgrade or a migration, and its value is `time()` in whole seconds. It is stored as a state parameter in `data/state.php` and exposed to the client as a global setting | `ClientManager.php` `725121562a41876d79db16f6ace4d961bb1aae9cb30123b7bfafbee98ab62f40`; `DataManager.php` `a701fe39d936072b63c3454ef7299df18101e600ecd6860cc8bb0062f1ccad0f`; `UpdateAppTimestamp.php` `15d82eae42aa72ccc8ebf541d2935fc68ad24819d89868143370493e38cd098b`; `Config/InternalConfigHelper.php` `8e6c9d99b73373a96ec6270ab71af4bac20ddb7bb04cc7ecaee905c20d8ea2e2` (`stateParamList`); `Config.php` (`data/state.php`); `defaults/systemConfig.php` (`globalItems`) |
+| F3 | **Cache invalidation.**<br>• Outside developer mode the loader versions module URLs with **`appTimestamp`** (`?r=<appTimestamp>`).<br>• `clear-cache` changes only `cacheTimestamp`.<br>• `appTimestamp` changes only through `bin/command update-app-timestamp`, an upgrade or a migration. Its value is `time()` in whole seconds.<br>• It is stored as a state parameter in `data/state.php` and exposed to the client as a global setting | `ClientManager.php` `725121562a41876d79db16f6ace4d961bb1aae9cb30123b7bfafbee98ab62f40`; `DataManager.php` `a701fe39d936072b63c3454ef7299df18101e600ecd6860cc8bb0062f1ccad0f`; `UpdateAppTimestamp.php` `15d82eae42aa72ccc8ebf541d2935fc68ad24819d89868143370493e38cd098b`; `Config/InternalConfigHelper.php` `8e6c9d99b73373a96ec6270ab71af4bac20ddb7bb04cc7ecaee905c20d8ea2e2` |
 | F4 | The CSP is `script-src 'self' 'nonce-…' 'unsafe-eval'`, so client code must be same-origin | `ClientManager.php` line 116 |
 | F5 | The repository has no `client/` tree. `scripts/deploy_custom.sh` (`d1aaa430e150e95c8e42c93ba3544afdcfbcd40117e0eed1aa0083c7ef9ed67b`) deploys only `custom/Espo/Custom` and runs `clear-cache` and `rebuild`, with no `update-app-timestamp` | `main` @ `6e176698` |
-| F6 | Persistence already covers `client/custom`: `CRM_PERSISTENT_DIRS`, `client-custom.tar.gz` in backup and restore, compose mount checks, and `make_runtime` | `common.sh` `34f622395c169ae2e3cc30229ba72ed2073f29a7e5d5fe23d5511fe955d0fff1`; `backup.sh` `ba67fa26fdb49e70f4a53fb329af6813e56e2fc7ac65a83fc790b33b648c0fc3`; `restore.sh` `c1e92f0d43e730c5b627d2a3f5afc67f27529d216fde891010df42b94d3ac78f`; `deploy_release.sh` `54aaedb320e9a26dfccbc1e5916a72cf021483b75beef14ec9e68ac4640524d7` |
+| F6 | Persistence already covers `client/custom`: `CRM_PERSISTENT_DIRS`, `client-custom.tar.gz` in backup and restore, the compose mount checks and `make_runtime` | `common.sh` `34f622395c169ae2e3cc30229ba72ed2073f29a7e5d5fe23d5511fe955d0fff1`; `backup.sh` `ba67fa26fdb49e70f4a53fb329af6813e56e2fc7ac65a83fc790b33b648c0fc3`; `restore.sh` `c1e92f0d43e730c5b627d2a3f5afc67f27529d216fde891010df42b94d3ac78f`; `deploy_release.sh` `54aaedb320e9a26dfccbc1e5916a72cf021483b75beef14ec9e68ac4640524d7` |
 | F7 | A release is the `git archive` of a commit minus `.forge/`. A tracked `client/custom/src/` is therefore bundled and checked by `verify-tree` without any change to `release.py` (`0560e352ba3e5fa79fe08694542550ed33b021fef61dd017e2e7c8c74bd06f8f`). The new deploy behaviour reaches beta **only** through a future, separately authorised `deploy_release.sh` run | `release.py` `EXCLUDED`; `deploy_release.sh` `start_stack` |
-| **F8 (A5, resolved)** | The **module format is AMD.** In `client/lib/espo.js` (`9c88b9db81ffdb35f99f9c77619a8fb56a338a355672173e670dc88ca9ebd318`):<br>• `_idToPath` maps `custom:<p>` to `client/custom/src/<p>.js`.<br>• The global `define(deps, factory)` is AMD (`define.amd = true`). An anonymous `define` is bound to its module id through the requesting script URL (`_urlIdMap`).<br>• The factory's return value is the module, and `undefined` raises `Could not load '<id>'`.<br>• With a cache timestamp set, the script URL gets `?r=<timestamp>`, and the loader's timestamp outside developer mode is `appTimestamp` (F3).<br>• Untranspiled ES-module syntax (`import`/`export`) is **not** supported in `client/custom/src`: only module ids listed in `_transpiledModuleList` are loaded from `lib/transpiled` paths.<br>**The canary is therefore a plain-ES2015 AMD file:** `define([], function () { return Object.freeze({name: 'crm-release-canary', contract: N, describe: function () { return 'crm-release-canary/' + N; }}); });`. It loads through `Espo.loader.requirePromise('custom:crm/release-canary')` | upstream `espo.js` (minified; behaviour quoted in the PL record) |
-| F9 | No browser automation is installed or approved on DOCKER1, and the Playwright image has not been pulled (re-checked 2026-11-16). No earlier CRM WO produced in-cycle real-browser evidence: CRM-003 was escalated | host check; `.forge/CRM-003/REPORT.md` |
+| F8 | **The module format is AMD.** In `client/lib/espo.js` (`9c88b9db81ffdb35f99f9c77619a8fb56a338a355672173e670dc88ca9ebd318`):<br>• `custom:<p>` maps to `client/custom/src/<p>.js`;<br>• `define` is AMD, and an anonymous `define` is bound to its module id through the requesting URL;<br>• a factory that returns `undefined` fails;<br>• the URL gets `?r=<appTimestamp>`;<br>• untranspiled `import`/`export` is not supported.<br>**Canary:** `define([], function () { return Object.freeze({name: 'crm-release-canary', contract: N, describe: function () { return 'crm-release-canary/' + N; }}); });`, loaded through `Espo.loader.requirePromise('custom:crm/release-canary')` | upstream `espo.js` (minified) |
+| F9 | No browser automation or vulnerability scanner is installed or approved on DOCKER1, and no Playwright image is present (re-checked 2026-11-16). No earlier CRM WO produced in-cycle real-browser evidence: CRM-003 was escalated | host check; `.forge/CRM-003/REPORT.md` |
+| **F10 (v1.2)** | **The engine cannot place an operator step inside one WO.**<br>• The PL is one headless run that "returns only when it has reached a final status" (`ORCHESTRATOR.md` §2).<br>• Every final status closes the ledger (`SKILL.md` §4).<br>• After a close, `spawn()` refuses every dispatch (`forgelib.py`: "Work Order … is closed; no further dispatch").<br>• Reviewers may be dispatched one at a time while the decision is `REVIEW` (`needs_review`). However, `SKILL.md` §3 requires the three reviewers to be given in one command, and a WO instruction that conflicts with the procedure is `BLOCKED`.<br>• The documented action on ESCALATED is "issue a new, narrower WO" (`ORCHESTRATOR.md` §4). Suffixed follow-on WOs are established CRM practice (CRM-003-F, CRM-009-F…I).<br>Hence CL-D7 | engine files of §1, read-only |
+| **F11 (v1.2)** | **The PL's local `main` cannot be advanced by any supported PL-owned tool.**<br>• `forge-start` resolves `--base` locally with `git rev-parse` and never fetches (`forge-start` line 50).<br>• The PL guard forbids direct mutating Git, and `forge-commit`/`forge-push` cannot update `main`.<br>• The correction, FV2-SYNC-001 (`maff0000/forgev2#7`), is **open and not installed**; its delivery is itself `BLOCKED — CREDENTIAL_ADMIN`.<br>• The CRM `main` fast-forwards of 2026-11-11..13 (reflog) were made by root through `runuser` as `forgev2-pl`. Adopted `ROGUE.md` §A2/§H no longer permits that. Hence CL-D8 | `maff0000/forgev2#7`; reflog of `/srv/CRM/main`, read-only |
+| **F12 (v1.2)** | `playwright/__init__.py` in the 1.64.1 wheel defines **no** `__version__`. The version is `playwright-1.64.1.dist-info/METADATA`, `Version: 1.64.1`. The wheel's `playwright/driver/package/browsers.json` pins **chromium revision 1248, browserVersion 156.0.8078.4**, and the wheel bundles **Node.js 24.22.1** as `playwright/driver/node` | wheel `577b8d88…7e2`, inspected as data with `zipfile`, nothing executed |
 
 **PBI-016/017 deviation.** This WO keeps the deploy-into-runtime model (CRM-D017 deviation) and extends it to `client/custom/src`. It claims **no** baked-image or clean-host acceptance, and it does not implement PBI-016 (CL-D4).
 
 ## 3. Intended outcome
 
 1. A tracked, CRM-owned `client/custom/src/` is the only source of CRM browser code (CL-D1).
-2. `scripts/deploy_custom.sh dev|beta` deploys `custom/Espo/Custom` **and** `client/custom/src`, using the same stop, secure, stage and rename discipline. `client/custom/modules` and every other runtime path are left untouched.
+2. `scripts/deploy_custom.sh dev|beta` deploys `custom/Espo/Custom` **and** `client/custom/src`, with the same stop, secure, stage and rename discipline. `client/custom/modules` and every other runtime path are left untouched.
 3. Each deploy then runs `clear-cache`, `rebuild` and **`update-app-timestamp`**, with a strict check that the timestamp advanced (annex B5).
-4. Defined failure semantics after the swap: no false success, the failed step is named, the previous trees are recovered, and then either a recovered cache-bust or a controlled shutdown (annex B7).
+4. Defined failure semantics after the swap: no false success, the failed step is named, the previous trees are recovered, then either a recovered cache-bust or a controlled shutdown (annex B7).
 5. Backup, restore and rollback cover the client tree.
-6. A non-user-visible AMD canary, `custom:crm/release-canary`, proves loading, versioning, cache-bust, rollback and recovery in a real browser (annex B5).
+6. A non-user-visible AMD canary, `custom:crm/release-canary`, and a hardened runner, isolation probe, journeys and offline evidence verifier. These let the operator prove loading, versioning, cache-bust, rollback and recovery in a real browser (annex B), and the companion WO `CRM-CLIENT-001-BA` has that evidence assessed independently.
 7. All existing customisations and protections keep working.
 
-## 4. In scope (allowlist, exhaustive)
+## 4. In scope (allowlist, exhaustive; paths unchanged from v1.1, with content refined for A2 and CL-D5)
 
 | Path | Change |
 |---|---|
-| `client/custom/src/crm/release-canary.js` | **new.** The AMD canary of F8 with **contract 1**. No network, DOM, storage or globals. It is not referenced by any clientDefs, layout, `app/client.json`, navbar or i18n |
-| `scripts/deploy_custom.sh` | Deploy `client/custom/src`; keep the previous trees until success; run `update-app-timestamp` with an advance check; implement the annex B7 failure and recovery semantics; print integer appTimestamp values only |
-| `scripts/lib/common.sh` | Only if a shared swap helper is factored out. The existing guards must not be weakened, and CRM-TEST-001 M1–M4 must still kill |
-| `tests/unit/test_scripts.py` | New tests (AC2–AC5, AC4b). Existing tests stay unchanged, except the expected call lists that gain the new step |
-| `tests/unit/test_client_custom.py` | **new.** Static policy for `client/custom/` and `tests/browser/` (AC1, AC7, AC11) |
-| **v1.1** `tests/browser/requirements.lock` | **new.** Exactly the four hash-pinned wheels of annex B2 |
-| **v1.1** `tests/browser/entry.sh`, `probe_isolation.py`, `journeys.py`, `verify_evidence.py` | **new.** Container entry point, isolation probe, journeys J1–J5, and the offline evidence verifier (annex B4–B6). They run only inside the hardened container, except `verify_evidence.py`, which only reads files and is run by the Tester in the sandbox |
-| **v1.1** `tests/browser/fixtures/canary-transition/v2/crm/release-canary.js` | **new.** Identical to the canary except **contract 2** (annex B5) |
-| `docs/RELEASE.md`, `docs/BETA.md`, `docs/BUILD.md` | The client delivery, cache-bust, failure and recovery, backup and rollback, and browser-run procedure, plus the PBI-016 deviation note |
-| `security/EXTERNAL_CODE_REGISTER.yaml` | **v1.1:** the `playwright-python-browser-runner` candidate entry (annex B2) |
+| `client/custom/src/crm/release-canary.js` | **new.** The AMD canary of F8, **contract 1**. No network, DOM, storage or globals. It is not referenced by any clientDefs, layout, `app/client.json`, navbar or i18n |
+| `scripts/deploy_custom.sh` | Deploy `client/custom/src`; keep the previous trees until success; `update-app-timestamp` with an advance check; the annex B7 failure and recovery semantics; integer appTimestamp output only |
+| `scripts/lib/common.sh` | Only if a shared swap helper is factored out. No weakened guard, and CRM-TEST-001 M1–M4 must still kill |
+| `tests/unit/test_scripts.py` | New tests (AC2–AC5, AC4b). Existing tests are unchanged, except expected call lists that gain the new step |
+| `tests/unit/test_client_custom.py` | **new.** Static policy for `client/custom/` and `tests/browser/` (AC1, AC7, AC11), and the AC6a tests of `verify_evidence.py` on synthetic packages **generated inside the test** (no committed evidence fixtures) |
+| `tests/browser/requirements.lock` | **new.** Exactly the four hash-pinned wheels of annex B2 |
+| `tests/browser/entry.sh`, `probe_isolation.py`, `journeys.py`, `verify_evidence.py` | **new.** Container entry point, isolation probe, journeys J1–J5 and the offline verifier (annex B2–B6). They run only inside the hardened container, except `verify_evidence.py`, which only reads files and is run in the specialist sandbox |
+| `tests/browser/fixtures/canary-transition/v2/crm/release-canary.js` | **new.** Identical to the canary except **contract 2** (annex B5) |
+| `docs/RELEASE.md`, `docs/BETA.md`, `docs/BUILD.md` | The client delivery, cache-bust, failure and recovery, backup and rollback, and browser-run procedure (annex B9 summary), plus the PBI-016 deviation note |
+| `security/EXTERNAL_CODE_REGISTER.yaml` | The `playwright-python-browser-runner` candidate entry (annex B2) and the `grype-cl-d5-scanner` candidate entry (annex B8), both `usage: test-only, operator-run` |
 
 Any other path is out of scope, and a need for one is a **stop** (§11).
 
-## 5. Exclusions (unchanged from v1.0)
+## 5. Exclusions (unchanged from v1.1)
 
 - `custom/Espo/Custom/**`, `config/access/**`, `deploy/**`, `scripts/release.py`, `scripts/deploy_release.sh`, `scripts/backup.sh`, `scripts/restore.sh`, `scripts/up.sh`.
 - Any metadata or layout change that makes client code user-visible.
 - `client/custom/modules/**`, which is never written, removed or swapped.
-- The running beta (`/srv/CRM/runtime/beta`, `/srv/CRM/deploy`), Salesforce, the legacy WIP repository and its data, FOUNDRY, ForgeV2, and other host applications.
+- The running beta (`/srv/CRM/runtime/beta`, `/srv/CRM/deploy`), Salesforce, the legacy WIP repository and its data, FOUNDRY, ForgeV2 and other host applications.
 - Any CDN, npm, Node toolchain, bundler or minified or vendored blob in `client/custom`.
-- **v1.1:**
-  - any persistent Docker network, image or container left after the WO;
-  - any firewall rule;
-  - any use of host networking or the Docker socket by the browser runner.
+- Any persistent Docker network, image or container after WO closure; any firewall rule; any use of host networking or the Docker socket by the browser runner.
 
 ## 6. Acceptance criteria
 
+**The assessing WO.** Each AC is assessed in **CRM-CLIENT-001** (this WO), offline and in the sandbox, unless it is marked **BA**. A BA criterion is assessed by the Tester and DevSecOps of **CRM-CLIENT-001-BA** on the operator's immutable evidence (CL-D7).
+
 | AC | Criterion | Evidence |
 |---|---|---|
-| AC1 | `client/custom/` in Git holds only `src/**`.<br>• Allowed types are `.js`, `.css`, `.json`, `.tpl` and `.svg`, with no symlinks, no executable bit and no file over 256 KiB.<br>• There is no `modules/`.<br>• Every `.js` file is AMD (`define(`), with no `import`/`export` statements.<br>• Banned constructs: remote URLs, `eval`, `new Function`, `document.write`, `innerHTML` assignment, absolute-URL fetch or XHR, and storage APIs.<br>• The v2 fixture differs from the canary only in the contract value. | `test_client_custom.py`, with a broken fixture for each rule |
-| AC2 | `deploy_custom.sh` replaces the runtime `client/custom/src` as a whole, staged and renamed on the same filesystem, after the stop and with path security as for `Espo/Custom`.<br>• It refuses symlinked or redirected `client`, `client/custom` or `src`.<br>• Files removed from Git disappear from the runtime. | `test_scripts.py`. Each refusal case fails **before** any swap |
-| AC3 | `client/custom/modules`, and every non-`src` entry in `client/custom`, are byte-identical before and after a deploy, a failure and a recovery | `test_scripts.py` hash comparison |
-| AC4 | The success path runs `up --wait`, `clear-cache`, `rebuild` and `update-app-timestamp`, in that order, in crm-app as www-data.<br>• The appTimestamp after the update is strictly greater than before. The script retries once after one second, and otherwise fails.<br>• With the stack stopped, it prints that the cache-bust was skipped and how to complete it. | `test_scripts.py`, recorded fake-docker calls |
-| **AC4b** | **Post-swap failure (annex B7).** For an injected failure at each post-swap step, and at each recovery step:<br>• the exit code is non-zero and step-specific;<br>• `FAILED STEP: <step>` is printed, and there is no success line;<br>• the previous trees are restored byte for byte, and `.failed-<stamp>` is retained;<br>• after recovery a cache-bust ran, or the stack is stopped and `RECOVERY FAILED` is printed. | `test_scripts.py` failure injection; on crm-dev, J4 |
-| AC5 | **Backup and rollback.**<br>• A backup, then a deploy of B over A, then `restore.sh`, gives A back byte for byte in `client/custom/src`.<br>• Redeploying A over B removes the files that exist only in B.<br>• Both are followed by a cache-bust. | `test_scripts.py`; on crm-dev, J3 and J5 |
-| **AC6** | **Real browser** on synthetic crm-dev, with the annex B1 image pinned by digest, the B4 isolation proven first, and D0–D5 run in order (annex B5):<br>• **J1:** contract 1, and the URL `r` equals `a1` (with `a1 > a0`);<br>• **J2:** contract 2, `a2 > a1`, and a new network fetch;<br>• **J3:** after rollback, contract 1 and `a3 > a2`;<br>• **J4:** after the injected failure, recovered contract 1 and an advanced `r`;<br>• **J5:** after restore, the canary is absent and the regression screens match D0.<br>For every journey there is no CSP violation and no canary console error. The login, Account list and detail, Enquiry list and detail, and Stream panels render. | Annex B6 evidence package; the Tester's independent verdict (CL-D3) |
+| AC1 | `client/custom/` in Git holds only `src/**`.<br>• Allowed types are `.js`, `.css`, `.json`, `.tpl` and `.svg`, with no symlinks, no executable bit and no file over 256 KiB.<br>• There is no `modules/`.<br>• Every `.js` file is AMD, with no `import`/`export`.<br>• No remote URLs, `eval`, `new Function`, `document.write`, `innerHTML` assignment, absolute-URL fetch or XHR, or storage APIs.<br>• The v2 fixture differs from the canary only in the contract value | `test_client_custom.py`, with a broken fixture for each rule |
+| AC2 | `deploy_custom.sh` replaces the runtime `client/custom/src` as a whole, staged and renamed on the same filesystem, after the stop and with path security as for `Espo/Custom`.<br>• It refuses symlinked or redirected `client`, `client/custom` or `src`.<br>• Files removed from Git disappear from the runtime | `test_scripts.py`; each refusal fails **before** any swap |
+| AC3 | `client/custom/modules`, and every non-`src` entry in `client/custom`, are byte-identical across a deploy, a failure and a recovery | `test_scripts.py` hash comparison |
+| AC4 | The success path runs `up --wait`, `clear-cache`, `rebuild` and `update-app-timestamp`, in that order, in crm-app as www-data.<br>• The appTimestamp after the update is strictly greater than before; one retry after 1 s, otherwise fail.<br>• With the stack stopped, it prints that the cache-bust was skipped and how to complete it | `test_scripts.py`, recorded fake-docker calls |
+| AC4b | **Post-swap failure (annex B7).** For an injected failure at each post-swap step and at each recovery step:<br>• the exit code is non-zero and step-specific;<br>• `FAILED STEP: <step>` is printed, with no success line;<br>• the previous trees are restored byte for byte, and `.failed-<stamp>` is retained;<br>• then either a recovered cache-bust, or a stopped stack with `RECOVERY FAILED` | `test_scripts.py` failure injection (J4 in BA) |
+| AC5 | **Backup and rollback.**<br>• A backup, a deploy of B over A, then `restore.sh`, gives A back byte for byte in `client/custom/src`.<br>• Redeploying A over B removes the files that exist only in B.<br>• Both are followed by a cache-bust | `test_scripts.py` (J3 and J5 in BA) |
+| **AC6a** | **Runner and verifier correctness (offline).**<br>• `verify_evidence.py` recomputes every AC6b verdict from the raw files and ignores `result.json`.<br>• On a generated *good* package it returns PASS. It returns FAIL, naming the cause, for each tampered variant: a missing file; a `SHA256SUMS` mismatch; a non-advancing or equal `r`; a cached or absent fetch of the new URL; a CSP event; a canary console error; an unexpected isolation success; a wrong Playwright distribution version; a wrong browser version or revision; a candidate, image or wheel identity mismatch; a cleanup-failure record.<br>• `journeys.py` writes exactly the annex B6 layout | `test_client_custom.py` |
+| **AC6b (BA)** | **Real browser** on synthetic crm-dev, with the B1 image pinned by digest, the CL-D5 scan gate passed, B4 isolation proven first, and D0–D5 in order (annex B5):<br>• **J1:** contract 1, URL `r = a1 > a0`;<br>• **J2:** contract 2, `a2 > a1`, and a new network fetch;<br>• **J3:** rollback to contract 1, `a3 > a2`;<br>• **J4:** injected failure, then recovered contract 1 and an advanced `r`;<br>• **J5:** after restore, the canary is absent and the regression screens match D0.<br>For every journey, no CSP violation and no canary console error. The login, Account list and detail, Enquiry list and detail, and Stream panels render | Annex B6 package; the independent Tester verdict in BA |
 | AC7 | No user-visible change: the canary is unreferenced in any metadata or layout, and the `custom/**` diff is empty | static test; diff limited to §4 |
-| AC8 | **Regression.**<br>• The full unit suite passes as non-root from a `git archive` copy, with at least the starting count.<br>• `tests/load` passes.<br>• The CRM-TEST-001 M1–M4 mutations still kill.<br>• The existing `deploy_custom` and guard tests pass unchanged. | Orchestrator host procedure (as CRM-TEST-001 §7); Tester re-run on the PL snapshot |
-| AC9 | **Release integrity.**<br>• A bundle of the candidate passes `release.py verify --sha256`.<br>• `RELEASE.json` lists the canary with its sha256.<br>• `verify-tree` refuses a file injected under `client/custom/src`. | Temporary directory, run as `nobody` |
-| AC10 | The documentation is truthful: client delivery, cache-bust, failure and recovery, rollback, the browser procedure, and the PBI-016/017 deviation. It makes no baked-image or clean-host claim. | Auditor |
-| **AC11** | **Browser runner integrity.**<br>• `requirements.lock` equals annex B2 exactly, with `--hash` lines.<br>• `journeys.py` and `probe_isolation.py` contact only `CRM_BROWSER_BASE_URL` and the probe targets passed in as data. They contain no credentials or addresses as literals.<br>• `verify_evidence.py` does no network I/O and recomputes every AC6 verdict from the raw files. | `test_client_custom.py`; DevSecOps |
+| AC8 | **Regression.**<br>• The full unit suite passes as non-root from a `git archive` copy, with at least the starting count.<br>• `tests/load` passes.<br>• CRM-TEST-001 M1–M4 still kill.<br>• The existing `deploy_custom` and guard tests pass unchanged | Orchestrator host procedure (as CRM-TEST-001 §7); Tester re-run on the PL snapshot |
+| AC9 | **Release integrity.**<br>• A bundle of the candidate passes `release.py verify --sha256`.<br>• `RELEASE.json` lists the canary with its sha256.<br>• `verify-tree` refuses a file injected under `client/custom/src` | Temporary directory, as `nobody` |
+| AC10 | The documentation is truthful: client delivery, cache-bust, failure and recovery, rollback, the browser procedure including cleanup and manual recovery (annex B9), and the PBI-016/017 deviation. No baked-image or clean-host claim | Auditor |
+| AC11 | **Runner integrity.**<br>• `requirements.lock` equals annex B2 exactly, with `--hash` lines.<br>• `journeys.py` and `probe_isolation.py` contact only `CRM_BROWSER_BASE_URL` and the probe targets passed in as data, with no credentials or addresses as literals.<br>• `verify_evidence.py` does no network I/O.<br>• **The version check uses `importlib.metadata`, not `playwright.__version__`** (annex B2.3) | `test_client_custom.py`; DevSecOps |
+| **AC12 (BA)** | **Operator procedure and cleanup (annex B9).** The package's `cleanup.json` shows all of the following, and any cleanup failure is a FAIL:<br>• the crm-dev env file restored byte-identical (`cmp` and sha256);<br>• no `crm-client001-*` container or network remaining;<br>• crm-app back on crm-net only, healthy, and serving `/` with the pre-test config hash;<br>• the beta directory metadata, file hashes and container IDs/StartedAt unchanged | `cleanup.json`, `beta-before.json` and `beta-after.json`; Tester and DevSecOps in BA |
 
 A skipped, unrun or screenshot-only check is **not PASS**.
 
 ## 7. Security and supply-chain controls
 
 - **Source of truth:**
-  - Git for dev, and a `--sha256`-anchored, verified release for beta;
+  - Git for dev;
+  - a `--sha256`-anchored, verified release for beta;
   - the transition tree is only an overlay of the candidate's own blobs (annex B5).
-- **Client code:**
-  - same-origin, plain hand-written AMD;
-  - no third-party JavaScript.
-- **Path safety:**
-  - `real_dir`, `owned_private` and `secure_dir` are reused;
-  - no recursion through a symlink;
-  - `--one-file-system` throughout;
-  - the reserved `modules/` is never touched.
+- **Client code:** same-origin, plain hand-written AMD, with no third-party JavaScript.
+- **Path safety:** `real_dir`, `owned_private` and `secure_dir` are reused; no recursion through a symlink; `--one-file-system`; the reserved `modules/` is never touched.
 - **Browser runner (annex B1–B4):**
-  - the official image is pinned by digest;
-  - offline, hash-locked wheels;
+  - the image is pinned by digest, with offline hash-locked wheels;
   - uid 65534, read-only rootfs, all capabilities dropped, `no-new-privileges`, default seccomp and AppArmor;
-  - no Docker socket, no host network;
-  - a per-run internal network with no host-side bridge address;
-  - isolation is proven by probe before any journey;
-  - full teardown afterwards.
+  - no Docker socket and no host network;
+  - a per-run internal network with no host-side bridge address, and isolation proven by probe before any journey.
+- **Isolation, stated precisely.** The browser has **no intended direct network path** to crm-db, beta, the host or external destinations, and the probe proves that for the listed targets. The **application** (crm-app) keeps its legitimate database connection. The design therefore does **not** prevent application-layer effects reached *through* crm-app, such as any data the synthetic test user can read or change through the CRM API. That is acceptable only because crm-dev holds synthetic data and the test users are synthetic.
+- **Vulnerability gate (CL-D5, annex B8).** The pinned image and wheels are scanned by the pinned scanner before first use. Material findings are a gate. The bundled Chromium is a pre-stable build, which is a known, recorded residual risk that needs explicit acceptance.
 - **No secrets or customer data:**
   - only synthetic crm-dev data and synthetic `@example.test` users;
   - credentials are passed by env file and never appear in argv or evidence;
   - gitleaks runs on the candidate, the snapshot and every evidence package.
-- **Open item:** vulnerability scanning of the runner image is CL-D5 (annex B8).
 
 ## 8. Roles, independent criteria and evidence paths
 
-| Role | PASS only if |
+| Role (this WO) | PASS only if |
 |---|---|
-| Engineer | §4 is implemented, and every test for AC1–AC5, AC4b, AC7, AC9 and AC11 exists and is mutation-sensitive. Nothing outside §4 changes. |
-| Auditor | The diff matches §4 and §5. The F1–F8 claims hold against the recorded upstream facts. The documentation is truthful. |
-| Tester | All ACs are evidenced on the **same unchanged candidate**. The unit-suite re-run on the PL snapshot passes. Its **own** AC6 verdict per journey comes from `verify_evidence.py`, the raw evidence and the trace (annex B6), and it may request one bounded repeat. |
-| DevSecOps | §7, AC1 and AC11 hold. The swap and recovery ordering is sound. Runner hardening and isolation evidence are in place (`identity.json`, `isolation.json`). There is no CSP finding and no secret. |
+| Engineer | §4 is implemented, and every test for AC1–AC5, AC4b, AC6a, AC7, AC9 and AC11 exists and is mutation-sensitive. Nothing outside §4 changes |
+| Auditor | The diff matches §4 and §5. F1–F12 hold against the recorded upstream facts. The documentation is truthful |
+| Tester | AC1–AC5, AC4b, AC6a and AC7–AC11 are evidenced on the **same unchanged candidate**, and the unit-suite re-run on the PL snapshot passes. AC6b and AC12 are **not** assessed here; they belong to CRM-CLIENT-001-BA |
+| DevSecOps | §7, AC1 and AC11 hold. The swap and recovery ordering is sound, and the runner hardening in the source is sound. This review happens **before** any root execution of `deploy_custom.sh` (sequence S2) |
 
-- **Engine records:** `/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-CLIENT-001/`. They hold only `REPORT.md` and `prompts/*.md`.
+- **Engine records:** `/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-CLIENT-001/`, holding only `REPORT.md` and `prompts/*.md`.
 - **PL evidence:** `/home/forgev2-pl/crm-evidence/CRM-CLIENT-001/`, indexed by `CRM-CLIENT-001.sha256`.
-- **Specialist-readable scratch:** `/srv/CRM/worktrees/.forge-scratch/CRM-CLIENT-001/`, which holds:
-  - `snapshot-<sha12>/` (§6b pattern of CRM-TEST-001);
-  - `diff-<sha12>/`;
-  - `browser-<sha12>-<run>/`.
-- **Execution limit:** four executions per specialist, including the first. This is a hard maximum, and exhaustion is FAIL with escalation to CGPT.
+- **Specialist-readable scratch:** `/srv/CRM/worktrees/.forge-scratch/CRM-CLIENT-001/`, holding `snapshot-<sha12>/` (§6b pattern of CRM-TEST-001) and `diff-<sha12>/`.
+- **Operator evidence store** (annex B6), used by the BA WO: `/srv/CRM/evidence/CRM-CLIENT-001/<run>/`. It is root-owned, group `forgev2-pl`, directories 0750 and files 0640, and it is created at sequence S3, not now.
+- **Execution limit:** four executions per specialist, including the first. Exhaustion is FAIL with escalation to CGPT. CRM-CLIENT-001-BA has its own counters but **cannot change any §4 path** (CL-D7), so it is never a bypass.
 
-## 9. Real-browser execution plan
+## 9. Assurance sequence (non-circular; A1)
 
-This is annex B in full:
-- B1: the component;
-- B2: the dependency lock and the offline installation;
-- B3: the hardened invocation;
-- B4: network isolation and teardown;
-- B5: the D0–D5 deployment order and assertions;
-- B6: the evidence package and the route to the Tester;
-- B7: failure injection.
+| Step | Actor | Action | Exit condition |
+|---|---|---|---|
+| **S1** | Engineer (this WO) | Builds the candidate with unit tests, deploy failure and recovery tests, the runner and the verifier | Engineer `completed`, then `forge-commit` |
+| **S2** | Auditor, Tester and DevSecOps (this WO), **independently** and in the engine's single concurrent round on the unchanged candidate | Auditor: diff and facts. Tester: offline ACs. DevSecOps: static security review, including `deploy_custom.sh` **before root ever runs it** | PL `DELIVERED` (all three PASS on the same candidate `C`). Otherwise correction rounds, or ESCALATED |
+| **S3** | Operator (Rogue as root, under this approval) | **Pre-root verification gate OP-V** (annex B9.1). Checks: the exact archive of `C` from two sources; the `deploy_custom.sh` blob; the root-execution boundary; a fresh synthetic backup with a restore dry check; the recovery procedure; the CL-D5 scan | Every OP-V item passes, or the run is BLOCKED |
+| **S4** | Operator | Controlled synthetic browser run D0–D5 (annex B4–B7), with cleanup always run (B9). The package is sealed in the evidence store | `SHA256SUMS` sealed; `cleanup.json` all-true. Otherwise the run FAILS (no BA dispatch) |
+| **S5** | Tester (**CRM-CLIENT-001-BA**) | Independently evaluates the immutable package with `verify_evidence.py`, the raw files and the trace (AC6b, AC12). May request one bounded repeat | Tester PASS |
+| **S6** | DevSecOps (**BA**) | Reviews the final unchanged candidate against the *actual* security evidence: `identity.json`, `isolation.json`, the CSP log, the scan report and `cleanup.json` | DevSecOps PASS |
+| **S7** | PL (BA), then Rogue | BA `DELIVERED`, then Rogue validates the PL JSON and the ledger and returns **READY_FOR_CGPT** | Never before S5 and S6 PASS |
 
-Only the operator acts on Docker, crm-dev or the network, and only after G1–G5. Beta is never a target.
+**Engine notes.**
+- In both WOs the engine runs Auditor, Tester and DevSecOps concurrently on one candidate. Each reviewer is independent and sees no other reviewer's findings, so the FOUNDRY order Engineer → Auditor → Tester → DevSecOps is met in substance: every browser-dependent verdict (S5, S6) comes after the evidence exists.
+- The BA Auditor checks the evidence-record commit (annex `CRM-CLIENT-001-BA.md`).
+- **Operator testing is not a specialist PASS.** S3 and S4 produce evidence only.
 
-## 10. Repository and workspace
+## 10. Repository and workspace (exact base; A3, CL-D8)
 
-- **Canonical checkout and start:** `/srv/CRM/main`, then `forge-start --wo CRM-CLIENT-001 --base main --known-commit <docs-merge SHA of this approved version>`.
+- **Start command:** `forge-start --wo CRM-CLIENT-001 --repo infosec-estateresearch/CRM --host DOCKER1 --root /srv/CRM/main --worktrees /srv/CRM/worktrees --base main --known-commit 6e1766980e24d781d498727d4fe5db43cdeadbb7`.
+- **Exact-base gate EB** (Orchestrator, read-only; any failure means engineering dispatch is **BLOCKED**, with no workaround):
+  - **EB1.** This WO's docs PR is merged at an exact merge SHA `M`. GitHub compare `6e176698…M` lists only the approved `work-orders/CRM-CLIENT-001*.md` paths, with `behind_by = 0`.
+  - **EB2.** GitHub `main` equals `M`. If it has advanced further, every commit after `M` is reviewed, and any non-docs change is a stop for CGPT.
+  - **EB3.** The PL's local `main` equals `6e176698…`. Its tracked and untracked tree is clean. It is on branch `main`, with the origin `git@github.com:infosec-estateresearch/CRM.git` for fetch and push, no `url.*` rewrites, no `core.hooksPath` and no fsmonitor. Inspection is read-only, with `GIT_OPTIONAL_LOCKS=0`.
+  - **EB4.** No `forge/CRM-CLIENT-001` branch, worktree, scratch directory or ledger exists, and no other WO is in flight.
+  - **EB5.** The WO file given to the PL is byte-identical (sha256) to the blob of this path at `M`. It is placed outside the repository, readable by `forgev2-pl`.
+  - **EB6.** `forge-start` prints `base_sha = 6e1766980e24d781d498727d4fe5db43cdeadbb7`, and the committed ledger later shows the same value.
+- **Why the base is `6e176698` and not `M`.**
+  - The approved text can only name a commit that already exists when it is approved (WO contract, *Approval provenance*).
+  - The installed engine cannot move the PL's `main` to `M` (F11), and root must not do it on the PL's behalf (`ROGUE.md` §A2/§H).
+  - EB1 proves that `M` differs from the base only by this WO's own documents, so the engineering tree is exactly the approved one.
+  - The candidate's later PR to `main` touches disjoint paths.
+  - FV2-SYNC-001 is the permanent fix. Until it is installed, CL-D8 applies.
 - **Worktree:** `/srv/CRM/worktrees/CRM-CLIENT-001`, on branch `forge/CRM-CLIENT-001`.
 - **Specialists:** run as `forgev2-pl` under the engine sandbox and use no Git; the PL provides snapshots.
-- **Engineer-authored code runs** only in the sandbox, as `nobody` on the host from `git archive` copies, or as uid 65534 inside the browser container. It never runs as root or as the PL.
+- **Engineer-authored code** runs only in the sandbox, as `nobody` on the host from `git archive` copies, or as uid 65534 inside the browser container. It never runs as root or as the PL, with one exception: the reviewed `scripts/deploy_custom.sh` is run by root from the verified archive at S3–S4 (G2).
 
 ## 11. Entry gates, stop conditions and reporting
 
 | Gate | Requirement | State |
 |---|---|---|
-| G1 | CGPT exact-version approval of v1.1 (path and commit) on Issue #59 | open |
-| **G2** | **Sandbox entry gate for CRM-CLIENT-001.** See the assessment below this table. | **evidence ready; CGPT acceptance open** |
-| G3 | **Browser component.** Annex B1/B2 records the selection. Open items:<br>• CGPT acceptance of the register entry;<br>• CL-D5 (scanning) decided;<br>• at execution, the operator verifies the RepoDigest and config ID after the pull. | open |
-| G4 | Docs merge of v1.1. Its merge SHA becomes `--known-commit`. | open |
-| G5 | **Dispatch and run preflight:**<br>• main is unchanged or compatibly advanced;<br>• crm-dev is synthetic and backed up;<br>• the browser network subnet is unused;<br>• the beta metadata snapshot (`0:0 700 1794416166` at preparation) is recorded and re-checked after the run. | open |
+| G1 | CGPT exact-version approval of v1.2 (path and commit) on Issue #59, covering this WO, annex B and the BA template | open |
+| G2 | Sandbox entry gate; see the assessment below | evidence ready; CGPT acceptance open |
+| G3 | **Browser component and vulnerability gate (CL-D5).**<br>• CGPT accepts the two register entries.<br>• The CL-D5 method is approved.<br>• At S3 the scan runs, with no unresolved material finding, or an explicit recorded acceptance of the Chromium residual (annex B8.4).<br>• The RepoDigest and config ID are verified after the pull | open |
+| G4 | Exact-base gate EB1–EB6 (§10) | open (EB3 and EB4 pass today) |
+| G5 | **Run preflight:**<br>• crm-dev is synthetic and backed up;<br>• the browser subnet is unused;<br>• beta snapshot `beta-before.json` is taken (at preparation: `0:0 700 1794416166`);<br>• no stale `crm-client001-*` objects exist | open (S3) |
+| G6 | Pre-root verification gate OP-V (annex B9.1) | open (S3) |
+| G7 | Cleanup verification (annex B9.3), which is a FAIL, not a warning | open (S4) |
 
-**G2 assessment for CRM-CLIENT-001** (re-verified on 2026-11-16, and unchanged since the CRM-TEST-001 annex §7):
+**G2 assessment for CRM-CLIENT-001** (re-verified 2026-11-16):
 
 | Component | Identity |
 |---|---|
-| ForgeV2 | `63b6b8ab6c6d3c12d1ef3f0aeabe2ca22fbefb82`, with a clean tracked tree. The only ignored entry is the accepted `plugin/lib/__pycache__/forgelib.cpython-313.pyc`, sha256 `1e456d81…52c1`. |
+| ForgeV2 | `63b6b8ab6c6d3c12d1ef3f0aeabe2ca22fbefb82`, with a clean tracked tree. The only ignored entry is the accepted `plugin/lib/__pycache__/forgelib.cpython-313.pyc` |
 | Claude | 2.1.317, sha256 `eb224419e344575faa4a1f39b290b649425a10cd5ee2ef1d003480cd9ae57eb0` |
 | bubblewrap | 0.12.0-1~deb13u1, sha256 `573236e5328ac2ebb08f59ae3a9805b4f8d12bdef14be8af4450d5463294985f` |
 | `forgelib.py` | `6a7d587a79da13de733dc41a97e6f499c163062151175acda74918ca19f6dc55` |
 
-**What carries over.** The 2026-11-09 CRM-001 acceptance (`maff0000/forgev2#5` comment 6746699026) and the CRM-TEST-001 acceptance are **specific to those WOs**. They are not engine certification: ENGINE-SANDBOX-TEST-001 (`forgev2#5`) is still **open**.
+- **What carries over.** The 2026-11-09 CRM-001 acceptance (`maff0000/forgev2#5` comment 6746699026) and the CRM-TEST-001 acceptance are **specific to those WOs**. They are not engine certification: ENGINE-SANDBOX-TEST-001 (`forgev2#5`) is still **open**.
+- **Applicability:**
+  - Specialists need file editing, Python and shell in the sandbox, plus reads of the PL snapshot and (in BA) the operator evidence store.
+  - No sandbox network, Docker or Git access is requested.
+- **New exposure.** Root runs the Engineer-edited `deploy_custom.sh` against crm-dev. Mitigations:
+  - it runs only from the verified archive of `C`;
+  - it runs only after the S2 Auditor and DevSecOps PASS and the OP-V gate;
+  - it runs only on synthetic crm-dev;
+  - AC4/AC4b cover it.
 
-**Applicability to this WO:**
-- Specialists need only file editing, Python and shell in the sandbox, and reads of the PL snapshot and evidence. This is the same capability set CRM-TEST-001 used.
-- No sandbox network, Docker or Git access is requested.
-- The browser, Docker and crm-dev steps are orchestrator-run outside the sandbox (annex B).
+  Engineer browser code runs only in the hardened runner as uid 65534.
+- **Limitations:**
+  - The sandbox's Git read isolation has not been established.
+  - Root-owned host files appear as uid 65534 inside the sandbox.
 
-**New exposure compared with CRM-TEST-001:**
-- The Engineer edits `scripts/deploy_custom.sh`, which the operator later runs **as root** against crm-dev. This is mitigated as follows:
-  - it runs only from a `git archive` copy of the reviewed candidate;
-  - it runs only after four independent PASS verdicts on that candidate;
-  - it runs only against synthetic crm-dev;
-  - the AC4/AC4b tests and the DevSecOps review cover it;
-  - this matches the existing practice for `deploy_custom.sh` (CRM-001/007).
-- The Engineer also authors browser code. That code runs inside the hardened runner as uid 65534 (annex B3).
-
-**Remaining limitations:**
-- The sandbox's Git read isolation has not been established.
-- The sandbox maps root-owned host files to uid 65534 (observed).
-- Both are tolerated, because specialists are told not to use Git and are given snapshots. Any observed Git use by a specialist is a recorded deviation.
+  Both are tolerated because snapshots are used. Any observed Git use by a specialist is a recorded deviation.
 
 **Stop immediately** for any of the following:
 - a need outside §4, or any write to `client/custom/modules`;
-- a failed security, isolation or entry gate, including an unexpected probe success;
+- a failed security, isolation, scan, entry or cleanup gate, including an unexpected probe success;
 - a digest or hash mismatch;
 - a candidate change after review;
 - any contact with beta, Salesforce or real data;
 - an exhausted execution limit;
 - unverifiable EspoCRM 10.0.12 behaviour.
 
-After four PASS verdicts on the same candidate, the PL returns READY_FOR_CGPT with the head, the patch sha256 and the evidence index. **No beta deployment.**
+**Reporting.**
+- This WO's PL `DELIVERED` is **not** READY_FOR_CGPT for acceptance or merge. Rogue reports it to CGPT as *"S2 complete; candidate `C` frozen; proceeding to S3"*.
+- The PR of `forge/CRM-CLIENT-001` is labelled *do not merge: assurance continues in CRM-CLIENT-001-BA*.
+- READY_FOR_CGPT for CRM-CLIENT-001 is returned only at S7. **No beta deployment.**
 
 ## 12. Decisions
 
 | ID | Decision | Status |
 |---|---|---|
-| CL-D1 | CRM-owned client source lives exclusively under `client/custom/src/`. `client/custom/modules/` is never overwritten or managed. The existing secured deploy and release processes are kept. | **Decided** (CGPT, 2026-11-16) |
-| CL-D2 | Real-browser component: the official Playwright Python image, pinned per annex B1, with dependencies per B2, hardened per B3 and isolated per B4. | **Selected by the PL** per the CGPT preference. CGPT acceptance of the register entry is open (G3) |
-| CL-D3 | Orchestrator-run real-browser tests, followed by independent Tester verification, are accepted for this WO **only** with the annex B6 evidence package and route. The Tester issues its own verdict and may request one bounded repeat. A screenshot alone is insufficient. | **Decided** (CGPT, 2026-11-16), with conditions incorporated |
-| CL-D4 | Baking `client/custom` into a `crm-espocrm` image is PBI-016 work and not this WO. No PBI-016/017 acceptance is claimed. | Recorded |
-| CL-D5 | Vulnerability scanning of the runner image: approve a pinned scanner, or accept the risk (annex B8). | **Open** (CGPT) |
-| CL-D6 | Canary transition uses committed fixtures overlaid from one candidate, not two ordered commits. Reason: execution-limit economy; every deployed byte is still a blob of `F` (annex B5). | PL design under the A3 options |
+| CL-D1 | CRM-owned client source lives exclusively under `client/custom/src/`. `client/custom/modules/` is never overwritten or managed. The existing secured deploy and release processes are kept | **Decided** (CGPT, 2026-11-16) |
+| CL-D2 | Real-browser component: the official Playwright Python image, pinned per annex B1, with dependencies per B2, hardened per B3 and isolated per B4 | Selected; CGPT acceptance of the register entry open (G3) |
+| CL-D3 | Operator-run real-browser tests, followed by independent Tester verification, with the annex B6 package and route. The Tester issues its own verdict and may request one bounded repeat. A screenshot alone is insufficient | **Decided** (CGPT, 2026-11-16) |
+| CL-D4 | Baking `client/custom` into an image is PBI-016 work, not this WO | Recorded |
+| CL-D5 | **Vulnerability assessment:**<br>• Grype `v0.121.0`, pinned by release digest and verified with `gh release verify-asset`;<br>• run non-root, with no Docker socket (`registry:` source by digest);<br>• the four wheels scanned as extracted data;<br>• triage rules and the Chromium residual-risk decision per annex B8 | **Proposed** (CGPT; Chromium residual acceptance needs CGPT and, as material risk, Matt) |
+| CL-D6 | Canary transition by committed fixtures overlaid from one candidate (annex B5) | PL design |
+| **CL-D7** | **Two-WO assurance split.**<br>• CRM-CLIENT-001 does S1–S2 (build, plus offline Auditor, Tester and DevSecOps).<br>• **CRM-CLIENT-001-BA** does S5–S7. It is based on `forge/CRM-CLIENT-001` at the delivered candidate, and its only change is committing the sealed evidence record. Its Tester and DevSecOps assess the real-browser evidence.<br>• BA may not change any §4 path; a code defect found in BA is ESCALATED to CGPT, never corrected in BA.<br>• Its final exact version, which names `C` and the evidence manifest sha256, needs its own CGPT approval at S4 completion.<br>• Reason: F10; no engine change, no invented verdict and no counter reset | **Proposed** (CGPT) |
+| **CL-D8** | **Exact base until FV2-SYNC-001 is installed:**<br>• the engineering base is the pinned `6e176698…`;<br>• the docs merge `M` must be proven docs-only (EB1–EB6);<br>• no root, `runuser` or other Git mutation of the PL checkout.<br>If CGPT requires the base to be `M` itself, engineering dispatch is **BLOCKED on FV2-SYNC-001** | **Proposed** (CGPT) |
+
+## 13. Findings and corrections (v1.1 → v1.2)
+
+| Finding | Source | Correction |
+|---|---|---|
+| A1: circular sequencing (four PASS before browser, while Tester PASS needs browser evidence) | CGPT | §9 S1–S7; F10; CL-D7; companion WO `CRM-CLIENT-001-BA.md`; AC6 split into AC6a (offline, this WO) and AC6b (BA) |
+| A2: `playwright.__version__` does not exist | CGPT, confirmed by F12 | AC11 and annex B2.3: `importlib.metadata.version("playwright") == "1.64.1"`, a single distribution located under `/tmp/pydeps`, and independent browser version and revision checks |
+| A3: exact base and stale PL `main` | CGPT, F11 | §10 EB1–EB6; CL-D8; header `KNOWN_COMMIT`. The v1.1 G4 ("docs-merge SHA becomes `--known-commit`") is removed |
+| A4: CL-D5 | CGPT | Annex B8 (scanner, provenance, data source, method, triage, Chromium residual); G3 |
+| A5: cleanup and recovery | CGPT | Annex B9 (always-run cleanup, verification, closure image removal, manual recovery); AC12; G7; §7 precise isolation wording |
+| P1: `BROWSER: yes (...)` header would force a Tester-driven browser, giving INCONCLUSIVE then ESCALATED | PL, against `SKILL.md` §3 | Header line removed; header note added |
+| P2: the finding key `browser-rerun:<journey>:<reason>` is invalid (the ledger's `KEY[:severity]` syntax and `SLUG_RE` forbid `:`) | PL, against `forgelib.py` | Annex B6.4: key `browser-rerun-<journey>`, with the reason in `--note` |
+| P3: evidence route into `.forge-scratch/CRM-CLIENT-001/` cannot serve a later WO, and a WO's scratch must not exist before its `forge-start` | PL, against `forge-start` | Annex B6: root-owned, read-only operator evidence store `/srv/CRM/evidence/CRM-CLIENT-001/<run>/` |
+| P4: "four independent PASS verdicts" miscounts (there are three reviewers) | PL | G2 text corrected |
