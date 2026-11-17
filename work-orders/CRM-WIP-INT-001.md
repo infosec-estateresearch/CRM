@@ -4,13 +4,14 @@ HOST: DOCKER1
 ROOT: /srv/CRM/main
 WORKTREES: /srv/CRM/worktrees
 BASE: main
-KNOWN_COMMIT: 9ea7b725b7d8a8ddfc330a68510de65d184de089
+KNOWN_COMMIT: 6e1766980e24d781d498727d4fe5db43cdeadbb7
 
 # CRM-WIP-INT-001: one CRM Account displaying WIP data read from the existing WIP application
 
-- **Version:** v1.0 **DRAFT**, 2026-11-17. **Not approved. No dispatch.** Dispatch needs a CGPT exact-version approval naming this path and the commit that contains it, relayed through Matt and recorded on Issue #71.
+- **Version:** v1.1 **DRAFT**, 2026-11-17. It applies CGPT's three corrections C1–C3 (PR #72 decision, 2026-11-17) to v1.0 (`194f0e2b94041b2a7922cfd6cfae8cf595357a42`). **Not approved. No dispatch.** Dispatch needs a CGPT exact-version approval naming this path and the commit that contains it, relayed through Matt and recorded on Issue #71.
 - **Issue:** https://github.com/infosec-estateresearch/CRM/issues/71. Related: #70 (security hygiene, not a dependency).
-- **Authority:** the CGPT scope approval of 2026-11-17 ("approved to prepare"), and `docs/architecture/crm-wip-integration-amendment.md` (**must be approved and merged first**, gate G1).
+- **Authority:** the CGPT scope approval of 2026-11-17 ("approved to prepare"), and `docs/architecture/crm-wip-integration-amendment.md` (**approved by CGPT** at `194f0e2b…`, SHA-256 `7838cf44bf3330e50d42dfe958f26ff84088c50db5a508579f44338da8f15734`, gate G1; it merges with this PR and is unchanged here).
+- **Header note (base).** `KNOWN_COMMIT` is the PL's actual local `main`, which is the engineering base (§8). It is **not** the GitHub `main` at the docs merge. The two differ only by documents (§8, EB1).
 - **Header note.** There is no `BROWSER: yes` line. The sandboxed Tester has no network to crm-dev. The one browser check (P8) is run by the operator or Matt. The CRM-CLIENT-001R2 harness and its D0–D5 sequence are **not used**.
 - **Prepared by:** Rogue (Orchestrator). No implementation and no dispatch.
 
@@ -25,7 +26,7 @@ On synthetic crm-dev, an authorised user opens one synthetic Account and sees it
 | **W** (WIP side) | `infosec-estateresearch/WIP`, base `91b2af19877b498ed307ee9f1218b3243b2b60ba` | New files only: the read-only endpoint, its own small app, tests, and three variable names. No existing WIP file other than `.env.example` changes |
 | **B** (CRM side) | this repository | Read loader, two fields, panel, role scope, optional env pass-through, tests, one operator document |
 
-**Dispatch scope.** ForgeV2 identifies one repository per WO and its PL can push only to this one. **A ForgeV2 dispatch of this WO delivers Part B only.** Part W is specified here and is delivered under gate **G4**. Part B is tested against a stub of the contract, so the two parts can proceed independently. The proof (§5) needs both.
+**Dispatch scope.** ForgeV2 identifies one repository per WO and its PL can push only to this one. **A ForgeV2 dispatch of this WO delivers Part B only.** Part W is specified here and is delivered by the WIP Helm lane (gate **G4**, T2 selected by CGPT): no new ForgeV2 checkout, credential or access. Part B is tested against a stub of the contract, so the two parts can proceed independently. The proof (§5) needs both.
 
 **Reference material (read-only).** At dispatch the operator provides `/srv/CRM/wo/CRM-WIP-INT-001/reference/wip-91b2af19/`: a `git archive` of WIP's `migrations/` and `.env.example` at the pinned base, with its sha256 recorded in the dispatch record. The Engineer writes the synthetic seed from it and edits nothing in it. No other WIP source, no environment file and no WIP data is provided.
 
@@ -45,10 +46,12 @@ Behaviour:
 3. **Database:** host, port and database name reuse the existing WIP settings. The user and password come **only** from `WIP_API_DB_USER` and `WIP_API_DB_PASSWORD`. The API never connects as `wip_app`. `connect_timeout` 2 s, `read_timeout` 3 s, a read-only session.
 4. **Queries (the only SQL, parameterised, the contract views only):**
    - `SELECT salesforce_account_id, company_name FROM v_eric_wip_company_summary WHERE salesforce_account_id = %s`
-   - `SELECT case_reference, case_name, case_type, status, opened_at, current_wip_value, current_fees_invoiced, current_actual_yield, current_estimated_yield, financial_as_of FROM v_eric_wip_current_cases WHERE salesforce_account_id = %s ORDER BY current_wip_value DESC, wip_case_id LIMIT 51`
-   - The 51st row only sets `truncated` and is dropped. No totals, no arithmetic, no float.
-5. **Response:** exactly the keys in the amendment §5. Amounts are `format(Decimal, "f")` strings, `null` stays `null`, dates are ISO. **Errors** are exactly 401, 422, 404 (firm absent from the company view; zero cases is a 200), 503 (any database error; the body is generic). No exception text, SQL or token is ever returned or logged.
-6. **Unit tests** (existing `TestClient` and fake-connection pattern): missing, wrong and malformed tokens; the order (a bad id with no token gives 401); 422; 404; 200 with zero cases; 200 with mixed null and non-null amounts as strings; truncation at 51; 503 on a database error; no extra keys; the token never appears in any response or captured log; the documentation and schema routes give 404; POST gives 405; the connection never uses the `wip_app` settings. **The unit tests cannot prove "latest observation per case". The proof does (P3).**
+   - `SELECT wip_case_id, case_reference, case_name, case_type, status, opened_at, current_wip_value, current_fees_invoiced, current_actual_yield, current_estimated_yield, financial_as_of FROM v_eric_wip_current_cases WHERE salesforce_account_id = %s ORDER BY current_wip_value DESC, wip_case_id LIMIT 51`
+   - `SELECT COUNT(*) AS n, COUNT(DISTINCT wip_case_id) AS d FROM v_eric_wip_current_cases WHERE salesforce_account_id = %s` (the integrity check in item 5)
+   - The 51st row only sets `truncated` and is dropped. `wip_case_id` is used internally and is **never returned**. No totals, no arithmetic, no float.
+5. **Ambiguity is rejected (C2).** The view can return more than one row for a case when two of its financial observations share the latest `as_of_date`. If `n` differs from `d`, or the fetched rows repeat a `wip_case_id`, the API answers **409** with the generic body `{"error":"conflict"}` for the **whole request**: no cases, no amounts. It does not duplicate the case, drop a row, or pick between observations (no selection rule is invented). It logs one warning naming only the affected `wip_case_id` values (at most 10). No schema, view or business-logic change.
+6. **Response:** exactly the keys in the amendment §5. Amounts are `format(Decimal, "f")` strings, `null` stays `null`, dates are ISO. **Errors** are exactly 401, 422, 404 (firm absent from the company view; zero cases is a 200), 409 (item 5) and 503 (any database error; the body is generic). The amendment §5 lists the first four of these. The CRM maps any other failure to "WIP unavailable" (amendment §5), so 409 needs no new panel status. No exception text, SQL or token is ever returned or logged.
+7. **Unit tests** (existing `TestClient` and fake-connection pattern): missing, wrong and malformed tokens; the order (a bad id with no token gives 401); 422; 404; 200 with zero cases; 200 with mixed null and non-null amounts as strings; truncation at 51; **one negative test (C2): a firm whose view returns two rows for the same `wip_case_id` gets 409 with exactly `{"error":"conflict"}`, no case data, and no `wip_case_id` in the body;** 503 on a database error; no extra keys; the token never appears in any response or captured log; the documentation and schema routes give 404; POST gives 405; the connection never uses the `wip_app` settings. **The unit tests cannot prove "latest observation per case" or that the real view returns one row per case. The proof does (P3).**
 
 ## 4. Part B: CRM side
 
@@ -72,16 +75,19 @@ Behaviour:
 
 **Loader behaviour (all server-side):**
 
-1. **No grant, no call.** If the user lacks the `WipSummary` scope, or the Account has no valid `sfId`, the loader sets the fields to nothing and makes **no outbound request**.
-2. The URL and token come only from the two env names. A missing or empty value gives "WIP unavailable". The `sfId` is checked against `^[A-Za-z0-9]{18}$` before it goes into the path. Only `http` and `https`. **No redirects.** The body is capped at 256 KiB. Timeouts 2 s and 3 s.
+1. **Authorisation first, then the Account (C1).**
+   - **No grant:** a user without the `WipSummary` scope (any role that is not Admin and does not grant it) gets **no WIP fields at all**, so the panel stays hidden. The loader makes **no outbound request**, whatever the Account holds.
+   - **Granted, no valid `sfId`:** an authorised user (Admin, or a role that grants the scope) who opens an Account whose `sfId` is empty or fails `^[A-Za-z0-9]{18}$` gets `wipStatus` = "No Salesforce ID on this Account" (the amendment §5 wording) and an empty `wipCases`. The loader makes **no outbound request**.
+   - Both rules hold on every read path that runs the loader.
+2. The URL and token come only from the two env names. A missing or empty value gives "WIP unavailable". Only a valid `sfId` (rule 1) ever reaches the path. Only `http` and `https`. **No redirects.** The body is capped at 256 KiB. Timeouts 2 s and 3 s.
 3. The reply must be a valid JSON object with exactly the contract keys and types, with at most 50 cases and bounded string lengths. Anything else is "WIP unavailable". Output is plain text (no HTML).
-4. Every failure (timeout, refusal, 401, 404, 422, 5xx, bad JSON, wrong shape) becomes a status. **Nothing is thrown to the page.** A log line may name the failure class and HTTP status only. It never holds the token, the URL, the sfId or the body.
+4. Every outcome other than a valid 200 becomes a status: 404 gives "Firm not found in WIP"; every other failure (timeout, refusal, 401, 409, 422, 5xx, bad JSON, wrong shape) gives "WIP unavailable". **Nothing is thrown to the page.** A log line may name the failure class and HTTP status only. It never holds the token, the URL, the sfId or the body.
 5. Two read-only fields only. No write path, no hook and no stored copy.
 
 **Part B tests (`test_wip_panel.py`, precedent `test_activities.py` and `test_access_policy.py`, PHP run when present):**
 
 - Metadata: valid JSON; the loader is registered; both fields are `readOnly` and `notStorable`; the panel names only existing fields; the scope has the core shape; every role lists `WipSummary` as `false`.
-- Loader, using a stub server on loopback and stubs for the EspoCRM classes it touches: each status in the amendment §5 from the matching reply; no outbound request without the scope or without a valid `sfId` (the stub records zero requests); no token in output or logs; no redirect followed; oversize, malformed and wrong-shape replies; a timeout. **Show that the PHP tests actually ran. A skip does not count.**
+- Loader, using a stub server on loopback and stubs for the EspoCRM classes it touches: each status in the amendment §5 from the matching reply: 404 gives "Firm not found in WIP", and **409**, 401, 422 and 5xx give "WIP unavailable"; **C1, both cases: (i) a user without the scope, with a valid `sfId`, with an empty `sfId` and with a malformed `sfId` (15 characters, 19 characters, a non-alphanumeric character), gets no WIP fields and the stub records zero requests; (ii) an authorised user with an empty or malformed `sfId` gets "No Salesforce ID on this Account" and the stub records zero requests;** no token in output or logs; no redirect followed; oversize, malformed and wrong-shape replies; a timeout. **Show that the PHP tests actually ran. A skip does not count.**
 
 ## 5. Proof (operator, synthetic, disposable, transient)
 
@@ -95,7 +101,7 @@ No permanent WIP service is started. No beta, production, Salesforce or real dat
 | P4 | Start the Part W app transiently, bound to the crm-net gateway address (read at run time, never written to Git), with a random token. Prove that no token gives 401 and that the documentation routes give 404 | |
 | P5 | Operator adds the two names to the crm-dev env file (record before and after hashes), recreates crm-app with `scripts/up.sh dev`, then runs `scripts/deploy_custom.sh dev` and `scripts/provision_access.py` | the crm-app to WIP network path works, or **BLOCKED** |
 | P6 | Create synthetic Accounts: S1, S2, an id absent from WIP (S3), and one with no `sfId` (S4). Create a temporary role with `WipSummary: true` and a user U1 on it. Use existing Admin, an ER Staff user U2 (explicit false) and a user U3 on a role that omits the scope | |
-| P7 | **REST checks.** (a) Admin and U1 on S1: status available, the expected cases, latest-period values, decimal strings, B's blanks not zero, no case C or D. (b) S2 gives "No current WIP cases"; S3 "Firm not found in WIP"; S4 "No Salesforce ID". (c) U2 and U3 on S1: HTTP 200, the WIP fields empty, **and the WIP API log shows no request**. (d) Stop the API: Admin on S1 gets HTTP 200, "WIP unavailable", all other fields intact. Restart: recovered. (e) The token is absent from every Account response, `docker logs` and the Apache and EspoCRM logs. (f) No WIP column in `account`; the fields are absent from the list, export and audit. (g) Admin saves S1: it succeeds and sends nothing to WIP | the matrix |
+| P7 | **REST checks.** (a) Admin and U1 on S1: status available, the expected cases, latest-period values, decimal strings, B's blanks not zero, no case C or D. (b) S2 gives "No current WIP cases"; S3 "Firm not found in WIP". **(C1)** Admin and U1 on S4 (no `sfId`) get "No Salesforce ID on this Account", **and the WIP API log shows no request for S4**. (c) **(C1)** U2 and U3 on S1 **and on S4**: HTTP 200, no WIP fields, **and the WIP API log shows no request for either**. (d) Stop the API: Admin on S1 gets HTTP 200, "WIP unavailable", all other fields intact. Restart: recovered. (e) The token is absent from every Account response, `docker logs` and the Apache and EspoCRM logs. (f) No WIP column in `account`; the fields are absent from the list, export and audit. (g) Admin saves S1: it succeeds and sends nothing to WIP | the matrix |
 | P8 | **One browser check** (operator or Matt, one session, a real browser): Admin opens S1 and sees the panel and cases; U2 opens S1 and sees no panel; with the API stopped Admin sees the bounded status and the Account page works. Screenshots go to the restricted store | |
 | P9 | Regression: the unit suite, the access-policy and compose-policy tests, and the existing acceptance tests | pass counts |
 | P10 | **Teardown:** stop the API; remove the scratch database, scratch directory and temporary role and users; delete the synthetic Accounts; restore the crm-dev env file to its recorded hash and recreate crm-app. Confirm no leftovers | before and after state |
@@ -114,17 +120,35 @@ No permanent WIP service is started. No beta, production, Salesforce or real dat
 | A6 | P7 (a) to (g) all as stated, and P8 as stated | proof and restricted evidence |
 | A7 | P9 regression passes. P10 leaves no leftovers and the crm-dev env file is back to its recorded hash | proof |
 | A8 | `gitleaks` shows 0 findings on the candidate, on the Part W diff and on the evidence store | scans |
+| A9 | The exact-base gate EB1–EB7 (§8) passed before dispatch, and the committed ledger shows `base_sha` `6e1766980e24d781d498727d4fe5db43cdeadbb7` | dispatch record, ledger |
 
 ## 7. Gates
 
 | Gate | Requirement | State |
 |---|---|---|
-| G1 | CGPT exact-version approval of the amendment; merged | open |
-| G2 | CGPT exact-version approval of **this** WO; base re-pinned and EB1–EB6 re-run at approval | open |
+| G1 | CGPT exact-version approval of the amendment; merged | **approved** (CGPT, 2026-11-17, at `194f0e2b…`, file SHA-256 `7838cf44…`); merge with PR #72 |
+| G2 | CGPT exact-version approval of **this** WO (v1.1: C1–C3 applied) and the exact-base gate (§8) | open |
 | G3 | PO-W1 is **not** a gate. This WO grants no role. Admin only until PO-W1 is decided | noted |
-| **G4** | **Delivery of Part W (CGPT decision).** **T1:** a second ForgeV2 identity `CRM-WIP-INT-001-W` with `REPO: infosec-estateresearch/WIP`. It needs a clean WIP clone owned by the PL (not the live installation) and a push credential for that repository, which are new access Matt must grant. **T2 (recommended):** the WIP lane (Helm) implements §3 as a WIP-repo branch and PR at the pinned base, commits with the Helm identity, and does not merge. The Part W tests need `fastapi`, its test client and `pymysql` in the interpreter that runs them | open, needs CGPT |
+| **G4** | **Delivery of Part W: T2 selected** (CGPT, 2026-11-17). The WIP Helm lane implements §3 in the WIP repository at base `91b2af19877b498ed307ee9f1218b3243b2b60ba` and does not merge. It needs its own **separately recorded, bounded WIP Work Order and CGPT approval** before any Part W work starts (this WO's §3 is its normative content; it is not drafted here). Independent tests and review are required (the WIP WO names who does them). The WIP PR stays unmerged pending acceptance. No new ForgeV2 checkout, credential or access. The Part W tests need `fastapi`, its test client and `pymysql` in the interpreter that runs them. **Part B dispatch does not wait for G4; the proof (§5) does** | selected; the WIP WO is open |
 | G5 | Proof prerequisites: P2 migrations apply on the pinned MariaDB image and P5 the network path works | checked at proof time |
+| G6 | **Exact-base gate EB1–EB7 (§8)** passes before Part B dispatch | open |
 
-## 8. Stop conditions
+## 8. Exact-base gate (C3, CL-D8)
+
+**Facts checked on 2026-11-17 (read-only).** The PL's local `main` is `6e1766980e24d781d498727d4fe5db43cdeadbb7`, clean, and nine commits behind GitHub `main` (`9ea7b725…` when checked). `forge-start` resolves `--base` locally with `git rev-parse` and **never fetches**, so the worktree base is the PL's local `main`. `check_repo` tests only that `KNOWN_COMMIT` exists as a commit object in the PL repository. It does not compare it with the base. Nobody may advance the PL checkout: the permanent fix, FV2-SYNC-001 (`maff0000/forgev2#7`), is not installed.
+
+Therefore the engineering base is `6e176698…` (the header `KNOWN_COMMIT`), exactly as in CRM-CLIENT-001R2. v1.0 named `9ea7b725…`; that was wrong, and it would have passed `check_repo` only by accident (see the disclosure on Issue #71).
+
+| Gate | Requirement (all read-only, `GIT_OPTIONAL_LOCKS=0`) |
+|---|---|
+| **EB1** | This WO's docs PR is merged at an exact merge SHA `M`. GitHub compare `6e176698…M` has `behind_by = 0` and lists **only documents**: the nine `work-orders/CRM-CLIENT-001*.md` files (unchanged since their own merges) and this PR's six files (`work-orders/CRM-WIP-INT-001.md`, `docs/architecture/crm-wip-integration-amendment.md`, `docs/architecture/crm-wip-module-boundary.md`, `docs/requirements/crm-modules-requirements.md`, `DECISIONS.md`, `PRODUCT-BACKLOG.md`). **No path of the §4 allowlist, and nothing under `custom/`, `config/`, `deploy/`, `scripts/` or `tests/`, appears.** So the Part B tree at `6e176698…` equals the tree at `M` for every file the WO may touch |
+| **EB2** | GitHub `main` equals `M`. If it has advanced, every later commit is reviewed, and any non-document change is a stop for CGPT |
+| **EB3** | The PL's local `main` equals `6e1766980e24d781d498727d4fe5db43cdeadbb7`, on branch `main`, with a clean tracked and untracked tree, the canonical SSH origin, no `url.*` rewrites, no `core.hooksPath` and no fsmonitor. **This is the gate. The presence of newer objects, or a newer local `origin/main` ref, in the PL repository is not evidence of anything and is never a pass** (the 2026-11-17 root-run `git fetch` is disclosed on #71) |
+| **EB4** | No `forge/CRM-WIP-INT-001` branch, worktree, scratch directory or ledger exists, and no other WO is in flight. The preserved CLIENT-001, 001R and 001R2 branches, worktrees and closed ledgers stay by design and are never touched |
+| **EB5** | The WO file given to the PL is byte-identical (sha256) to the blob of this path at `M`, and sits outside the repository, readable by `forgev2-pl` |
+| **EB6** | `forge-start` prints `base_sha = 6e1766980e24d781d498727d4fe5db43cdeadbb7`, equal to `KNOWN_COMMIT`, and the committed ledger later shows the same value. **Any other value is a stop (BLOCKED), with no retry and no repair** |
+| **EB7** | **No one advances the PL checkout.** No root, `runuser`, fetch, pull, checkout, merge, reset, gc or other Git mutation in `/srv/CRM/main` before or during the run. ForgeV2 is not modified. Reads of GitHub use `gh api`. If EB3 or EB6 cannot pass, dispatch is **BLOCKED on FV2-SYNC-001** and goes to CGPT. It is never forced |
+
+## 9. Stop conditions
 
 Any change outside the allowlists. A role grant before PO-W1. A total, a "revenue" figure or any calculation. Any real data, any beta step, any permanent WIP service, any change to the WIP GUI or its live database. A failing migration, an unresolvable network path or an unreportable finding is **BLOCKED**, not worked around. No firewall rules. No ForgeV2, Foundry or scan changes.
