@@ -1,5 +1,7 @@
 # CRM core ↔ FirmGroup ↔ WIP/Revenue module — architecture decision candidate
 
+> **Amended in part, 2026-11-17 (PROPOSED, pending CGPT approval, [Issue #71](https://github.com/infosec-estateresearch/CRM/issues/71)).** WIP stays an independent application and the CRM only displays it read-only. The CRM-owned `WipCase` / `WipFinancialPeriod` ownership model below is **superseded**; the FirmGroup section is **held**. See [`crm-wip-integration-amendment.md`](crm-wip-integration-amendment.md). The text below is kept unchanged for the record.
+
 > **Provenance:** CGPT Architect delivery package of 2026-11-13 (`ER_CRM_FOUNDRY_DELIVERY_2026-11-13.zip`, sha256 `a75b5f0d1768a2a1bd945d35710e6e2067c4a7fb5e0228773946446ad9104488`), reconciled into the CRM repository by Rogue under the documentation-only assignment of 2026-11-13. CANDIDATE: not approved. Changes made during reconciliation are listed in [`docs/initiation/2026-11-13-existing-product-reassessment.md`](../initiation/2026-11-13-existing-product-reassessment.md#7-reconciliation-log).
 
 **Status: proposed for CRM decision register; no code change authority.** One CRM product/repository and release, module-owned financial code, minimal supported EspoCRM integration. Preserve original WIP repo `infosec-estateresearch/WIP` unchanged as historical POC. CRM core and ForgeV2/FOUNDRY are immutable outside exact approved application WOs.
