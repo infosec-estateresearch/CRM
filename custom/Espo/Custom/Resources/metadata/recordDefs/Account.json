@@ -1,3 +1,6 @@
 {
-    "duplicateWhereBuilderClassName": "Espo\\Custom\\Classes\\DuplicateWhereBuilders\\Account"
+    "duplicateWhereBuilderClassName": "Espo\\Custom\\Classes\\DuplicateWhereBuilders\\Account",
+    "readLoaderClassNameList": [
+        "Espo\\Custom\\Classes\\FieldProcessing\\Account\\WipLoader"
+    ]
 }

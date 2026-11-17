@@ -335,6 +335,16 @@ class TestLevelScopes(unittest.TestCase):
         self.assertTrue(policy.rule_level_scopes(doc))
 
 
+def load_access_fixture(path):
+    """The access_bad_* fixtures predate the WipSummary scope (CRM-WIP-INT-001R2). Give any
+    role that lacks it the explicit false the policy now demands, so each fixture still breaks
+    exactly the rules it was written for; the fixture files themselves are unchanged."""
+    doc = load_json(path)
+    for role in doc["roles"]:
+        role["data"].setdefault("WipSummary", False)
+    return doc
+
+
 class TestBrokenFixtures(unittest.TestCase):
     """Each rule fails on a fixture that breaks it, and only the intended rules fail."""
 
@@ -347,8 +357,8 @@ class TestBrokenFixtures(unittest.TestCase):
                 self.assertEqual({r for r, v in result.items() if v}, expected)
 
     def test_access_fixtures(self):
-        self.check_group("access_bad_", BROKEN_ACCESS, policy.ROLE_RULES, load_json,
-                         policy.check_roles)
+        self.check_group("access_bad_", BROKEN_ACCESS, policy.ROLE_RULES,
+                         load_access_fixture, policy.check_roles)
 
     def test_key_fixtures(self):
         self.check_group("keys_bad_", BROKEN_KEYS, policy.KEY_RULES, load_json, policy.check_keys)

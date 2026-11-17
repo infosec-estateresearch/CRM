@@ -1,0 +1,190 @@
+{
+  "base": "1a1e80873b3abe5ba049923447f4fc2ee3784e6d",
+  "base_sha": "1a1e80873b3abe5ba049923447f4fc2ee3784e6d",
+  "branch": "forge/CRM-WIP-INT-001D",
+  "candidate": "2f8312561b9e63d769e24a9bfee219acad876337",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 2
+  },
+  "created": "2026-11-17T17:17:57Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-17T17:18:26Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-17T17:21:44Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "Engineer round 1 (only execution under CGPT exception): H1/H2 added, run_loader php_args param; suite 601 OK; VERIFYHOST 0 fails H1; 1 survives",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-17T17:21:47Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "2f8312561b9e63d769e24a9bfee219acad876337",
+      "t": "2026-11-17T17:21:49Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "2f8312561b9e63d769e24a9bfee219acad876337",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-17T17:21:57Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "2f8312561b9e63d769e24a9bfee219acad876337",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-17T17:21:57Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "2f8312561b9e63d769e24a9bfee219acad876337",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-17T17:21:57Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-17T17:23:55Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": null,
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-17T17:23:55Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-17T17:23:55Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "2f8312561b9e63d769e24a9bfee219acad876337",
+      "findings": [],
+      "note": "PASS on 2f831256; VERIFYHOST 0 fails H1; 601 tests OK",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-17T17:23:59Z",
+      "type": "result"
+    },
+    {
+      "candidate": "2f8312561b9e63d769e24a9bfee219acad876337",
+      "findings": [],
+      "note": "PASS on 2f831256; gitleaks 0; temp-dir certs",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-17T17:23:59Z",
+      "type": "result"
+    },
+    {
+      "candidate": "2f8312561b9e63d769e24a9bfee219acad876337",
+      "findings": [],
+      "note": "Tester substance was pass but final message lacked a recognisable VERDICT line; re-running tester on same candidate",
+      "outcome": "inconclusive",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-17T17:24:02Z",
+      "type": "result"
+    },
+    {
+      "candidate": "2f8312561b9e63d769e24a9bfee219acad876337",
+      "id": 13,
+      "n": 2,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-17T17:24:05Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/13-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 13,
+      "t": "2026-11-17T17:25:30Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "2f8312561b9e63d769e24a9bfee219acad876337",
+      "findings": [],
+      "note": "PASS on 2f831256; 601 OK; H1 fails at VERIFYHOST 0, H2 passes; VERIFYHOST 1 equivalent",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 1,
+      "spawn": 13,
+      "t": "2026-11-17T17:25:32Z",
+      "type": "result"
+    },
+    {
+      "note": "Auditor/Tester/DevSecOps PASS on 2f831256; Engineer executions 1 (cap reached, held by dispatch record); tester re-run once for unrecognisable status line",
+      "outcome": "DELIVERED",
+      "t": "2026-11-17T17:25:35Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-WIP-INT-001D",
+  "host": "docker1",
+  "known_commit": "1a1e80873b3abe5ba049923447f4fc2ee3784e6d",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-WIP-INT-001D",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-WIP-INT-001D",
+  "wo": "CRM-WIP-INT-001D",
+  "worktree": "/srv/CRM/worktrees/CRM-WIP-INT-001D"
+}
