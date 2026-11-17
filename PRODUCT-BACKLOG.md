@@ -1,5 +1,7 @@
 # Product Backlog — Estate Research CRM
 
+> **Amended in part, 2026-11-17 (PROPOSED, pending CGPT approval, [Issue #71](https://github.com/infosec-estateresearch/CRM/issues/71)).** CRM-PBI-019 to 023 and 025 describe a CRM-owned WIP model and are **superseded**; PBI-018, 024 and 027 (FirmGroup) are **held**. See [`docs/architecture/crm-wip-integration-amendment.md`](docs/architecture/crm-wip-integration-amendment.md) §4. The rows below are kept unchanged for the record.
+
 - **Status:** DRAFT. This needs Matt's explicit approval. Backlog items are not Work Orders and grant no authority (FND-009, FND-012).
 - **Revision 2026-11-13 (CANDIDATE):** CRM-PBI-018 to 029 added for Firm Groups and the WIP/Revenue module (FOUNDRY Stage 1 v0.4 existing-product reassessment, [`docs/initiation/2026-11-13-existing-product-reassessment.md`](docs/initiation/2026-11-13-existing-product-reassessment.md)). CRM-PBI-001 to 017 are unchanged. A delivery-evidence table is added at the end. **This exact version needs Matt's explicit approval.** New IDs were collision-checked against `main` at `330978598ac6`.
 - **Ordering:** smallest useful increment first. Each later item depends on the ones above it unless it says otherwise.

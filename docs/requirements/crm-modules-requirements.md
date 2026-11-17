@@ -1,5 +1,7 @@
 # CRM enhancement requirements — FirmGroup and WIP/Revenue MVP
 
+> **Amended in part, 2026-11-17 (PROPOSED, pending CGPT approval, [Issue #71](https://github.com/infosec-estateresearch/CRM/issues/71)).** The WIP-nn requirements describe a CRM-owned WIP model. Which are superseded, retained or held is listed in [`../architecture/crm-wip-integration-amendment.md`](../architecture/crm-wip-integration-amendment.md) §4. The FG-nn requirements are **held**. The text below is kept unchanged for the record.
+
 > **Provenance:** CGPT Architect delivery package of 2026-11-13 (`ER_CRM_FOUNDRY_DELIVERY_2026-11-13.zip`, sha256 `a75b5f0d1768a2a1bd945d35710e6e2067c4a7fb5e0228773946446ad9104488`), reconciled into the CRM repository by Rogue under the documentation-only assignment of 2026-11-13. CANDIDATE: not approved. Changes made during reconciliation are listed in [`docs/initiation/2026-11-13-existing-product-reassessment.md`](../initiation/2026-11-13-existing-product-reassessment.md#7-reconciliation-log).
 
 **Status: candidate requirements for Foundry reassessment (13 Nov 2026).** IDs are proposed stable requirement IDs subject to collision check. Acceptance is evidence-driven and includes core CRM regression. One requirement can be implemented over multiple exact-approved Forge WOs. No source data or host secrets permitted in this public file.
