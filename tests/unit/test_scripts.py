@@ -800,7 +800,7 @@ class TestSharedEnvNames(unittest.TestCase):
                            if l[:1].isupper() and "=" in l and not l.startswith("#")]
         self.assertEqual(res.stdout.split(), independent)
         self.assertEqual(res.stdout.split(), check_access.env_example_names())
-        self.assertEqual(len(independent), 13)
+        self.assertEqual(len(independent), 15)
 
     def test_missing_env_example_fails_closed(self):
         with tempfile.TemporaryDirectory() as repo:

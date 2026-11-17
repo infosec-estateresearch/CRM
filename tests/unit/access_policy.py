@@ -40,6 +40,7 @@ ACL_ENTITY_SCOPES = [
 ACL_BOOLEAN_SCOPES = [
     "Activities", "Calendar", "EmailAccountScope", "ExternalAccount", "GlobalStream", "Import",
     "OpenApi", "Webhook", "WorkingTimeCalendar",
+    "WipSummary",  # CRM-WIP-INT-001R2: the WIP panel scope; false for every role
 ]
 ACL_SCOPES = ACL_ENTITY_SCOPES + ACL_BOOLEAN_SCOPES
 # Generic CRM entity scopes Estate Research does not use: no access (false) for every role.
@@ -63,7 +64,8 @@ ADMIN_MANAGED_SCOPES = ["ServiceType"]
 # Email whose from is not their own unless the Import scope is granted.
 HUMAN_BOOLEAN = {"Activities": True, "Calendar": True, "GlobalStream": True,
                  "WorkingTimeCalendar": True, "Import": False, "Webhook": False,
-                 "OpenApi": False, "ExternalAccount": False, "EmailAccountScope": False}
+                 "OpenApi": False, "ExternalAccount": False, "EmailAccountScope": False,
+                 "WipSummary": False}
 IMPORT_BOOLEAN = dict({s: False for s in ACL_BOOLEAN_SCOPES}, Import=True)
 ACTIONS = ["create", "read", "edit", "delete", "stream"]
 LEVELS = {"create": {"yes", "no"}, "read": {"all", "team", "own", "no"},

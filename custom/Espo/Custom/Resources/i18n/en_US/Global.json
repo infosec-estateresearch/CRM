@@ -1,9 +1,11 @@
 {
     "scopeNames": {
+        "WipSummary": "WIP Summary",
         "Opportunity": "Enquiry",
         "ServiceType": "Service Type"
     },
     "scopeNamesPlural": {
+        "WipSummary": "WIP Summary",
         "Opportunity": "Enquiries",
         "ServiceType": "Service Types"
     }

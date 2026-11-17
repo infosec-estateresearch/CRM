@@ -17,5 +17,18 @@
             [{"name": "sfId"}, {"name": "sfOwnerId"}],
             [{"name": "sfCreatedAt"}, false]
         ]
+    },
+    {
+        "label": "WIP",
+        "name": "wip",
+        "rows": [
+            [{"name": "wipStatus", "fullWidth": true}],
+            [{"name": "wipCases", "fullWidth": true}]
+        ],
+        "dynamicLogicVisible": {
+            "conditionGroup": [
+                {"type": "isNotEmpty", "attribute": "wipStatus"}
+            ]
+        }
     }
 ]

@@ -6,7 +6,12 @@
         "learningPlatformAccess": "Learning Platform Access",
         "parent": "Head Office",
         "branches": "Branches",
-        "billingAddress": "Firm Address"
+        "billingAddress": "Firm Address",
+        "wipStatus": "WIP status",
+        "wipCases": "Current WIP cases"
+    },
+    "labels": {
+        "WIP": "WIP"
     },
     "links": {
         "parent": "Head Office",

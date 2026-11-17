@@ -218,7 +218,7 @@ class TestRepository(unittest.TestCase):
             for name in os.listdir(os.path.join(policy.RES, "metadata", kind)):
                 self.assertIn(name[:-5], {"Account", "Contact", "User", "Opportunity",
                                           "ServiceType", "Call", "Meeting", "Task",
-                                          "Email"},  # CRM-005
+                                          "Email", "WipSummary"},  # CRM-005, WIP-INT-001R2
                               f"{kind}/{name}")
 
 
