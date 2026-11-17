@@ -110,7 +110,8 @@
                 "Webhook": false,
                 "OpenApi": false,
                 "ExternalAccount": false,
-                "EmailAccountScope": false
+                "EmailAccountScope": false,
+                "WipSummary": false
             },
             "fieldData": {
                 "Account": {
@@ -374,7 +375,8 @@
                 "Webhook": false,
                 "OpenApi": false,
                 "ExternalAccount": false,
-                "EmailAccountScope": false
+                "EmailAccountScope": false,
+                "WipSummary": false
             },
             "fieldData": {
                 "Account": {
@@ -638,7 +640,8 @@
                 "Webhook": false,
                 "OpenApi": false,
                 "ExternalAccount": false,
-                "EmailAccountScope": false
+                "EmailAccountScope": false,
+                "WipSummary": false
             },
             "fieldData": {
                 "Account": {
@@ -902,7 +905,8 @@
                 "Webhook": false,
                 "OpenApi": false,
                 "ExternalAccount": false,
-                "EmailAccountScope": false
+                "EmailAccountScope": false,
+                "WipSummary": false
             },
             "fieldData": {
                 "Account": {

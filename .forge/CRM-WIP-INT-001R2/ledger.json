@@ -1,0 +1,165 @@
+{
+  "base": "main",
+  "base_sha": "6e1766980e24d781d498727d4fe5db43cdeadbb7",
+  "branch": "forge/CRM-WIP-INT-001R2",
+  "candidate": "167f2a9acf543f171f1db45ab1f3e83d1031fe38",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-17T13:50:53Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-17T13:51:04Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-17T13:58:46Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "Round 1 build; 594 tests OK reported",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-17T13:58:49Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "167f2a9acf543f171f1db45ab1f3e83d1031fe38",
+      "t": "2026-11-17T13:58:53Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "167f2a9acf543f171f1db45ab1f3e83d1031fe38",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-17T13:59:00Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "167f2a9acf543f171f1db45ab1f3e83d1031fe38",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-17T13:59:00Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "167f2a9acf543f171f1db45ab1f3e83d1031fe38",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-17T13:59:00Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-17T14:01:10Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "findings",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-17T14:01:10Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-17T14:01:10Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "167f2a9acf543f171f1db45ab1f3e83d1031fe38",
+      "findings": [],
+      "note": "PASS; advisory: load_access_fixture helper in test_access_policy.py (allowlisted)",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-17T14:01:17Z",
+      "type": "result"
+    },
+    {
+      "candidate": "167f2a9acf543f171f1db45ab1f3e83d1031fe38",
+      "findings": [
+        {
+          "key": "oversize-test-vacuous",
+          "severity": "advisory"
+        }
+      ],
+      "note": "Spot-checked: oversize test body is rejected by the 255-char text limit, not the 256 KiB cap; code correct (MAX_BODY enforced in write callback). Advisory; 594 tests OK, PHP ran 30/30",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-17T14:01:17Z",
+      "type": "result"
+    },
+    {
+      "candidate": "167f2a9acf543f171f1db45ab1f3e83d1031fe38",
+      "findings": [],
+      "note": "PASS; gitleaks clean",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-17T14:01:17Z",
+      "type": "result"
+    },
+    {
+      "note": "Round 1; all three reviewers; Engineer executions 1 of cap 2",
+      "outcome": "DELIVERED",
+      "t": "2026-11-17T14:01:24Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-WIP-INT-001R2",
+  "host": "docker1",
+  "known_commit": "6e1766980e24d781d498727d4fe5db43cdeadbb7",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-WIP-INT-001R2",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-WIP-INT-001R2",
+  "wo": "CRM-WIP-INT-001R2",
+  "worktree": "/srv/CRM/worktrees/CRM-WIP-INT-001R2"
+}

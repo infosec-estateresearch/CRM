@@ -633,8 +633,12 @@ class TestEnvExample(unittest.TestCase):
         names = {l[:-1] for l in self.lines}
         used = set(re.findall(r"\$\{([A-Z0-9_]+)", self.compose_text))
         self.assertEqual(names, used)
-        # every interpolation fails loudly when unset
-        self.assertEqual(re.findall(r"\$\{[A-Z0-9_]+(?!:\?)[}:-]", self.compose_text), [])
+        # every interpolation fails loudly when unset, except the two optional WIP
+        # names (CRM-WIP-INT-001R2), which are exactly ${VAR:-}
+        optional = {"CRM_WIP_API_URL", "CRM_WIP_API_TOKEN"}
+        self.assertEqual(set(re.findall(r"\$\{([A-Z0-9_]+):-\}", self.compose_text)), optional)
+        self.assertEqual(re.findall(r"\$\{(?!(?:%s):-\})[A-Z0-9_]+(?!:\?)[}:-]" % "|".join(sorted(optional)),
+                                    self.compose_text), [])
 
     def test_compose_holds_no_literal_secrets(self):
         doc = json.loads(self.compose_text)
