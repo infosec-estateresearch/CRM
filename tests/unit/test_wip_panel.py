@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -250,7 +251,7 @@ class TestLoader(unittest.TestCase):
         self.stub.requests.clear()
 
     def run_loader(self, reply=None, grant=True, sfid=SFID, env=True, loader=LOADER, url=None,
-                   boom=None, extra_env=None):
+                   boom=None, extra_env=None, php_args=()):
         if reply is not None:
             body = reply[1] if isinstance(reply[1], bytes) else json.dumps(reply[1]).encode()
             self.stub.reply = (reply[0], body, reply[2] if len(reply) > 2 else {},
@@ -258,7 +259,7 @@ class TestLoader(unittest.TestCase):
         cfg = {"grant": grant, "sfId": sfid, "boom": boom,
                "env": {"CRM_WIP_API_URL": url or self.stub.url, "CRM_WIP_API_TOKEN": TOKEN}
                if env else {}}
-        res = subprocess.run(["php", "-d", "display_errors=stderr", self.harness, loader,
+        res = subprocess.run(["php", "-d", "display_errors=stderr", *php_args, self.harness, loader,
                               json.dumps(cfg)], capture_output=True, text=True, timeout=30,
                              env=dict(os.environ, **(extra_env or {})))
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
@@ -393,6 +394,45 @@ class TestLoader(unittest.TestCase):
         self.assertEqual(out["set"], {"wipStatus": "WIP unavailable", "wipCases": ""})
         self.assertEqual(tls.requests, [])
         self.assertIn("Transport", out["logs"][0])
+
+    # --- H: the TLS host-name check is verified separately from certificate trust ----------
+    def trusted_tls_stub(self, name, san):
+        # A certificate generated now, kept in the temporary directory only. If openssl is
+        # missing this fails loudly (no skip).
+        self.assertIsNotNone(shutil.which("openssl"), "openssl is required to run the TLS test")
+        cert, key = os.path.join(self.tmp, name + ".crt"), os.path.join(self.tmp, name + ".key")
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                        "-keyout", key, "-out", cert, "-subj", "/CN=wip-stub",
+                        "-addext", "subjectAltName=" + san],
+                       check=True, capture_output=True, timeout=60)
+        tls = StubWip(tls=(cert, key))
+        self.addCleanup(tls.close)
+        tls.reply = (200, json.dumps(contract()).encode(), {}, 0)  # a valid contract reply
+        return tls, cert
+
+    def test_h1_a_trusted_certificate_naming_another_host_is_refused(self):
+        tls, cert = self.trusted_tls_stub("h1", "DNS:wrong.example")
+        # Independent of the loader: the certificate IS trusted (chain is fine without the
+        # host-name check) and fails only when the host name is checked.
+        lax = ssl.create_default_context(cafile=cert)
+        lax.check_hostname = False
+        with urllib.request.urlopen(tls.url + "/probe", timeout=10, context=lax) as reply:
+            self.assertEqual(reply.status, 200)
+        with self.assertRaises(urllib.error.URLError) as caught:
+            urllib.request.urlopen(tls.url + "/probe", timeout=10,
+                                   context=ssl.create_default_context(cafile=cert))
+        self.assertIsInstance(caught.exception.reason, ssl.SSLCertVerificationError)
+        tls.requests.clear()
+        out = self.run_loader((200, contract()), url=tls.url, php_args=("-d", "curl.cainfo=" + cert))
+        self.assertEqual(out["set"], {"wipStatus": "WIP unavailable", "wipCases": ""})
+        self.assertEqual(tls.requests, [])
+        self.assertIn("Transport", out["logs"][0])
+
+    def test_h2_a_trusted_certificate_naming_the_host_is_accepted(self):
+        tls, cert = self.trusted_tls_stub("h2", "IP:127.0.0.1")
+        out = self.run_loader((200, contract()), url=tls.url, php_args=("-d", "curl.cainfo=" + cert))
+        self.assertEqual(self.status(out), "WIP data available")
+        self.assertEqual(len(tls.requests), 1)
 
     # --- A1: an ACL check that throws fails closed ------------------------------------------
     def test_a1_acl_exception_sets_no_field_sends_no_request_and_logs_only_the_class(self):
