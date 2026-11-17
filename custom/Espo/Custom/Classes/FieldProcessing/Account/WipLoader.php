@@ -43,7 +43,16 @@ class WipLoader implements Loader
     public function process(Entity $entity, Params $params): void
     {
         try {
-            if (!$this->acl->checkScope(self::SCOPE)) {
+            $granted = $this->acl->checkScope(self::SCOPE);
+        } catch (\Throwable $e) {
+            // Permission not established: set no field and make no request.
+            $this->logFailure(get_class($e), null);
+
+            return;
+        }
+
+        try {
+            if (!$granted) {
                 return;
             }
 

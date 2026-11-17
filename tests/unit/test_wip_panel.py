@@ -10,11 +10,13 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import tempfile
 import threading
 import time
 import unittest
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import access_policy as policy
@@ -136,9 +138,11 @@ class TestMetadata(unittest.TestCase):
 # PHP loader
 # ---------------------------------------------------------------------------
 
-HARNESS = r"""<?php
-namespace Espo\Core { class Acl { public function __construct(public bool $grant) {}
-    public function checkScope(string $s): bool { return $s === 'WipSummary' && $this->grant; } } }
+STUBS = r"""<?php
+namespace Espo\Core { class Acl { public function __construct(public bool $grant, public ?string $boom = null) {}
+    public function checkScope(string $s): bool {
+        if ($this->boom !== null) { throw new \RuntimeException($this->boom); }
+        return $s === 'WipSummary' && $this->grant; } } }
 namespace Espo\Core\FieldProcessing { interface Loader {} }
 namespace Espo\Core\FieldProcessing\Loader { class Params {} }
 namespace Espo\Core\Utils { class Log { public array $lines = [];
@@ -146,7 +150,9 @@ namespace Espo\Core\Utils { class Log { public array $lines = [];
 namespace Espo\ORM { class Entity { public array $set = []; public function __construct(public $sfId) {}
     public function get(string $n) { return $n === 'sfId' ? $this->sfId : null; }
     public function set(string $n, $v): void { $this->set[$n] = $v; } } }
-namespace {
+"""
+
+HARNESS = STUBS + r"""namespace {
     $cfg = json_decode($argv[2], true);
     foreach (['CRM_WIP_API_URL', 'CRM_WIP_API_TOKEN'] as $k) {
         if (array_key_exists($k, $cfg['env'])) { putenv($k . '=' . $cfg['env'][$k]); } else { putenv($k); }
@@ -154,7 +160,7 @@ namespace {
     require $argv[1];
     $log = new \Espo\Core\Utils\Log();
     $loader = new \Espo\Custom\Classes\FieldProcessing\Account\WipLoader(
-        new \Espo\Core\Acl($cfg['grant']), $log);
+        new \Espo\Core\Acl($cfg['grant'], $cfg['boom'] ?? null), $log);
     $entity = new \Espo\ORM\Entity($cfg['sfId']);
     $t = microtime(true);
     $loader->process($entity, new \Espo\Core\FieldProcessing\Loader\Params());
@@ -163,11 +169,23 @@ namespace {
 }
 """
 
+# Calls the private buildUrl() by reflection (PHP 8.4: no setAccessible needed).
+BUILD_HARNESS = STUBS + r"""namespace {
+    require $argv[1];
+    $loader = new \Espo\Custom\Classes\FieldProcessing\Account\WipLoader(
+        new \Espo\Core\Acl(true), new \Espo\Core\Utils\Log());
+    $method = new \ReflectionMethod($loader, 'buildUrl');
+    $out = [];
+    foreach (json_decode($argv[2], true) as $u) { $out[] = $method->invoke($loader, $u, $argv[3]); }
+    echo json_encode($out);
+}
+"""
+
 
 class StubWip:
     """A WIP API stand-in on loopback that records every request it receives."""
 
-    def __init__(self):
+    def __init__(self, tls=None):
         self.requests = []
         self.reply = (200, b"{}", {}, 0)
         stub = self
@@ -193,7 +211,14 @@ class StubWip:
                 pass
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.url = "http://127.0.0.1:%d" % self.server.server_address[1]
+        scheme = "http"
+        if tls:  # (certificate file, key file): an HTTPS stub for the TLS checks
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(*tls)
+            self.server.socket = ctx.wrap_socket(self.server.socket, server_side=True)
+            scheme = "https"
+        self.port = self.server.server_address[1]
+        self.url = "%s://127.0.0.1:%d" % (scheme, self.port)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
@@ -210,6 +235,9 @@ class TestLoader(unittest.TestCase):
         cls.harness = os.path.join(cls.tmp, "harness.php")
         with open(cls.harness, "w", encoding="utf-8") as fh:
             fh.write(HARNESS)
+        cls.build_harness = os.path.join(cls.tmp, "build.php")
+        with open(cls.build_harness, "w", encoding="utf-8") as fh:
+            fh.write(BUILD_HARNESS)
 
     @classmethod
     def tearDownClass(cls):
@@ -221,20 +249,24 @@ class TestLoader(unittest.TestCase):
         self.assertIsNotNone(shutil.which("php"), "php is required to run the WIP loader tests")
         self.stub.requests.clear()
 
-    def run_loader(self, reply=None, grant=True, sfid=SFID, env=True, loader=LOADER, url=None):
+    def run_loader(self, reply=None, grant=True, sfid=SFID, env=True, loader=LOADER, url=None,
+                   boom=None, extra_env=None):
         if reply is not None:
             body = reply[1] if isinstance(reply[1], bytes) else json.dumps(reply[1]).encode()
             self.stub.reply = (reply[0], body, reply[2] if len(reply) > 2 else {},
                                reply[3] if len(reply) > 3 else 0)
-        cfg = {"grant": grant, "sfId": sfid,
+        cfg = {"grant": grant, "sfId": sfid, "boom": boom,
                "env": {"CRM_WIP_API_URL": url or self.stub.url, "CRM_WIP_API_TOKEN": TOKEN}
                if env else {}}
         res = subprocess.run(["php", "-d", "display_errors=stderr", self.harness, loader,
-                              json.dumps(cfg)], capture_output=True, text=True, timeout=30)
+                              json.dumps(cfg)], capture_output=True, text=True, timeout=30,
+                             env=dict(os.environ, **(extra_env or {})))
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         out = json.loads(res.stdout)
         blob = res.stdout + res.stderr
         self.assertNotIn(TOKEN, blob)
+        if boom:
+            self.assertNotIn(boom, blob)
         self.assertNotIn(sfid or "-", "".join(out["logs"]) if sfid else "")
         self.assertNotIn(self.stub.url, "".join(out["logs"]))
         return out
@@ -308,6 +340,69 @@ class TestLoader(unittest.TestCase):
                 self.assertEqual(self.status(out), "WIP unavailable")
                 self.assertEqual(self.stub.requests, [])
 
+    def test_f2_credentials_in_the_url_are_refused_before_any_request(self):
+        # Pointed at the live stub: a dead port would fail whatever the guard does.
+        control = self.run_loader((200, contract()))
+        self.assertEqual(self.status(control), "WIP data available")
+        self.assertEqual(len(self.stub.requests), 1)
+        host = "127.0.0.1:%d" % self.stub.port
+        for url in (f"http://user:pw@{host}", f"http://user@{host}", f"http://:pw@{host}"):
+            with self.subTest(url=url):
+                self.stub.requests.clear()
+                out = self.run_loader((200, contract()), url=url)
+                self.assertEqual(out["set"], {"wipStatus": "WIP unavailable", "wipCases": ""})
+                self.assertIn("BadConfiguredUrl", out["logs"][0])
+                self.assertEqual(self.stub.requests, [])
+
+    def build_urls(self, urls):
+        res = subprocess.run(["php", "-d", "display_errors=stderr", self.build_harness, LOADER,
+                              json.dumps(urls), SFID], capture_output=True, text=True, timeout=30)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        return json.loads(res.stdout)
+
+    def test_f3_scheme_check_in_build_url_stands_on_its_own(self):
+        # buildUrl() is called directly, so CURLOPT_PROTOCOLS (a second, redundant layer) cannot
+        # mask the scheme check. Removing only CURLOPT_PROTOCOLS is an equivalent mutant.
+        bad = ["ftp://127.0.0.1/x", "file:///etc/passwd", "gopher://127.0.0.1", "javascript:alert(1)",
+               "127.0.0.1:8080/x", "not a url", "FTP://127.0.0.1"]
+        self.assertEqual(self.build_urls(bad), [None] * len(bad))
+        good = self.build_urls(["http://127.0.0.1:8080", "https://wip.example.invalid/base/"])
+        for url in good:
+            self.assertIsNotNone(url)
+            self.assertIn(SFID, url)
+        self.assertEqual(good[0], f"http://127.0.0.1:8080/api/v1/accounts/{SFID}/wip")
+        self.assertEqual(good[1], f"https://wip.example.invalid/base/api/v1/accounts/{SFID}/wip")
+
+    def test_f4_tls_verification_refuses_an_untrusted_certificate(self):
+        # A self-signed certificate generated now; nothing is committed. If openssl is missing
+        # this fails loudly (no skip).
+        self.assertIsNotNone(shutil.which("openssl"), "openssl is required to run the TLS test")
+        cert, key = os.path.join(self.tmp, "stub.crt"), os.path.join(self.tmp, "stub.key")
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                        "-keyout", key, "-out", cert, "-subj", "/CN=wip-stub",
+                        "-addext", "subjectAltName=IP:127.0.0.1"],
+                       check=True, capture_output=True, timeout=60)
+        tls = StubWip(tls=(cert, key))
+        self.addCleanup(tls.close)
+        # Control: the HTTPS stub really answers a client that trusts its certificate.
+        with urllib.request.urlopen(tls.url + "/probe", timeout=10,
+                                    context=ssl.create_default_context(cafile=cert)) as reply:
+            self.assertEqual(reply.status, 200)
+        tls.requests.clear()
+        out = self.run_loader((200, contract()), url=tls.url)
+        self.assertEqual(out["set"], {"wipStatus": "WIP unavailable", "wipCases": ""})
+        self.assertEqual(tls.requests, [])
+        self.assertIn("Transport", out["logs"][0])
+
+    # --- A1: an ACL check that throws fails closed ------------------------------------------
+    def test_a1_acl_exception_sets_no_field_sends_no_request_and_logs_only_the_class(self):
+        marker = "ACL-BOOM-MARKER-7c1e"
+        out = self.run_loader((200, contract()), boom=marker)  # also checks stdout and stderr
+        self.assertEqual(out["set"], {})
+        self.assertEqual(self.stub.requests, [])
+        self.assertEqual(out["logs"], ["WIP loader: RuntimeException"])
+        self.assertNotIn(marker, json.dumps(out))
+
     def test_redirects_are_not_followed(self):
         out = self.run_loader((302, b"", {"Location": self.stub.url + "/other"}))
         self.assertEqual(self.status(out), "WIP unavailable")
@@ -319,6 +414,25 @@ class TestLoader(unittest.TestCase):
         out = self.run_loader((200, big))
         self.assertEqual(self.status(out), "WIP unavailable")
         self.assertEqual(out["set"]["wipCases"], "")
+
+    def test_f1_body_cap_is_the_only_reason_a_valid_reply_is_refused(self):
+        # The reply is otherwise valid (right contract, echoes the Account's id) and is padded
+        # with trailing whitespace, so it stays valid JSON. Only the size cap can refuse it.
+        with open(LOADER, encoding="utf-8") as fh:
+            self.assertIn("MAX_BODY = 262144;", fh.read())
+        limit = 262144
+        base = json.dumps(contract()).encode()
+        control = self.run_loader((200, base))
+        self.assertEqual(self.status(control), "WIP data available")  # unpadded: accepted
+        at_limit = self.run_loader((200, base + b" " * (limit - len(base))))
+        self.assertEqual(self.status(at_limit), "WIP data available")  # exactly MAX_BODY bytes
+        for size in (limit + 1, limit * 2):
+            with self.subTest(size=size):
+                self.assertEqual(json.loads(base + b" " * (size - len(base)))["companyName"],
+                                 "Synthetic Firm LLP")  # the padded body is itself valid
+                out = self.run_loader((200, base + b" " * (size - len(base))))
+                self.assertEqual(out["set"], {"wipStatus": "WIP unavailable", "wipCases": ""})
+                self.assertIn("BodyTooLarge", out["logs"][0])
 
     def test_malformed_and_wrong_shape_replies_are_unavailable(self):
         bad_case = dict(CONTRACT_CASE)
@@ -391,7 +505,7 @@ class TestLoader(unittest.TestCase):
         return path
 
     def test_harness_detects_a_loader_that_skips_the_acl_check(self):
-        path = self.mutated(("!$this->acl->checkScope(", "false && $this->acl->checkScope("))
+        path = self.mutated(("if (!$granted) {", "if (false && !$granted) {"))
         out = self.run_loader((200, contract()), grant=False, loader=path)
         self.assertNotEqual(out["set"], {})
 
