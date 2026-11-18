@@ -103,3 +103,25 @@ Nothing is built yet. "Planned" therefore means traced to a backlog item, not de
 ### Status mapping
 
 Every PBI/requirement and release acceptance record must distinguish proposal, reviewed draft, exact approved, engineered/tested, operator deployed, Matt UAT accepted and production cutover. 'Delivered' in an agent report is not synonymous with product acceptance. Existing CRM repo documents have stale status claims; update based on exact GitHub/runtime evidence and preserve earlier historical text in Git history.
+
+## Requirements amendment 2026-11-18: standalone WIP/Revenue (PROPOSED)
+
+- **Authority:** [Issue #81](https://github.com/infosec-estateresearch/CRM/issues/81); architecture [`docs/architecture/2026-11-18-standalone-wip-poc.md`](architecture/2026-11-18-standalone-wip-poc.md); decisions CRM-D035 to CRM-D043.
+- **Effect on the 2026-11-13 expansion above:** WIP-01 to WIP-19, GRP-01 to GRP-04, MOD-01 and MOD-02, and IMP-01 to IMP-08 were written for a CRM-owned WIP module. Those **CRM-side** requirements are **superseded**; the intent now sits in the WIP repository's own records. FG-01 to FG-11 are **held** (CRM-D034). REV-01 and REV-02 stay open as Product Owner decisions. Rows above are not edited.
+
+| Requirement | Statement | PBI | Proved by |
+|---|---|---|---|
+| LNK-01 | An Account page shows an "Open WIP / Revenue" action to users who may read Accounts | 030 | `CRM-WIP-LINK-001` AC2, AC3; operator journey J1 |
+| LNK-02 | The action opens, in a new tab, the WIP route of exactly that Account; firm A never opens firm B | 030 | AC3; journeys J1, J2 (Issue #81 acceptance A, B, F) |
+| LNK-03 | The WIP base URL is a non-secret runtime parameter per environment, never in Git, validated, and the action fails closed | 030 | AC3 behaviour table; journey J4 |
+| LNK-04 | The CRM keeps working when WIP is unavailable | 030 | journey J5 (acceptance C) |
+| LNK-05 | The CRM contains no WIP data, WIP SQL, API client, token or financial entity | 030 | allowlist AC1, AC4 (acceptance G) |
+| LNK-06 | Removing the customisation restores the original Account page | 030 | journey J6 (acceptance B) |
+| LNK-07 | Browser code under `client/custom/src` is delivered from Git, staged and reversible, and covered by backup and restore | 031 | the delivery base (CRM-D040) |
+| ID-01 | `Account.id` is the canonical key; `sfId` is a legacy join only; the current group id is a non-authoritative hint | 030 | CRM-D036; WIP-side tests |
+| ID-02 | No fuzzy name matching and no automatic firm creation | 030 | WIP-side tests |
+| DB-01 | WIP reads CRM identity through a separate read-only login; nothing in WIP writes to a CRM table | 032 (later); D1 synthetic | operator evidence; CRM-D038 |
+| SEC-01 | No credential, token or finance value in a URL; synthetic data first; live exposure needs Matt's decision | 030, 032 | CRM-D037, CRM-D041 |
+| BRW-01 | The CRM-to-WIP-and-back click path is evidenced in a real browser with a pinned browser identity | 034 | operator evidence package |
+
+Existing requirements R1 to R5, R7 to R11, R12, R15 and R19 to R27 and M1 to M6 are unaffected (see the compatibility notes above); R12 must still not be read as permission to show WIP finance to every staff user.
