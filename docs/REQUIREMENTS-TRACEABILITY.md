@@ -117,7 +117,7 @@ Every PBI/requirement and release acceptance record must distinguish proposal, r
 | LNK-04 | The CRM keeps working when WIP is unavailable | 030 | journey J5 (acceptance C) |
 | LNK-05 | The CRM contains no WIP data, WIP SQL, API client, token or financial entity | 030 | allowlist AC1, AC4 (acceptance G) |
 | LNK-06 | Removing the customisation restores the original Account page | 030 | journey J6 (acceptance B) |
-| LNK-07 | Browser code under `client/custom/src` is delivered from Git, staged and reversible, and covered by backup and restore | 031 | the delivery base (CRM-D040) |
+| LNK-07 | Browser code under `client/custom/src` is delivered from Git, staged and reversible, and covered by backup and restore | 031 | the minimal delivery inside `CRM-WIP-LINK-001` v1.1 (CRM-D040) |
 | ID-01 | `Account.id` is the canonical key; `sfId` is a legacy join only; the current group id is a non-authoritative hint | 030 | CRM-D036; WIP-side tests |
 | ID-02 | No fuzzy name matching and no automatic firm creation | 030 | WIP-side tests |
 | DB-01 | WIP reads CRM identity through a separate read-only login; nothing in WIP writes to a CRM table | 032 (later); D1 synthetic | operator evidence; CRM-D038 |

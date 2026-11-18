@@ -28,7 +28,7 @@ Estate Research's self-hosted replacement for Salesforce. It is delivered increm
 | [docs/delivery/](docs/delivery/) | Delivery sequence and draft WO intake briefs (no authority) |
 | [security/EXTERNAL_CODE_REGISTER.yaml](security/EXTERNAL_CODE_REGISTER.yaml) | External code and images |
 | [work-orders/](work-orders/) | Work Orders. Each is approved by exact version on its own Issue. |
-| [work-orders/CRM-WIP-LINK-001.md](work-orders/CRM-WIP-LINK-001.md) | DRAFT Work Order (2026-11-18): the Account action. Not approved; no dispatch |
+| [work-orders/CRM-WIP-LINK-001.md](work-orders/CRM-WIP-LINK-001.md) | DRAFT Work Order v1.1 (2026-11-18): the Account action and the minimal `client/custom/src` delivery. Not approved; no dispatch |
 
 Rules:
 - GitHub is the authoritative record.
