@@ -42,6 +42,44 @@ candidates:
     usage_confirmed: "deploy/beta/compose.json service crm-beta-edge, pinned to this digest, network_mode host, read-only, cap_drop ALL, no-new-privileges, user haproxy; checked by tests/unit/test_beta.py (CRM-007)."
     approval: none
     incorporated: true
+  # CRM-CLIENT-001R2 (v1.3): operator-run, test-only real-browser assurance components. None is part of a
+  # release bundle or of any runtime; none is installed on the host. CGPT acceptance (WO gate G3) is open.
+  - name: playwright-python-browser-runner
+    origin: https://mcr.microsoft.com/en-us/product/playwright/python/about   # image: mcr.microsoft.com/playwright/python
+    version: "v1.65.1-noble"
+    index_digest: "sha256:0ab41a37431309d72b7a26f40ef1fdb464a62740196b2143965a2f59dc090409"   # multi-arch index, MCR 2026-11-16
+    amd64_manifest: "sha256:ce84a3d75a47e81657d2ec2c0a949e6e0ef790abdc32ce6819220a3df987ff9a"   # linux/amd64; the digest the runner pulls
+    config_id: "sha256:eccd588fcb91db7fbc8db45ba5e8aa3afb31a13a57d445c3f65be10f0b692261"
+    role: "operating-system and dependency base only; the bundled Chromium 158.0.8127.18 (chromium-1254) under /ms-playwright is never executed"
+    python_wheels: "playwright 1.65.1 (sha256 5660e0b050a5bd5672bf8e366ed2580288a3d3640ff9444436ed2d890d3dc442; bundles Node.js 26.13.1); greenlet 3.5.6 (sha256 975736b002ed080d124cf81a79cb7e05cb26d6b3f5c7a7b651c0fcce70353aa1)"
+    licence: "Apache-2.0 (Playwright), MIT (greenlet), Ubuntu package licences (image)"
+    usage: test-only, operator-run, never in any release bundle or runtime
+    approval: none   # CGPT acceptance open (G3)
+    incorporated: false
+  - name: chrome-for-testing-stable
+    origin: https://googlechromelabs.github.io/chrome-for-testing/   # CfT, Stable channel
+    version: "157.0.8103.78"
+    url: "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.78/linux64/chrome-linux64.zip"
+    zip_sha256: "9223832977a13db3646201b1341c1f9cf08afa3ceae92540116d7b0c062364fb"
+    zip_gcs_md5: "n3ml73xVw0ZMdH0ruvsZVg=="
+    binary_sha256: "f60cb86024464df9740504a1584b605c2b3cf107625ff11e1da22c875c1627e8"   # chrome-linux64/chrome
+    fallback: "chrome-headless-shell-linux64.zip, zip sha256 f90329720fb61e5a76da9b6b509b6ad12a484c9c5df0359403e935177c6d153a, binary sha256 8e4c5db8c070059cb570a05c171dfcaec022d46334722ec3a16376614d687a96"
+    licence: "Chromium and Google Chrome for Testing terms"
+    usage: test-only, operator-run, mounted read-only into the runner and never installed on the host
+    approval: none   # CGPT acceptance open (G3)
+    incorporated: false
+  - name: grype-cl-d5-scanner
+    origin: https://github.com/anchore/grype
+    version: "v0.121.0"
+    artefact: "grype_0.121.0_linux_amd64.tar.gz"
+    artefact_sha256: "64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519"
+    checksums_sha256: "938761709760ee0e94ebca564a757b6658ab4efddc0d19ecc6ede12f22d2fdd0"
+    sigstore_bundle_sha256: "76e0fda1979bdc991dcab685fd10ed59c704edcab083667684412527e35af0e9"
+    verification: "gh release verify-asset v0.121.0 <file> -R anchore/grype"
+    licence: Apache-2.0
+    usage: test-only, operator-run, temporary, removed after scan
+    approval: none   # CGPT acceptance open (G3)
+    incorporated: false
 # Not incorporated: legacy WIP (infosec-estateresearch/WIP@91b2af19877b498ed307ee9f1218b3243b2b60ba) dependencies,
 # recorded so they are not mistaken for CRM components. Any future reuse needs its own WO with ownership,
 # licence and provenance assessment and exact-commit pinning (CRM-D022).
