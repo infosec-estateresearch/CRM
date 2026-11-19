@@ -1,0 +1,169 @@
+{
+  "base": "main",
+  "base_sha": "6e1766980e24d781d498727d4fe5db43cdeadbb7",
+  "branch": "forge/CRM-WIP-LINK-001",
+  "candidate": "3a5e7cd13bb31bd84c7f21ff4c9a5dc42ee40aea",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-19T09:39:01Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-19T09:39:24Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-19T09:50:39Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "r1 build, 609 tests OK per engineer",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-19T09:50:41Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "3a5e7cd13bb31bd84c7f21ff4c9a5dc42ee40aea",
+      "t": "2026-11-19T09:50:46Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "3a5e7cd13bb31bd84c7f21ff4c9a5dc42ee40aea",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-19T09:50:54Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "3a5e7cd13bb31bd84c7f21ff4c9a5dc42ee40aea",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-19T09:50:54Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "3a5e7cd13bb31bd84c7f21ff4c9a5dc42ee40aea",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-19T09:50:54Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-19T10:07:21Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-19T10:07:21Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-19T10:07:21Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "3a5e7cd13bb31bd84c7f21ff4c9a5dc42ee40aea",
+      "findings": [
+        {
+          "key": "handler-at-sign",
+          "severity": "advisory"
+        },
+        {
+          "key": "harness-edit-scope",
+          "severity": "advisory"
+        }
+      ],
+      "note": "both advisory; verified @ check in handler lines 47-49 is stricter than WO, fails closed; fake-docker additions are listed in this report",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-19T10:07:25Z",
+      "type": "result"
+    },
+    {
+      "candidate": "3a5e7cd13bb31bd84c7f21ff4c9a5dc42ee40aea",
+      "findings": [],
+      "note": "609 OK; mutations caught",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-19T10:07:25Z",
+      "type": "result"
+    },
+    {
+      "candidate": "3a5e7cd13bb31bd84c7f21ff4c9a5dc42ee40aea",
+      "findings": [],
+      "note": "gitleaks 0; 609 OK",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-19T10:07:25Z",
+      "type": "result"
+    },
+    {
+      "note": "Tester and DevSecOps PASS; Auditor verdict FINDINGS with two advisory-only findings (ledger permits delivery); see report",
+      "outcome": "DELIVERED",
+      "t": "2026-11-19T10:07:32Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-WIP-LINK-001",
+  "host": "docker1",
+  "known_commit": "6e1766980e24d781d498727d4fe5db43cdeadbb7",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-WIP-LINK-001",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-WIP-LINK-001",
+  "wo": "CRM-WIP-LINK-001",
+  "worktree": "/srv/CRM/worktrees/CRM-WIP-LINK-001"
+}
