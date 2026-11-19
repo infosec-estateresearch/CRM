@@ -1,5 +1,7 @@
 # Product Backlog — Estate Research CRM
 
+> **Product reset, 2026-11-18 (PROPOSED, [Issue #81](https://github.com/infosec-estateresearch/CRM/issues/81)).** WIP is an independent application and the CRM carries a link only (CRM-D035). CRM-PBI-019 to 023 and 025 are **superseded**; the earlier 2026-11-17 amendment's API route is superseded too. New items CRM-PBI-030 to 034 are added after CRM-PBI-029, and a supersession map is added at the end. Rows are not rewritten or removed.
+
 > **Amended in part, 2026-11-17 (PROPOSED, pending CGPT approval, [Issue #71](https://github.com/infosec-estateresearch/CRM/issues/71)).** CRM-PBI-019 to 023 and 025 describe a CRM-owned WIP model and are **superseded**; PBI-018, 024 and 027 (FirmGroup) are **held**. See [`docs/architecture/crm-wip-integration-amendment.md`](docs/architecture/crm-wip-integration-amendment.md) §4. The rows below are kept unchanged for the record.
 
 - **Status:** DRAFT. This needs Matt's explicit approval. Backlog items are not Work Orders and grant no authority (FND-009, FND-012).
@@ -39,6 +41,11 @@
 | CRM-PBI-027 | PROVISIONAL | **P2.** **Group-level financial reporting** and optional historical membership-as-of views with correct case revision selection, controlled access and no double counting | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | FirmGroup data, WIP MVP, approved metric semantics; historical basis undecided |
 | CRM-PBI-028 | PLACEHOLDER | **P3.** Advanced cross-firm workflow, business reports, exception-review cockpit, optional Case/Enquiry linkage after evidence | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | Later Agile refinement; not implementation-ready |
 | CRM-PBI-029 | DEFINED | **P0.** **Documentation/provenance reconciliation**: update Vision/Backlog/README/decisions/PIM amendment/requirements/security register to truthful current product and beta evidence | See `docs/requirements/crm-modules-requirements.md` and the traceability section *Expanded scope (2026-11-13)*. | Stage 1 reassessment, exact PO artifact approval, docs-only GitHub gate |
+| CRM-PBI-030 | DEFINED | **P0.** **Open WIP / Revenue action on the Account page**: one supported EspoCRM menu action that opens the independent WIP application at that Account in a new tab; non-secret per-environment base URL; fails closed; CRM unaffected if WIP is down | Acceptance A, B, C, F, G of Issue #81 §6. WO `work-orders/CRM-WIP-LINK-001.md` (DRAFT v1.1) | 031 (delivered inside the same Work Order) and the WIP firm page (private WIP repository, `WIP-CRM-CONTEXT-001`) |
+| CRM-PBI-031 | DEFINED | **P0.** **Client-asset delivery (minimal, inside `CRM-WIP-LINK-001` v1.1)**: browser code under `client/custom/src` reaches the CRM runtime from Git with the same stop, stage and rename discipline as `custom/Espo/Custom`, a cache-bust, restore on failure and managed removal (so deploying the base restores the original page), and survives backup and restore | Decided by CGPT 2026-11-18 (CRM-D040, option 2). Built on current `main`; the candidate `07bfaf1c…` (draft PR #69) is read-only evidence and is **not** merged or inherited. Delivered by the same Work Order as 030 (no separate Work Order) | none (delivered by the same Work Order as 030) |
+| CRM-PBI-032 | PROVISIONAL | **P1.** **Read-only CRM identity source for WIP beyond the synthetic proof**: a loopback-only, per-environment, off-by-default CRM database publication or an equivalent isolated path, with a restricted read-only login; amends CRM-D012 | Needs its own Work Order (`CRM-DB-READ-001`), operator verification and CGPT approval. Not needed for D1 | CGPT approval; amends CRM-D012 |
+| CRM-PBI-033 | PLACEHOLDER | **P2.** **FirmGroup to WIP link**: from a CRM FirmGroup, open WIP's group view, which finds current members from the CRM; no WIP group master, no totals until the metric is defined | Committed to the roadmap as a separate bounded Work Order after D1 (`WIP-GROUP-001`, after `CRM-FG-001`); no WIP group master | CRM-PBI-018 (held, CRM-D034), the PO's group decision, and the WIP group view (`WIP-GROUP-001`) |
+| CRM-PBI-034 | PROVISIONAL | **P1.** **Repeatable real-browser journey assurance** for the CRM-to-WIP path on synthetic data (operator run: Chrome for Testing in a pinned image, an evidence package, a clean teardown) | Capability exists (headless launch verified 2026-11-18); the harness and network arrangement are to be settled in the D1 operator plan (WIP `docs/operations/D1-SYNTHETIC-INTEGRATION-PLAN.md`) | 030 and 031 |
 
 CRM-PBI-009 (full migration and switch-off) is replaced by PBI-005, PBI-012 and PBI-015.
 
@@ -87,3 +94,22 @@ Recorded facts only. The **State** column above shows refinement readiness and i
 | 013 | — | UAT in progress (Matt) |
 | 016, 017 | CRM-007/007R | Release bundles built reproducibly (`scripts/release.sh`); clean-host deploy evidence is per CRM-007R. **Deviation to review:** beta runs the pinned upstream image with `custom/` deployed into the runtime, not a baked `crm-espocrm` image (PBI-016 text, CRM-D017) |
 | 006, 007, 008, 010, 014, 015 | — | Not started |
+
+## Supersession map, 2026-11-18
+
+Nothing is deleted. "Replacement" names where the intent now lives.
+
+| PBI | State from 2026-11-18 | Why | Replacement or owner |
+|---|---|---|---|
+| CRM-PBI-018 FirmGroup | HELD | The CRM still owns FirmGroup identity (CRM-D023); group work waits for the confirmed requirement and the PO decision (CRM-D034) | stays here |
+| CRM-PBI-019 CRM-WIP boundary and module scaffolding | **SUPERSEDED** | There is no WIP module inside the CRM | CRM-D035; architecture record §2; WIP repository boundary record |
+| CRM-PBI-020 WIP/Revenue Account tab and manual entry | **SUPERSEDED** | WIP is its own application; the CRM keeps only the action | CRM-PBI-030 plus the WIP repository's firm page and later `WIP-WRITE-001` |
+| CRM-PBI-021 WIP identity and current FirmGroup visibility | **SUPERSEDED** | The identity rules move into the WIP application and CRM-D036 | CRM-D036; later CRM-PBI-033 |
+| CRM-PBI-022 WIP module workspace and navigation | **SUPERSEDED** | WIP has its own navigation | WIP repository |
+| CRM-PBI-023 Transitional source investigation and verified importer | **SUPERSEDED** for the CRM | The WIP import and sync are WIP's operational pipeline | WIP repository (`WIP-OPS-001` is the existing issue) |
+| CRM-PBI-024 FirmGroup curated population | HELD | Unchanged (CRM-D024) | stays here |
+| CRM-PBI-025 Legacy WIP history transition | **SUPERSEDED** for the CRM | WIP keeps its history; any reconciliation is a WIP-owned, separately approved cutover | WIP repository |
+| CRM-PBI-026 Revenue definitions | RETAINED, owner moves | The revenue definition is a PO decision; the calculation lives with WIP | PO, then WIP |
+| CRM-PBI-027 Group-level reporting | HELD | Needs the CRM FirmGroup, the group view and the metric | later |
+| CRM-PBI-028 Advanced cross-firm workflow | PLACEHOLDER | Unchanged; now a WIP matter | WIP repository |
+| CRM-PBI-029 Documentation and provenance reconciliation | DEFINED, in review | Fulfilled for the reset by this document set, pending approval | this branch |

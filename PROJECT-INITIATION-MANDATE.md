@@ -2,6 +2,7 @@
 
 - **Status:** DRAFT for Architect review. Not approved, and grants no implementation authority.
 - **Reassessment (2026-11-13):** the product scope is being expanded (Firm Groups, WIP/Revenue module) under a FOUNDRY Stage 1 v0.4 existing-product reassessment. The dated addendum [`docs/initiation/2026-11-13-existing-product-reassessment.md`](docs/initiation/2026-11-13-existing-product-reassessment.md) records the current product truth, including stale statements in this file such as B1. This file is otherwise unchanged and keeps its historical content.
+- **Amendment (2026-11-18, PROPOSED):** product reset to a standalone WIP/Revenue proof of concept: see section 9 at the end of this file.
 - **Prepared by:** Rogue (Orchestrator), 2026-11-06, from the evidence listed in section 8.
 - **Governing FOUNDRY:** `maff0000/foundry` at `5f5e4a51f8909d134c46ef8b43a9bd20d086fcc0`: `stages/01-product-discovery.md`, `standards/project-scaffolding.md`, `standards/product-records.md`, `standards/secure-engineering.md` and `standards/work-order-contract.md`.
 - **Naming:** this is the FOUNDRY PIM, which the Product Owner calls the "PID". It is not a ForgeV1 `PID.md` (FND-043).
@@ -93,3 +94,21 @@ These are held outside this repository and are restricted, because they contain 
 - the infrastructure discovery report of 2026-11-03.
 
 Sanitised extracts may be added to `docs/` under an approved WO.
+
+## 9. Amendment 2026-11-18: product reset to a standalone WIP/Revenue proof of concept (PROPOSED)
+
+This is a dated amendment to the initiation snapshot above. It does not replace the living Vision, Backlog or Decisions and it is **not** permission to begin Forge delivery.
+
+| Item | Statement |
+|---|---|
+| Status and authority | PROPOSED. Product direction: the Product Owner, recorded with the CGPT Architect baseline in [Issue #81](https://github.com/infosec-estateresearch/CRM/issues/81) (2026-11-18). The documentation mission (D0) was authorised by the CGPT directive of 2026-11-18, relayed by Matt. Prepared by Rogue (Orchestrator) |
+| Governing FOUNDRY for this amendment | `maff0000/foundry@84fedf0a74017237aa1bd650d8560350c91c7f0e` (the current `main`, verified 2026-11-18). The header of this file still names the 2026-11-06 revision; that is history |
+| Intent change | WIP is no longer a CRM module. The CRM keeps firm, contact and FirmGroup identity and adds one link to the **independent WIP application** (private repository `infosec-estateresearch/WIP`, own database, own deployment). See `PRODUCT-VISION.md` (amendment) and `docs/architecture/2026-11-18-standalone-wip-poc.md` |
+| In scope of this repository | The Account action (a client browser module, one clientDefs entry, a label), its delivery to the runtime, its tests, the operator note and the records. Nothing that holds or computes WIP data |
+| Out of scope here | Any WIP entity, importer, API, token service, PHP loader, WIP SQL or calculation; the WIP application itself; sign-on and a common security layer (D4); live data; FirmGroup implementation (held, CRM-D034) |
+| Verified repository and infrastructure facts (2026-11-18) | This repository's `main` is `e157bd51429e2764a94cecaf85a06bf707bd876f`. The development target and PL checkout are as in section 1 (the PL's local `main` is the engineering base `6e1766980e24d781d498727d4fe5db43cdeadbb7`). `crm-dev` (synthetic) and `crm-beta` (UAT) each run their own database on a private Compose network with no published port. Browser tooling exists: Chrome for Testing 158.0.8127.18 launches headless in a digest-pinned Playwright image. Host addresses stay in restricted records (CRM-D011) |
+| Authority chain and approvals | Unchanged (section 6). Each Work Order needs CGPT's exact-version approval on its own Issue: `CRM-WIP-LINK-001` on [#82](https://github.com/infosec-estateresearch/CRM/issues/82); the two WIP Work Orders on Issues in the WIP repository. A Work Order approval does not approve the operator plan unless that plan is named in it |
+| Bootstrap and execution authority | None granted. No dispatch, deployment, merge, runtime change or live-data change is authorised by this amendment. Synthetic disposable environments for the proof are described in `docs/delivery/crm-module-sequencing.md` and need CGPT's approval with the Work Orders |
+| Security context | Finance data appears only in the WIP application. The proof of concept is synthetic and internal; it has no sign-on; live exposure is Matt's decision (CRM-D041). The CRM database login that WIP uses is new, read-only and kept out of Git. No credential exposed earlier is reused. Public-repository rules (CRM-D011) are unchanged |
+| Open blockers and unknowns | CGPT exact-version approvals of the three revised Work Orders and of the synthetic-environment plan; specialist access to sensitive Git history in the WIP repository (security gate G10, owned outside this product, with a tested minimal control proposed; G-CLIENT is resolved); PO decisions on revenue, FirmGroup, WIP finance roles and live exposure; non-admin visibility of the runtime parameter (to be shown by the browser run) |
+| Review and exit evidence | CGPT's critical review of the exact documentation commit; Matt's exact-version approval of the Vision and Backlog; for any later Work Order, the contract in `standards/work-order-contract.md` |

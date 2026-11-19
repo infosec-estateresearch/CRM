@@ -4,6 +4,26 @@
 - **Prepared by:** CGPT Architect (content, 2026-11-13); reconciled into this repository by Rogue (2026-11-13). See [`docs/initiation/2026-11-13-existing-product-reassessment.md`](docs/initiation/2026-11-13-existing-product-reassessment.md).
 - **History:** the previous Vision (Rogue, 2026-11-06, DRAFT, never approved) is kept below under [Retained from the 2026-11-06 Vision](#retained-from-the-2026-11-06-vision), with its supersessions marked. Its full text is in Git history.
 - **Governing FOUNDRY:** `maff0000/foundry@5f5e4a51f8909d134c46ef8b43a9bd20d086fcc0`.
+- **Amendment (2026-11-18, PROPOSED):** the WIP parts of this revision are superseded by the product reset recorded in the next section. Nothing below is deleted.
+
+## Amendment 2026-11-18: standalone WIP/Revenue (supersedes the WIP parts of this revision)
+
+- **Status:** PROPOSED. It needs CGPT's critical review of its exact commit and Matt's recorded approval of that exact version; until then the approval status below the next heading is unchanged and nothing here grants a Work Order or deployment authority.
+- **Authority:** the Product Owner's direction of 2026-11-18, recorded with the Architect baseline in [Issue #81](https://github.com/infosec-estateresearch/CRM/issues/81). Architecture: [`docs/architecture/2026-11-18-standalone-wip-poc.md`](docs/architecture/2026-11-18-standalone-wip-poc.md). Decisions CRM-D035 to CRM-D043. Governing FOUNDRY for this amendment: `maff0000/foundry@84fedf0a74017237aa1bd650d8560350c91c7f0e`.
+- **What changed and why.** The 2026-11-13 revision put WIP inside the CRM (CRM-D021 and following). The Product Owner has reset that: WIP is an independent application with its own database and its own code, and the CRM only links to it. The reasons recorded: avoid rebuilding an existing application inside the CRM, keep each product independently changeable, deployable and reversible, and reach a working, demonstrable whole sooner.
+- **Revised Product Goal.** *A single Estate Research CRM in which firms, contacts, Firm Groups, enquiries, activities and users are authoritative, and from which an authorised user opens the independent WIP/Revenue application at the firm they are viewing, with one click, sees that firm's WIP cases and amounts, and returns to the same firm, without any second customer master and without WIP faults touching core CRM work.*
+- **Revised outcomes.**
+  1. **FirmGroup** (outcome 1 of the revision below) is unchanged in meaning and **held** (CRM-D034): the CRM owns it, and no group function is built until the actual entity exists and the group requirement is confirmed.
+  2. An Account page has one **Open WIP / Revenue** action (CRM-PBI-030). It opens the WIP application at that Account, in a new tab. The CRM stores and computes no WIP data. (Replaces outcomes 2, 3 and the in-CRM parts of 4 and 5 below.)
+  3. The **WIP application** shows the firm's name from the CRM and its WIP cases, amounts and observation history from WIP's own database, read-only first and on synthetic data, with clear empty and error states; it links back to the exact CRM firm. (A separate product record in the private WIP repository.)
+  4. **Identity** follows CRM-D036: `Account.id` is the key, `sfId` the legacy join, the current group an interface hint that WIP re-confirms.
+  5. **Independence:** the CRM keeps working when WIP is down, and WIP can be fixed, changed and rolled back without changing EspoCRM.
+  6. **Revenue is not invented** (CRM-D028 stands): WIP values, fees invoiced and yield fields are shown as labelled source facts, never as recognised revenue, and without totals.
+  7. **Later:** the group view in WIP once the CRM entity exists; synthetic manual add and edit with audit in WIP; the reconciled transition of live WIP data; a common sign-on layer (D4).
+- **Observable success (summary; the full matrix is Issue #81 §6 and the architecture record §7).** A synthetic firm A with cases 1 and 2 and a firm B with different cases: selecting A opens exactly A and never B; refreshed WIP data shows in the page; the CRM stays functional when WIP is stopped; the WIP page also works when opened directly; a real-browser click path from the CRM to WIP and back is evidenced; the CRM diff contains only the action, its configuration, a client asset and tests, and no EspoCRM core change.
+- **Scope boundaries.** Not in the CRM: any WIP entity, table, importer, calculation or loader; a JSON API or token service for WIP (the `WIP-API-001` and `CRM-WIP-INT-001*` direction is superseded); a revenue formula; sign-on. Not in the first milestone: live data, writes, group totals, retirement of the existing import.
+- **Evidence labels (VERIFIED on 2026-11-18, read-only, counts only).** The CRM's Account storage (id, `sfId`, no FirmGroup storage); 11,758 of 11,776 legacy WIP cases (99.85%) match a live CRM Account exactly on `sfId`, 18 do not; the supported EspoCRM action mechanism and its delivery gap; a headless browser capability. Details and the other labels are in the architecture record §4.
+- **Risks and unresolved questions.** Browser-code delivery to the CRM runtime (CRM-D040: decided by CGPT as a minimal delivery inside the link Work Order; proof still to be run); specialist access to sensitive Git history in the private WIP repository (a security gate owned outside this product); finance data shown without sign-on (synthetic only until Matt decides, CRM-D041); the revenue definition; FirmGroup population; roles for WIP finance; the current WIP scheduled jobs failing since 2026-11-06 (a separate WIP issue; passing proof-of-concept tests say nothing about live data freshness).
 
 ## Purpose, problem and beneficiaries
 
@@ -13,9 +33,13 @@ Users are business-development staff, enquiries/ancillary teams, firm management
 
 ## Product Goal
 
+> **Superseded in part, 2026-11-18:** the WIP parts of this section are replaced by the amendment above (WIP is an independent application; the CRM carries a link only). Kept for the record.
+
 **A single Estate Research CRM in which firms, contacts, Firm Groups, enquiries, activities and users are authoritative; authorised staff can open any firm, view and maintain that firm's WIP records through a simple validated WIP/Revenue tab, and later manage WIP across firms and groups through a dedicated module — without maintaining another customer master or breaking core CRM workflows.**
 
 ## First MVP outcomes (priority over broad financial reporting)
+
+> **Superseded in part, 2026-11-18:** the WIP parts of this section are replaced by the amendment above (WIP is an independent application; the CRM carries a link only). Kept for the record.
 
 1. A **FirmGroup** is an independent CRM record: two peers may join the same group without declaring either parent. Each Account may have zero or one `firmGroup`; managers can maintain membership, staff can navigate linked members. Salesforce `Account.parent/branches` remains a separate historical relationship.
 2. An Account detail record has **WIP/Revenue** alongside its existing Stream/Account areas. It lists WIP cases and their associated financial observations for **that Account only**, with a clear empty state, clickable cases, and an **Add WIP entry** action for authorised users.
@@ -37,11 +61,15 @@ Users are business-development staff, enquiries/ancillary teams, firm management
 
 ## Ownership, modularity and dependencies
 
+> **Superseded in part, 2026-11-18:** the WIP parts of this section are replaced by the amendment above (WIP is an independent application; the CRM carries a link only). Kept for the record.
+
 CRM is authoritative for Account/Firm/Branch, Contact, FirmGroup, Opportunity/Enquiry, staff identity and business relationships. WIP owns its **financial case references**, financial observations, manual entry, imports, validation and future reporting. WIP's financial-case record is not a replacement for any independent operational/legal Case Manager system. Both use one EspoCRM application/MariaDB deployment, with WIP-owned code and data models plus minimal platform-supported integration. This is **logical modularity, not independent process isolation**. Engineering must test failure containment.
 
 A WIP case stores a required `accountId` (CRM Account foreign reference). `firmGroupId` is exposed as **derived current membership**, not an independently editable field. Historic group-as-of reports, if required, need a later versioned membership-history policy.
 
 ## Scope and non-goals
+
+> **Superseded in part, 2026-11-18:** the WIP parts of this section are replaced by the amendment above (WIP is an independent application; the CRM carries a link only). Kept for the record.
 
 **In scope:** FirmGroup model and Account Group Members tab; WIP Account tab; synthetic-only WIP entities; validated manual entry; financial access control; native module architecture; later left-navigation scaffold and incremental reports/imports.
 

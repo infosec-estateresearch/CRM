@@ -10,6 +10,7 @@ Estate Research's self-hosted replacement for Salesforce. It is delivered increm
 - No WO has Matt's recorded product acceptance yet, and production cutover is not authorised.
 - A FOUNDRY Stage 1 existing-product reassessment (2026-11-13) proposes Firm Groups and a WIP/Revenue module. It is a candidate only: see [docs/initiation/2026-11-13-existing-product-reassessment.md](docs/initiation/2026-11-13-existing-product-reassessment.md).
 - The bootstrap status "nothing is installed, EspoCRM not selected" is historical. EspoCRM is the build in use (CRM-D010, still PROPOSED).
+- **Update (2026-11-18): product reset, documents only.** The Product Owner has reset the WIP direction: WIP is an independent application and the CRM adds one **Open WIP / Revenue** link on the Account page. The CRM-owned WIP module and the JSON-API route are superseded (nothing is deleted). This is **PROPOSED**: see [Issue #81](https://github.com/infosec-estateresearch/CRM/issues/81), [docs/architecture/2026-11-18-standalone-wip-poc.md](docs/architecture/2026-11-18-standalone-wip-poc.md) and decisions CRM-D035 to CRM-D043. **Next authorised activity:** CGPT's review of these documents and the draft Work Order [`CRM-WIP-LINK-001`](work-orders/CRM-WIP-LINK-001.md); no Work Order is approved and no dispatch, deployment or live change is authorised.
 
 | Record | Purpose |
 |---|---|
@@ -21,11 +22,13 @@ Estate Research's self-hosted replacement for Salesforce. It is delivered increm
 | [docs/BUILD.md](docs/BUILD.md) | How the CRM is built, where it runs, its isolation boundary and how it is verified |
 | [docs/REQUIREMENTS-TRACEABILITY.md](docs/REQUIREMENTS-TRACEABILITY.md) | Requirements traced to backlog items |
 | [docs/architecture/crm-wip-module-boundary.md](docs/architecture/crm-wip-module-boundary.md) | CRM core, FirmGroup and WIP module ownership boundary (candidate) |
+| [docs/architecture/2026-11-18-standalone-wip-poc.md](docs/architecture/2026-11-18-standalone-wip-poc.md) | **Current direction (PROPOSED):** independent WIP application, EspoCRM link only; supersedes the CRM-owned WIP module and the API route (the row above and the 2026-11-17 amendment are kept as history) |
 | [docs/requirements/](docs/requirements/) | FirmGroup and WIP/Revenue requirements, UX contract and field contract (candidate) |
 | [docs/discovery/wip-evidence-status.md](docs/discovery/wip-evidence-status.md) | HELM legacy-WIP evidence reconciliation |
 | [docs/delivery/](docs/delivery/) | Delivery sequence and draft WO intake briefs (no authority) |
 | [security/EXTERNAL_CODE_REGISTER.yaml](security/EXTERNAL_CODE_REGISTER.yaml) | External code and images |
 | [work-orders/](work-orders/) | Work Orders. Each is approved by exact version on its own Issue. |
+| [work-orders/CRM-WIP-LINK-001.md](work-orders/CRM-WIP-LINK-001.md) | DRAFT Work Order v1.1 (2026-11-18): the Account action and the minimal `client/custom/src` delivery. Not approved; no dispatch |
 
 Rules:
 - GitHub is the authoritative record.

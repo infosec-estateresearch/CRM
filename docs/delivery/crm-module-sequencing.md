@@ -66,3 +66,27 @@ Separate group mapping/seed, legacy financial historical import, actual revenue 
 ## Single-current-step discipline
 
 At the end of each milestone Rogue reports `WORKING`, `BLOCKED`, `READY_FOR_CGPT` or `COMPLETED`, with exact artifact and next gate. **Do not dispatch a later WO just because this document lists it.** Cross-project/concurrent PLs require explicit isolation; default one CRM WO at a time.
+
+## Sequence from 2026-11-18 (standalone WIP/Revenue proof of concept; PROPOSED, no authority)
+
+Source: [Issue #81](https://github.com/infosec-estateresearch/CRM/issues/81) §7 and §10, and [`docs/architecture/2026-11-18-standalone-wip-poc.md`](../architecture/2026-11-18-standalone-wip-poc.md). This section **supersedes the order** of the 2026-11-13 sequence for WIP items (019 to 023, 025), which are superseded; it does not delete it.
+
+**Work Orders (new identities; fresh counters; none approved):**
+
+| WO | Repository | Purpose | Issue | Depends on |
+|---|---|---|---|---|
+| `CRM-WIP-LINK-001` | CRM | the Account action, **the minimal `client/custom/src` delivery in `deploy_custom.sh`**, their tests, the operator note | [#82](https://github.com/infosec-estateresearch/CRM/issues/82) | approval (G-CLIENT is resolved: the minimal client-asset delivery is inside this Work Order, v1.1) |
+| `WIP-CRM-CONTEXT-001` | WIP (private) | CRM identity adapter, the firm page and case detail, WIP SQL, tests | WIP #2 | G-ISOLATION, approval |
+| `WIP-UX-001` | WIP (private) | presentation: shared layout, local styling, pagination, accessible states, direct search | WIP #3 | `WIP-CRM-CONTEXT-001` delivered |
+| **committed after D1 evidence (separate bounded Work Orders, none drafted for dispatch):** `WIP-WRITE-001`, `WIP-HISTORY-001`, `WIP-GUI-001`, `CRM-FG-001` (or the approved group WO) then `WIP-GROUP-001`, `CRM-DB-READ-001` | | functional add/edit with audit; history; the corrected GUI; FirmGroup entity then group workflows; the lasting database path | to be created | D1 evidence, PO decisions |
+
+**D1 plan (one end-to-end read-only proof on synthetic data):**
+1. **Prerequisites, no Engineer:** CGPT approves the three Work Orders (exact versions) and the operator plan below (planning only is authorised now); the sanitized specialist source for the WIP delivery checkout is in place and its acceptance sweep passes (G-ISOLATION, the G10 plan); CRM and WIP documentation merged after approvals; the Orchestrator re-verifies the engine, the checkouts and the entry gates EB1 to EB8 of each Work Order.
+2. **Wave 1:** dispatch `WIP-CRM-CONTEXT-001` and `CRM-WIP-LINK-001`. They touch different repositories. Whether the engine runs two Project Lead sessions at once is UNKNOWN; the Orchestrator proves it at dispatch and otherwise runs the WIP one first. Engineer cap 2 each.
+3. **Wave 2:** `WIP-UX-001` on the delivered `WIP-CRM-CONTEXT-001` candidate.
+4. **Operator integration run (synthetic only):** (a) a disposable network-less WIP database container (same MariaDB version as the live one) with the migrations and the defined synthetic dataset, plus a column-restricted read-only login; (b) on `crm-dev`: the link candidate deployed, `wipBaseUrl` set, synthetic firms created through the REST API, and a read-only database login for the WIP service; (c) the WIP service started unprivileged from the delivered candidate on an approved internal interface; (d) the browser journeys of the link Work Order's annex plus the WIP-side journeys; (e) teardown. No `crm-beta`, no live WIP database, no change to WIP's units or timers.
+5. **Demonstration:** one demonstration to Matt, with the evidence package.
+
+**After approval, without Matt handling each step:** Rogue runs steps 1 to 5 end to end, records each event on the Issues, runs the independent assurance (re-run from a fresh export, source-identity check, mutation sweep, browser run), and returns **one** consolidated milestone report. Routine choices (fonts, colours, icons, copy, route spelling, helper names, fixtures, disposable ports) are not questions. The run stops and escalates only for: a change to settled architecture; an exact Work Order or allowlist change; a missing verified prerequisite with no safe supported remedy; an exhausted specialist budget; a material security or data-integrity finding; or ambiguous business semantics. To Matt only: ownership of firm, group or financial data; deleting or replacing live data; unrestricted live writes; exposing finance beyond the internal PoC; new cost or licence; a revenue formula; product priority changes. A failed Work Order stays failed.
+
+**After D1 (committed roadmap; each item a separate bounded Work Order, drafted and approved separately, none ready for dispatch):** D2 makes WIP the useful product: `WIP-WRITE-001` (functional add and edit with audit), `WIP-HISTORY-001` (history) and `WIP-GUI-001` (the corrected GUI: each legacy operator task reviewed and rebuilt or explicitly retired). D3 adds firm-group workflows when the CRM entity exists (`CRM-FG-001`, then `WIP-GROUP-001`) and reconciles legacy data, outstanding rejects and operations (no live writes and no retirement of the source without a separate operator change and evidence). D4 is the common security layer. **D1 is a deliberately narrow read-only synthetic proof; it must never be presented as the finished WIP product.** The existing WIP scheduled-job outage (`WIP-OPS-001`) and the SEC-1 remediation stay separately owned.
