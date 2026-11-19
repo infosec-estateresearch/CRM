@@ -44,6 +44,8 @@ case "$*" in
     *" config --format json") exec python3 -I "$FAKE_COMPOSE_CONFIG" "$@" ;;
     *mariadb-dump*) printf -- '-- fake dump\\nCREATE TABLE account (id int);\\n' ;;
     *"exec -T crm-db"*) cat > "$FAKE_DOCKER_STDIN" ;;
+    *"update-app-timestamp"*) [ -n "${FAKE_TS_STATIC:-}" ] || echo $(( $(cat "$FAKE_DOCKER_LOG.ts" 2>/dev/null || echo 100) + 1 )) > "$FAKE_DOCKER_LOG.ts" ;;
+    *appTimestamp*) cat "$FAKE_DOCKER_LOG.ts" 2>/dev/null || echo 100 ;;
     *" ps --status running -q crm-app"*) [ -z "${FAKE_DOCKER_RUNNING:-}" ] || echo 0123abcd ;;
     *" stop crm-daemon crm-app") [ -z "${FAKE_DOCKER_ON_STOP:-}" ] || bash -c "$FAKE_DOCKER_ON_STOP" ;;
 esac
@@ -387,6 +389,12 @@ def tree(root):
     return out
 
 
+# The docker call that reads the stored appTimestamp (CRM-WIP-LINK-001).
+READ_TS = ("exec -T -u www-data -w /var/www/html crm-app php -r "
+           '$a = include "data/config.php"; $b = is_file("data/config-internal.php") ? '
+           'include "data/config-internal.php" : []; echo (int) (array_merge($a, $b)["appTimestamp"] ?? 0);')
+
+
 class TestDeployCustom(ScriptEnv):
     def setUp(self):
         super().setUp()
@@ -452,6 +460,11 @@ class TestDeployCustom(ScriptEnv):
             "up -d --wait crm-app crm-daemon",
             "exec -T -u www-data -w /var/www/html crm-app php bin/command clear-cache",
             "exec -T -u www-data -w /var/www/html crm-app php bin/command rebuild",
+            # CRM-WIP-LINK-001: the repository now has client/custom/src, so the
+            # deploy also advances the stored appTimestamp (read, update, read).
+            READ_TS,
+            "exec -T -u www-data -w /var/www/html crm-app php bin/command update-app-timestamp",
+            READ_TS,
         ])
 
     def test_missing_runtime_custom_dir_fails_and_writes_nothing(self):
@@ -1046,8 +1059,10 @@ class TestDeploySecuresCustomDirs(ScriptEnv):
         self.assert_private(self.custom)
         self.assert_private(self.espo)
         uid = os.getuid()
-        self.assertEqual(self.chown_calls(), [f"-h -- {uid} {self.custom}", f"-h -- {uid} {self.espo}"],
-                         "non-recursive, no-dereference chown of exactly the two directories")
+        # CRM-WIP-LINK-001: client/custom is secured the same way (that one directory).
+        self.assertEqual(self.chown_calls(), [f"-h -- {uid} {self.custom}", f"-h -- {uid} {self.espo}",
+                                              f"-h -- {uid} {self.runtime}/client/custom"],
+                         "non-recursive, no-dereference chown of exactly the three directories")
         self.assertEqual(tree(os.path.join(self.espo, "Custom")), tree(REPO_CUSTOM))
 
     def test_created_parent_is_private(self):
