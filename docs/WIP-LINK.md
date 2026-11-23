@@ -4,7 +4,7 @@ An EspoCRM Account's detail page shows an **Open WIP / Revenue** button for user
 
 ## The `wipBaseUrl` runtime parameter
 
-- **What:** the base address of the independent WIP application, as an absolute `http:` or `https:` URL with a host. A path prefix is allowed and one trailing `/` is ignored. User-info (`user:pass@`), a query (`?x=1`) and a fragment (`#x`) are refused.
+- **What:** the base address of the independent WIP application, as an absolute `http:` or `https:` URL with a host. A path prefix is allowed and one trailing `/` is ignored. A value containing `@` anywhere (user-info such as `user:pass@`, or elsewhere, including in the path prefix), a query (`?x=1`) or a fragment (`#x`) is refused.
 - **Where:** EspoCRM's runtime configuration of the target (`data/config.php` in the runtime `data/` directory, key `wipBaseUrl`), never in this repository and never in the env file. Set it per environment with a value such as `<scheme>://<wip-host>:<port>` (placeholder only), then reload the CRM page in the browser.
 - **If it is missing or invalid** the button shows the warning "The WIP link is not configured." and nothing opens. There is no default address.
 - The record id must be letters and digits only; otherwise a warning is shown and nothing opens.
@@ -51,7 +51,7 @@ If crm-app was running it is started again and the cache steps re-run (`RECOVERE
 ## Verification
 
 1. After the deploy, open an Account: the button is present. Click it: a new tab opens at `<wipBaseUrl>/crm/firm/<Account id>`.
-2. Set `wipBaseUrl` to a value with a scheme other than `http:`/`https:`, with user-info, query or fragment, or empty: the warning appears and nothing opens.
+2. Set `wipBaseUrl` to a value with a scheme other than `http:`/`https:`, containing `@` anywhere, with a query or fragment, or empty: the warning appears and nothing opens.
 3. Stop the WIP application: the Account page and its panels still work.
 4. Deploy the base: the button, `client/custom/src` and the marker are gone; `client/custom/modules` is unchanged.
 5. `scripts/backup.sh dev` archives `client/custom` including the handler (`client-custom.tar.gz`).

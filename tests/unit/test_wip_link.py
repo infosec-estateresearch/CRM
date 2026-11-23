@@ -361,5 +361,55 @@ class TestReferenceModel(unittest.TestCase):
                 self.assertRegex(code, HANDLER_RULES[rule])
 
 
+# CRM-WIP-LINK-001R2: the written rule is "wipBaseUrl is rejected if it contains '@' anywhere
+# (user-info or otherwise), a query or a fragment; a path prefix without '@' is allowed".
+AT_SIGN_ROWS = [
+    ("http://user:pass@wip.example", "user-info with a password"),
+    ("http://user@wip.example", "user-info without a password"),
+    ("http://@wip.example", "empty user-info"),
+    ("http://wip.example@evil.example", "'@' that turns the host into user-info"),
+    ("http://wip.example:8310@", "'@' at the end of the authority"),
+    ("http://wip.example/app@v2", "'@' in a path prefix"),
+    ("https://wip.example/a/@b/", "'@' in a path segment"),
+    ("http://wip.example/app@v2?x=1", "'@' in the path with a query"),
+    ("http://wip.example/app@v2#x", "'@' in the path with a fragment"),
+    ("http://wip.example/app%40v2@", "encoded and raw '@'"),
+]
+
+
+class TestAtSignRule(unittest.TestCase):
+    def test_every_at_sign_row_is_rejected_by_the_reference_model(self):
+        for base, why in AT_SIGN_ROWS:
+            with self.subTest(base=base, why=why):
+                self.assertIsNone(model_base(base))
+                self.assertIsNone(model_target(base, "ID1"))
+
+    def test_a_path_prefix_without_at_sign_is_still_accepted(self):
+        self.assertEqual(model_target("https://wip.example/app/v2/", "ID1"), "https://wip.example/app/v2/crm/firm/ID1")
+        self.assertEqual(model_target("http://wip.example:8310/a-b_c", "ID1"), "http://wip.example:8310/a-b_c/crm/firm/ID1")
+
+    def test_query_and_fragment_are_still_rejected(self):
+        for base in ("http://wip.example/app?x=1", "http://wip.example/app#x", "http://wip.example?", "http://wip.example#"):
+            with self.subTest(base=base):
+                self.assertIsNone(model_base(base))
+
+    def test_the_handler_rejects_an_at_sign_anywhere(self):
+        code = strip_comments(read(HANDLER))
+        self.assertRegex(code, HANDLER_RULES["raw user-info text"])
+        # the check is on the whole raw value and returns null (not a warning or a partial strip)
+        self.assertRegex(code, r"if \(value\.indexOf\('@'\) !== -1\) \{\s*return null;\s*\}")
+
+    def test_deleting_the_handlers_at_sign_check_is_detected(self):
+        original = read(HANDLER)
+        self.assertEqual(handler_problems(original), [])
+        for name, mutated in (
+            ("check removed", original.replace("value.indexOf('@') !== -1", "false")),
+            ("check limited to user-info", original.replace("value.indexOf('@') !== -1", "url.username !== ''")),
+        ):
+            with self.subTest(mutation=name):
+                self.assertNotEqual(mutated, original, "the mutation did not apply")
+                self.assertNotEqual(handler_problems(mutated), [], name)
+
+
 if __name__ == "__main__":
     unittest.main()

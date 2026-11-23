@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(__file__))
 import test_scripts as ts  # noqa: E402  (its test classes stay in that module)
@@ -453,6 +454,163 @@ class Delivery(ts.ScriptEnv):
             "rebuilds by itself; otherwise re-run this script once the stack is up.\n"))
         self.assertEqual(self.verbs(), ["ps --status running -q crm-app", "stop crm-daemon crm-app"])
 
+    # ---- marker guard (CRM-WIP-LINK-001R2): the marker must be a regular file, not a link ----
+    MARKER_RUNS = ("install", "update", "removal")
+    MARKER_KINDS = ("link-inside", "dangling-link", "link-to-canary", "directory", "fifo")
+    MARKER_LINE = "client/custom/src is managed by scripts/deploy_custom.sh\n"
+
+    @property
+    def marker(self):
+        return os.path.join(self.cc, MARKER)
+
+    @property
+    def canary(self):
+        return os.path.join(self.tmp.name, "canary.txt")
+
+    @property
+    def dangling_target(self):
+        return os.path.join(self.tmp.name, "dangling-target")
+
+    def deploy_bounded(self, **env):
+        """deploy(), but a script blocked on a marker (a write into a FIFO) fails as a
+        test assertion after a short time instead of hanging for the full timeout."""
+        real = subprocess.run
+
+        def bounded(*args, **kwargs):
+            kwargs["timeout"] = 20
+            try:
+                return real(*args, **kwargs)
+            except subprocess.TimeoutExpired as exc:
+                raise AssertionError("the script hung on the marker (a write into it blocked)") from exc
+        with mock.patch.object(subprocess, "run", bounded):
+            return self.deploy(**env)
+
+    def marker_prepare(self, run):
+        """The runtime and repository of one run kind, with a regular marker where the run has one."""
+        if run == "install":
+            return
+        self.ok()  # an earlier good install: managed src and a regular marker
+        if run == "update":
+            self.write_repo("handlers/account-open-wip.js", "// v2 (the update)\n")
+        else:
+            shutil.rmtree(self.rsrc)  # removal: the repository has no client/custom/src
+
+    def marker_plant(self, kind, path=None):
+        """Put a marker of this kind in place (replacing a regular marker); returns the canary bytes."""
+        path = path or self.marker
+        with open(self.canary, "w") as fh:
+            fh.write("canary: nothing may write here or remove it\n")
+        if os.path.lexists(path):
+            os.remove(path)
+        if kind == "link-inside":
+            self.write("client/custom/marker-target.txt", "a regular file inside client/custom\n")
+            os.symlink(os.path.join(self.cc, "marker-target.txt"), path)
+        elif kind == "dangling-link":
+            os.symlink(self.dangling_target, path)
+        elif kind == "link-to-canary":
+            os.symlink(self.canary, path)
+        elif kind == "directory":
+            os.mkdir(path)
+            with open(os.path.join(path, "inner.txt"), "w") as fh:
+                fh.write("inner\n")
+        elif kind == "fifo":
+            os.mkfifo(path)
+        else:
+            raise AssertionError(kind)
+
+    def marker_world(self):
+        """Everything a refused run must leave exactly as it was (types, modes, link targets, bytes)."""
+        return {"client": ts.tree_hash(self.client),
+                "custom": ts.tree_hash(os.path.join(self.runtime, "custom")),
+                "marker": snapshot(self.marker) if not stat.S_ISFIFO(os.lstat(self.marker).st_mode) else "fifo",
+                "marker-mode": os.lstat(self.marker).st_mode,
+                "canary": snapshot(self.canary),
+                "dangling-target-created": os.path.lexists(self.dangling_target)}
+
+    def marker_no_working_names(self):
+        parent = os.path.dirname(self.live)
+        for d in (self.cc, parent):
+            self.assertEqual([n for n in os.listdir(d) if ".deploy-" in n or ".old-" in n or ".failed-" in n], [],
+                             "no working name was created")
+
+    def marker_refusal(self, run, kind):
+        self.fresh()
+        self.marker_prepare(run)
+        self.marker_plant(kind)
+        before = self.marker_world()
+        res = self.deploy_bounded()
+        self.assertNotEqual(res.returncode, 0, f"{run}/{kind}: {res.stdout}{res.stderr}")
+        self.stderr_has(res, f"refusing to deploy: the marker is not a regular file: {self.marker}")
+        self.assertEqual(self.verbs(), [], f"{run}/{kind}: no docker call, so nothing was stopped, removed or rebuilt")
+        self.assertEqual(self.marker_world(), before, f"{run}/{kind}: the runtime and the canary are untouched")
+        self.assertFalse(os.path.lexists(self.dangling_target), "nothing was written through the link")
+        self.marker_no_working_names()
+
+    def sc_marker_refused_install(self):
+        for kind in self.MARKER_KINDS:
+            with self.sub(run="install", kind=kind):
+                self.marker_refusal("install", kind)
+
+    def sc_marker_refused_update(self):
+        for kind in self.MARKER_KINDS:
+            with self.sub(run="update", kind=kind):
+                self.marker_refusal("update", kind)
+
+    def sc_marker_refused_removal(self):
+        for kind in self.MARKER_KINDS:
+            with self.sub(run="removal", kind=kind):
+                self.marker_refusal("removal", kind)
+
+    def sc_marker_second_pass(self):
+        """The marker becomes a link while the stack stops: refused after the stop, stack left stopped."""
+        for run in ("install", "update"):
+            with self.sub(run=run):
+                self.fresh()
+                self.marker_prepare(run)
+                with open(self.canary, "w") as fh:
+                    fh.write("canary: nothing may write here or remove it\n")
+                canary = snapshot(self.canary)
+                cmd = f"rm -f -- {shlex.quote(self.marker)} && ln -s -- {shlex.quote(self.canary)} {shlex.quote(self.marker)}"
+                client_before = ts.tree_hash(self.src) if os.path.isdir(self.src) else None
+                custom_before = ts.tree_hash(os.path.join(self.runtime, "custom"))
+                res = self.deploy_bounded(FAKE_DOCKER_ON_STOP=cmd)
+                self.assertTrue(os.path.islink(self.marker), f"{run}: the plant happened")
+                self.assertNotEqual(res.returncode, 0, f"{run}: {res.stdout}{res.stderr}")
+                self.stderr_has(res, f"refusing to deploy: the marker is not a regular file: {self.marker}", "left stopped")
+                self.assertEqual(self.verbs(), ["ps --status running -q crm-app", "stop crm-daemon crm-app"])
+                self.assertEqual(os.readlink(self.marker), self.canary)
+                self.assertEqual(snapshot(self.canary), canary, "nothing was written through the link")
+                self.assertEqual(ts.tree_hash(self.src) if os.path.isdir(self.src) else None, client_before)
+                self.assertEqual(ts.tree_hash(os.path.join(self.runtime, "custom")), custom_before)
+                self.marker_no_working_names()
+
+    def sc_marker_positive_controls(self):
+        """The same harness with the guard intact accepts a regular marker (so the refusals are not vacuous)."""
+        with self.sub(run="install"):
+            self.fresh()
+            self.assertFalse(os.path.lexists(self.marker))
+            self.ok()
+            self.assertTrue(os.path.isfile(self.marker) and not os.path.islink(self.marker))
+            with open(self.marker) as fh:
+                self.assertEqual(fh.read(), self.MARKER_LINE)
+            self.tree_equal(self.src, self.rsrc)
+        with self.sub(run="update"):
+            self.fresh()
+            self.marker_prepare("update")
+            self.assertTrue(os.path.isfile(self.marker) and not os.path.islink(self.marker))
+            self.ok()
+            self.tree_equal(self.src, self.rsrc)
+            self.assertTrue(os.path.isfile(self.marker) and not os.path.islink(self.marker))
+            with open(self.marker) as fh:
+                self.assertEqual(fh.read(), self.MARKER_LINE)
+        with self.sub(run="removal"):
+            self.fresh()
+            self.marker_prepare("removal")
+            self.assertTrue(os.path.isfile(self.marker) and not os.path.islink(self.marker))
+            self.ok()
+            self.assertFalse(os.path.lexists(self.src))
+            self.assertFalse(os.path.lexists(self.marker))
+
 
 class TestClientDelivery(Delivery):
     def test_first_install(self): self.sc_first_install()
@@ -478,6 +636,12 @@ class TestClientDelivery(Delivery):
     def test_group_or_world_writable_client_is_refused(self): self.sc_writable_client_refused()
     def test_preexisting_working_names_are_refused(self): self.sc_preexisting_names()
     def test_no_asset_on_either_side_equals_the_base_behaviour(self): self.sc_none_equals_base()
+
+    def test_marker_that_is_not_a_regular_file_is_refused_on_install(self): self.sc_marker_refused_install()
+    def test_marker_that_is_not_a_regular_file_is_refused_on_update(self): self.sc_marker_refused_update()
+    def test_marker_that_is_not_a_regular_file_is_refused_on_removal(self): self.sc_marker_refused_removal()
+    def test_marker_replaced_by_a_link_while_the_stack_stops_is_refused(self): self.sc_marker_second_pass()
+    def test_a_regular_marker_is_accepted_on_install_update_and_removal(self): self.sc_marker_positive_controls()
 
     def test_exit_codes_are_documented_in_the_script_header(self):
         with open(self.script) as fh:
@@ -532,6 +696,22 @@ MUTATIONS = [
     ("recovery does not restart the stack", lambda s: replace_once(s, "{ compose up -d --wait crm-app crm-daemon \\\n            && app_exec", "{ true \\\n            && app_exec"), "sc_post_swap_failures"),
     ("RECOVERY FAILED never printed", lambda s: replace_once(s, "RECOVERY FAILED:", "RECOVERED?:"), "sc_recovery_failed"),
     ("the other client/custom entries are listed as leftovers", lambda s: replace_once(s, '$d"/.src.deploy-* "$d"/.src.old-*', '$d"/* "$d"/.src.old-*'), "sc_leftovers"),
+    # marker guard (CRM-WIP-LINK-001R2): M05 and its variants
+    ("M05 marker guard body removed",
+     lambda s: replace_once(s, '        [ ! -L "$marker" ] && [ -f "$marker" ] \\\n            || die "refusing to deploy: the marker is not a regular file: $marker"\n', '        true\n'),
+     "sc_marker_refused_install"),
+    ("M05a marker symlink test dropped (only -f stays)",
+     lambda s: replace_once(s, '[ ! -L "$marker" ] && [ -f "$marker" ] \\\n            || die', '[ -f "$marker" ] \\\n            || die'),
+     "sc_marker_refused_update"),
+    ("M05b marker regular-file test dropped (only ! -L stays)",
+     lambda s: replace_once(s, '[ ! -L "$marker" ] && [ -f "$marker" ] \\\n            || die', '[ ! -L "$marker" ] \\\n            || die'),
+     "sc_marker_refused_removal"),
+    ("M05c marker guard entered only when -e is true (a dangling link escapes)",
+     lambda s: replace_once(s, 'if [ -e "$marker" ] || [ -L "$marker" ]; then\n        [ ! -L', 'if [ -e "$marker" ]; then\n        [ ! -L'),
+     "sc_marker_refused_install"),
+    ("M05d marker refusal downgraded to a warning",
+     lambda s: replace_once(s, '|| die "refusing to deploy: the marker is not a regular file: $marker"', '|| echo "warning: the marker is not a regular file: $marker" >&2'),
+     "sc_marker_second_pass"),
 ]
 
 
