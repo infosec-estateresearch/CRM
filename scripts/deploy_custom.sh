@@ -255,7 +255,7 @@ app_exec() {
 # The stored appTimestamp (whole seconds), read from the application's own config.
 read_app_timestamp() {
     local value
-    value=$(app_exec php -r '$a = include "data/config.php"; $b = is_file("data/config-internal.php") ? include "data/config-internal.php" : []; echo (int) (array_merge($a, $b)["appTimestamp"] ?? 0);') || return 1
+    value=$(app_exec php -r '$a = include "data/config.php"; $b = is_file("data/config-internal.php") ? include "data/config-internal.php" : []; $c = is_file("data/state.php") ? include "data/state.php" : []; echo (int) (array_merge($a, $b, $c)["appTimestamp"] ?? 0);') || return 1
     case "$value" in
         ''|*[!0-9]*) echo "$(basename "$0"): cannot read appTimestamp (got '$value')" >&2; return 1 ;;
     esac
@@ -324,7 +324,7 @@ restore_trees() {
 # FAILED STEP: name it, restore both trees, start the stack again if it was
 # running, and exit with the step's own code.
 fail_step() {
-    local step=$1 code=$2 ok=1
+    local step=$1 code=$2 ok=1 up_ok=
     [ -z "$in_recovery" ] || exit "$code"
     in_recovery=1
     trap '' INT TERM HUP
@@ -335,6 +335,8 @@ fail_step() {
         echo "$(basename "$0"): the previous trees could not all be put back; see the .old-$stamp and .failed-$stamp names" >&2
     fi
     if [ -n "$ok" ] && [ -n "$was_running" ]; then
+        # In this chain app_exec runs only after compose up succeeded: note it.
+        app_exec() { up_ok=1; compose exec -T -u www-data -w /var/www/html crm-app "$@"; }
         { compose up -d --wait crm-app crm-daemon \
             && app_exec php bin/command clear-cache \
             && app_exec php bin/command rebuild \
@@ -344,6 +346,8 @@ fail_step() {
         echo "$(basename "$0"): RECOVERED: previous trees restored, crm-app and crm-daemon started again" >&2
     elif [ -n "$ok" ]; then
         echo "$(basename "$0"): RECOVERED: previous trees restored; crm-app was not running and is left stopped" >&2
+    elif [ -n "$up_ok" ]; then
+        echo "$(basename "$0"): RECOVERY FAILED: previous trees restored and crm-app and crm-daemon started, but a cache step failed" >&2
     else
         echo "$(basename "$0"): RECOVERY FAILED: crm-app and crm-daemon are left stopped" >&2
     fi

@@ -9,6 +9,7 @@ import io
 import json
 import hashlib
 import os
+import re
 import shlex
 import shutil
 import stat
@@ -39,13 +40,47 @@ FAKE_DOCKER = """#!/usr/bin/env bash
 # Records its arguments; plays mariadb-dump / mariadb inside "crm-db", and
 # `compose config --format json` through FAKE_COMPOSE_CONFIG.
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+# The application's data directory, laid out as EspoCRM 10.0.12 lays it out
+# (FAKE_TS_LAYOUT=state, the default): appTimestamp only in data/state.php. "legacy":
+# only in data/config-internal.php. "none": in no file.
+APPDATA="$FAKE_DOCKER_LOG.app/data"
+ts_init() {
+    [ -f "$APPDATA/config.php" ] && return 0
+    mkdir -p "$APPDATA"
+    printf '<?php\\nreturn [];\\n' > "$APPDATA/config.php"
+    case "${FAKE_TS_LAYOUT:-state}" in
+        state) printf "<?php\\nreturn ['cacheTimestamp' => 100, 'appTimestamp' => 100];\\n" > "$APPDATA/state.php" ;;
+        legacy) printf "<?php\\nreturn ['appTimestamp' => 100];\\n" > "$APPDATA/config-internal.php" ;;
+    esac
+}
+# Reads only the files the expression includes (`include "data/X.php"`), the later
+# file winning as in array_merge; a file that does not exist adds nothing.
+ts_read() {
+    ts_init
+    local v=0 f x
+    for f in $(printf '%s' "$1" | grep -o 'include "data/[A-Za-z0-9_.-]*"' | sed 's/include "//; s/"$//'); do
+        [ -f "$APPDATA/${f#data/}" ] || continue
+        x=$(sed -n "s/.*'appTimestamp' => \\([0-9][0-9]*\\).*/\\1/p" "$APPDATA/${f#data/}" | tail -1)
+        [ -z "$x" ] || v=$x
+    done
+    echo "$v"
+}
+ts_write() {
+    ts_init
+    local f
+    case "${FAKE_TS_LAYOUT:-state}" in state) f=state.php ;; legacy) f=config-internal.php ;; *) return 0 ;; esac
+    printf "<?php\\nreturn ['appTimestamp' => %s];\\n" $(( $(sed -n "s/.*'appTimestamp' => \\([0-9][0-9]*\\).*/\\1/p" "$APPDATA/$f" | tail -1) + 1 )) > "$APPDATA/$f"
+}
+if [ -n "${FAKE_DOCKER_FAIL:-}" ] && [[ "$*" == *"$FAKE_DOCKER_FAIL"* ]]; then
+    echo "fake docker: failing $FAKE_DOCKER_FAIL" >&2; exit 1
+fi
 [ -z "${FAKE_DOCKER_ENV_LOG:-}" ] || env >> "$FAKE_DOCKER_ENV_LOG"
 case "$*" in
     *" config --format json") exec python3 -I "$FAKE_COMPOSE_CONFIG" "$@" ;;
     *mariadb-dump*) printf -- '-- fake dump\\nCREATE TABLE account (id int);\\n' ;;
     *"exec -T crm-db"*) cat > "$FAKE_DOCKER_STDIN" ;;
-    *"update-app-timestamp"*) [ -n "${FAKE_TS_STATIC:-}" ] || echo $(( $(cat "$FAKE_DOCKER_LOG.ts" 2>/dev/null || echo 100) + 1 )) > "$FAKE_DOCKER_LOG.ts" ;;
-    *appTimestamp*) cat "$FAKE_DOCKER_LOG.ts" 2>/dev/null || echo 100 ;;
+    *"update-app-timestamp"*) [ -n "${FAKE_TS_STATIC:-}" ] || ts_write ;;
+    *appTimestamp*) ts_read "$*" ;;
     *" ps --status running -q crm-app"*) [ -z "${FAKE_DOCKER_RUNNING:-}" ] || echo 0123abcd ;;
     *" stop crm-daemon crm-app") [ -z "${FAKE_DOCKER_ON_STOP:-}" ] || bash -c "$FAKE_DOCKER_ON_STOP" ;;
 esac
@@ -392,7 +427,72 @@ def tree(root):
 # The docker call that reads the stored appTimestamp (CRM-WIP-LINK-001).
 READ_TS = ("exec -T -u www-data -w /var/www/html crm-app php -r "
            '$a = include "data/config.php"; $b = is_file("data/config-internal.php") ? '
-           'include "data/config-internal.php" : []; echo (int) (array_merge($a, $b)["appTimestamp"] ?? 0);')
+           'include "data/config-internal.php" : []; $c = is_file("data/state.php") ? '
+           'include "data/state.php" : []; echo (int) (array_merge($a, $b, $c)["appTimestamp"] ?? 0);')
+
+
+class TestDeployStoredTimestamp(ScriptEnv):
+    """CRM-WIP-LINK-001R3: the stored appTimestamp is read where the application
+    keeps it (data/state.php on EspoCRM 10.0.12), and the recovery message is
+    accurate. The fake docker reads only the files the expression includes."""
+
+    def setUp(self):
+        super().setUp()
+        self.live = os.path.join(self.runtime, "custom", "Espo", "Custom")
+
+    def deploy(self, **env):
+        env.setdefault("FAKE_DOCKER_RUNNING", "1")
+        return self.run_script("deploy_custom.sh", "dev", extra_env=env)
+
+    def stored(self, name):
+        path = os.path.join(self.log + ".app", "data", name)
+        if not os.path.isfile(path):
+            return None
+        with open(path) as fh:
+            found = re.search(r"'appTimestamp' => (\d+)", fh.read())
+        return int(found.group(1)) if found else None
+
+    def test_state_layout_completes_and_value_increases(self):  # positive control (i)
+        res = self.deploy()
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.stored("state.php"), 101)
+        self.assertIsNone(self.stored("config.php"))
+        self.assertIsNone(self.stored("config-internal.php"))
+        self.assertIn("application timestamp advanced", res.stdout)
+        self.assertEqual(tree(self.live), tree(REPO_CUSTOM))
+
+    def test_legacy_layout_still_completes(self):  # positive control (ii)
+        res = self.deploy(FAKE_TS_LAYOUT="legacy")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.stored("config-internal.php"), 101)
+        self.assertIsNone(self.stored("state.php"))
+        self.assertIn("application timestamp advanced", res.stdout)
+
+    def test_value_in_no_file_fails_closed_at_step_27(self):
+        before = tree(self.live)
+        res = self.deploy(FAKE_TS_LAYOUT="none")
+        self.assertEqual(res.returncode, 27, res.stdout + res.stderr)
+        self.assertIn("FAILED STEP: update-app-timestamp", res.stderr)
+        self.assertIn("appTimestamp did not advance (0 -> 0)", res.stderr)
+        self.assertIn("RECOVERED: previous trees restored", res.stderr)
+        self.assertNotIn("RECOVERY FAILED", res.stderr)
+        self.assertEqual(tree(self.live), before, "the previous custom tree is back")
+        self.assertFalse(os.path.exists(os.path.join(self.runtime, "client", "custom", "src")),
+                         "the new client tree was rolled back")
+
+    def test_cache_step_fails_after_compose_up_succeeded(self):
+        res = self.deploy(FAKE_DOCKER_FAIL="bin/command rebuild")
+        self.assertEqual(res.returncode, 26, res.stdout + res.stderr)
+        self.assertIn("RECOVERY FAILED: previous trees restored and crm-app and crm-daemon started, "
+                      "but a cache step failed", res.stderr)
+        self.assertNotIn("left stopped", res.stderr)
+        self.assertGreaterEqual(self.verbs().count("up -d --wait crm-app crm-daemon"), 2)
+
+    def test_compose_up_itself_fails_keeps_the_old_wording(self):
+        res = self.deploy(FAKE_DOCKER_FAIL="up -d --wait")
+        self.assertEqual(res.returncode, 24, res.stdout + res.stderr)
+        self.assertIn("RECOVERY FAILED: crm-app and crm-daemon are left stopped", res.stderr)
+        self.assertNotIn("a cache step failed", res.stderr)
 
 
 class TestDeployCustom(ScriptEnv):

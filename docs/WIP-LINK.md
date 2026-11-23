@@ -20,7 +20,7 @@ scripts/deploy_custom.sh dev
 - Only the runtime `client/custom/src` is managed. `client/custom/modules` and every other entry of `client/custom` are never read, written or listed.
 - The source `client/custom/src` must be a real directory with no symlink inside. The runtime `client/` must be a real directory owned by the invoking user and not group- or world-writable.
 - The new tree is staged as `.src.deploy-<UTC>` beside `src` and swapped in by rename. The previous `src` and `custom/Espo/Custom` are kept as `.src.old-<UTC>` and `.Custom.old-<UTC>` until `clear-cache`, `rebuild` and `update-app-timestamp` have succeeded.
-- After `rebuild` the script runs `update-app-timestamp` and checks that the stored `appTimestamp` strictly increased (one retry after one second), so browsers fetch the new code.
+- After `rebuild` the script runs `update-app-timestamp` and checks that the stored `appTimestamp` (read from `data/state.php` beside the two configuration files, `data/config.php` and `data/config-internal.php`) strictly increased (one retry after one second), so browsers fetch the new code.
 - The marker `client/custom/.src-managed-by-git` is written after a successful install.
 - If crm-app was not running, it stays stopped, the cache steps are skipped and the timestamp is not advanced; run the script again once the stack is up.
 
