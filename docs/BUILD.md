@@ -141,11 +141,11 @@ Everything below is for the operator stage. Run it as the authorised operator, f
 
 **How the deploy works.** It is deterministic:
 - It stops `crm-app` and `crm-daemon` before it checks the paths and swaps the tree (see "Path safety" below).
-- It builds a fresh copy beside the live tree, swaps it in by rename, and deletes the previous tree. Files removed from Git are therefore removed from the runtime too, and two deploys of the same commit give identical trees.
+- It builds a fresh copy beside the live tree, swaps it in by rename, and deletes the previous tree once every later step has succeeded. Files removed from Git are therefore removed from the runtime too, and two deploys of the same commit give identical trees.
 - Files are written world-readable (umask `022`), whatever the operator's umask.
-- It only manages `custom/Espo/Custom/`. The rest of the runtime `custom/` and all of `client/custom/` are left alone. The repository has no `client/custom/` content at present.
+- It manages `custom/Espo/Custom/` and, when the repository has `client/custom/src`, the runtime `client/custom/src` (the browser code; see `docs/WIP-LINK.md`). The rest of the runtime `custom/` and every other entry of `client/custom/` (for example `modules/`) are left alone. Neither tree is replaced as a whole before every post-swap step has succeeded: the previous trees are kept as `.Custom.old-<UTC>` and `.src.old-<UTC>` until `clear-cache`, `rebuild` and `update-app-timestamp` have passed, and a failure puts both back.
 - It never replaces the runtime `custom/` directory itself, because that directory is the bind-mount source.
-- If `crm-app` was running when the deploy started, it starts `crm-app` and `crm-daemon` again (`up -d --wait`), then runs `bin/command clear-cache` and `bin/command rebuild` inside `crm-app` as `www-data`. If `crm-app` was not running, both stay stopped and the script says the rebuild was skipped.
+- If `crm-app` was running when the deploy started, it starts `crm-app` and `crm-daemon` again (`up -d --wait`), then runs `bin/command clear-cache`, `bin/command rebuild` and (when the browser code is managed) `bin/command update-app-timestamp` inside `crm-app` as `www-data`. If `crm-app` was not running, both stay stopped and the script says the rebuild was skipped.
 - It takes the `dev` guard like the other scripts.
 
 **Path safety.** The deploy runs as root. The image entrypoint chowns the runtime `custom/` to the container's `www-data` on every start, so code running as `www-data` in `crm-app` or `crm-daemon` could otherwise plant a symlink in that tree and redirect a root write or delete elsewhere on the host. The script therefore fails closed, as follows:
@@ -165,6 +165,7 @@ Everything below is for the operator stage. Run it as the authorised operator, f
 - **Restart.** The entrypoint re-chowns the three runtime directories to `www-data` (container uid) on every start. The files deployed from Git stay as they are, only their owner changes. A later deploy, run as root, replaces them again.
 - **Admin-UI changes.** A deploy run as root leaves the deployed `custom/Espo/Custom/` tree **root-owned until the next container start**, when the entrypoint chowns it to `www-data`. Until then, Entity Manager and Layout Manager cannot write to it. When the deploy restarts the app itself (the app was running), that start is part of the deploy and they can write again once the deploy has finished. After a deploy before the first `up`, they can write once the stack has started. Any change they make is **overwritten by the next deploy**. To keep a change, make it in Git. Git remains authoritative, and the runtime copy is only a deployment of it.
 - **Backup and restore** cover the runtime `custom/` and `client/custom/` as well as `data/` and the database (§7.3). After a restore, the runtime holds the customisation as it was at backup time. Run `scripts/deploy_custom.sh dev` to return to the checked-out commit.
+- **Rollback.** Check out the commit to return to (the base, or any commit without `client/custom/src`) and run `scripts/deploy_custom.sh dev`. The runtime `client/custom/src` is removed only if the marker `client/custom/.src-managed-by-git` is present; without the marker it is left untouched and the script says so. Details, exit codes and failure restore: `docs/WIP-LINK.md`.
 
 The entrypoint and image behaviour above comes from the upstream `espocrm-docker` source (`latest/apache/`, `ESPOCRM_VERSION 10.0.12`), not from the pinned digest. It is to be confirmed at the operator stage.
 
