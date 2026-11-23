@@ -1,0 +1,156 @@
+# Tester review: CRM-WIP-LINK-001 (round 1)
+
+Worktree: /srv/CRM/worktrees/CRM-WIP-LINK-001
+Candidate SHA: 3a5e7cd13bb31bd84c7f21ff4c9a5dc42ee40aea
+Base SHA: 6e1766980e24d781d498727d4fe5db43cdeadbb7
+Scratch directory: /srv/CRM/worktrees/.forge-scratch/CRM-WIP-LINK-001
+
+Assess the candidate independently against the Work Order below, in your role as Tester. Do not modify the worktree. End your final message with exactly one verdict word: PASS, FINDINGS or INCONCLUSIVE, and list each finding with a short stable key, severity (blocking or advisory) and evidence.
+
+----- WORK ORDER (verbatim) -----
+WO: CRM-WIP-LINK-001
+REPO: infosec-estateresearch/CRM
+HOST: DOCKER1
+ROOT: /srv/CRM/main
+WORKTREES: /srv/CRM/worktrees
+BASE: main
+KNOWN_COMMIT: 6e1766980e24d781d498727d4fe5db43cdeadbb7
+
+# CRM-WIP-LINK-001: "Open WIP / Revenue" action on the Account page (link only)
+
+- **Version:** v1.1 **DRAFT**, 2026-11-18 (revised once after CGPT's D0 review; v1.0 was published in CRM commit `acd87f2f1588ada0f6a9ed809b82acd57ac47463`, file SHA-256 `a9736d5564d0223cc81969a9c04460927ad3048ff09544ea1fb5e105771cd3fc`; counters and ledgers are unchanged by the revision). **Not approved. No dispatch.** Dispatch needs a CGPT exact-version approval naming this path and the commit that contains it, recorded on the Issue below after that commit exists (the approval is recorded outside this text, so this text cannot show it). The Orchestrator's dispatch record (`APPROVAL.md`) carries the cap in section 0.
+- **Issue (status, evidence, approval, escalation):** https://github.com/infosec-estateresearch/CRM/issues/82. **Product direction:** https://github.com/infosec-estateresearch/CRM/issues/81 (Product Owner and Architect, 2026-11-18). **Architecture:** `docs/architecture/2026-11-18-standalone-wip-poc.md` (PROPOSED in the same commit).
+- **Parent PBI:** `CRM-PBI-030` (Account to WIP link) and `CRM-PBI-031` (client-asset delivery, **now delivered inside this Work Order**), in `PRODUCT-BACKLOG.md` (PROPOSED). Decisions: CRM-D035, CRM-D037, CRM-D039, CRM-D040 (PROPOSED).
+- **Governing FOUNDRY:** `maff0000/foundry@84fedf0a74017237aa1bd650d8560350c91c7f0e`: `standards/work-order-contract.md`, `standards/secure-engineering.md`, `standards/product-records.md`. **Engine:** ForgeV2 plugin 0.3.0, pinned `63b6b8ab6c6d3c12d1ef3f0aeabe2ca22fbefb82` (re-verify at dispatch). **PIM:** `PROJECT-INITIATION-MANDATE.md` with its 2026-11-18 amendment.
+- **Prepared by:** Rogue (Orchestrator). Preparation only.
+- **G-CLIENT is decided (CGPT, 2026-11-18, option 2).** The minimal browser-asset delivery lives **inside this Work Order**, built on the verified current CRM `main` (application tree `6e176698…`; the 20 later commits on GitHub `main` are documents only), **not** on the unaccepted candidate `07bfaf1c…` (draft PR #69), which is **not** merged, **not** a base and **not** inherited with its open assurance chain. Its technical ideas and tests are read-only evidence (architecture record sections 5 and 11). If the delivery proves infeasible, the Work Order ends **BLOCKED** with a concrete build or proof finding, never a conceptual question.
+- **Header note (base).** `BASE: main` is the PL repository's local `main`, and `KNOWN_COMMIT` is its commit `6e1766980e24d781d498727d4fe5db43cdeadbb7` (VERIFIED 2026-11-18: clean, canonical origin). GitHub `main` (`e157bd51429e2764a94cecaf85a06bf707bd876f` at the time of writing, and after the documentation pull requests merge) differs from it by **documents only**; gate EB2 compares the trees. The merged documentation therefore does not change the engineering base, and `forge-start` is unaffected by it. There is **no `BROWSER: yes` line**: the sandboxed Tester has no network and no browser, so the real-browser proof is the operator's annex (section 8) and is not a specialist's claim.
+
+## 0. Chain and budget
+
+| Item | Value |
+|---|---|
+| Identity and counters | A **new** Work Order for a new product goal. It does not continue, rename or reset the `CRM-WIP-INT-001` chain (whose Engineer budget of five is spent) or `CRM-CLIENT-001R2`. Its own ledger starts at 0/0/0/0 |
+| **Engineer budget** | **At most 3** executions, held by the dispatch record (the engine's constant limit is 4 per specialist and cannot be lowered). **Raised from the 2 of v1.0 because the delivery script and its tests are now in scope; CGPT may hold it at 2 in the dispatch record.** A further execution is allowed only to correct a reviewer FAIL or FINDINGS on the previous one. Any further failure ends the WO as BLOCKED and returns to CGPT with the concrete finding; **no automatic replacement or recovery WO** |
+| Reviewers | Auditor, Tester and DevSecOps assess the **exact final candidate**; each returns PASS on the same unchanged commit. Any Engineer change restarts the sequence |
+| Operator assurance | Annex (section 8): the Orchestrator's real-browser run. It is evidence for CGPT and Matt, not a specialist execution |
+
+## 1. Outcome
+
+On an EspoCRM Account's detail page, a user who may read Accounts sees an **Open WIP / Revenue** button. Clicking it opens `<wipBaseUrl>/crm/firm/<Account id>` in a new browser tab. Nothing else changes: no WIP data, SQL, API, token, PHP, entity, field, scope, ACL, layout or route enters the CRM; removing the change restores the original page. The independent WIP application (a separate repository and Work Order, `WIP-CRM-CONTEXT-001`) serves that route. Because the browser code must reach the running CRM, the Work Order also delivers, by the repository's established script, the CRM-owned browser tree `client/custom/src` (first install, update and rollback) and proves it in a real browser. The candidate stays a draft: no merge, no deployment.
+
+## 2. Repository, workspace and what must stay untouched
+
+| Item | Verified value (2026-11-18) |
+|---|---|
+| Repository | `infosec-estateresearch/CRM` (public). GitHub `main` `e157bd51429e2764a94cecaf85a06bf707bd876f` (documents only since `6e176698`; further document commits may follow) |
+| Execution host and paths | `DOCKER1:/srv/CRM/main` (the PL's checkout, clean, local `main` `6e176698…`), worktrees `/srv/CRM/worktrees`; the specialist branch is `forge/CRM-WIP-LINK-001` in its own worktree |
+| Base | the PL's local `main` `6e1766980e24d781d498727d4fe5db43cdeadbb7` (see the header note). Baseline suite on this base: **564 tests, OK, 1 skipped** (python 3.13.5, run 2026-11-18 as the specialist account in an engine-shaped sandbox on an export of the base) |
+| Specialist limits | The sandbox has no network, no Docker, no browser, no Node.js, and cannot read the runtime directories. Unit tests are Python (`python3 -m unittest discover -s tests/unit`) |
+| Protected | `/srv/forgev2`, `/srv/src/foundry`, every ledger, the live runtime directories, the candidates `07bfaf1c…`, `167f2a9a…`, `1a1e8087…`, `2f831256…` (read-only evidence only), branches `forge/CRM-WIP-INT-*` and `forge/CRM-CLIENT-001R2`, draft PRs #69, #75, #80 |
+
+## 3. Required work (the allowlist; everything else is out of scope)
+
+| Path | Change |
+|---|---|
+| `client/custom/src/handlers/account-open-wip.js` | **new.** An AMD module (`define([...], function (...) {...})`, no `import` or `export`) returning a class whose constructor takes the view and which has `openWip()`. Behaviour in section 3.1 |
+| `custom/Espo/Custom/Resources/metadata/clientDefs/Account.json` | add one top-level key `menu`: `{"detail": {"buttons": [ <one item> ]}}`. The item is exactly: `name` `openWip`, `label` or `text` "Open WIP / Revenue", `handler` `custom:handlers/account-open-wip`, `actionFunction` `openWip`, `acl` `read`, `aclScope` `Account`, `style` `default`, optionally `iconClass`. **No** `link`, `url` or `data` that carries a URL. The existing `relationshipPanels` key is byte-identical |
+| `custom/Espo/Custom/Resources/i18n/en_US/Account.json` | only if a label key is used: add the single label; no existing key changes |
+| `tests/unit/test_wip_link.py` | **new.** Section 5 |
+| `scripts/deploy_custom.sh` | **edit.** The minimal client-asset delivery of section 3.2 (copy, update, rollback, restore on failure). The existing behaviour for `custom/Espo/Custom` is unchanged |
+| `tests/unit/test_client_delivery.py` | **new.** The delivery proofs of section 5, using the fake-`docker` harness pattern of `test_scripts.py` (the new file may import its helpers or repeat the minimum it needs) |
+| `tests/unit/test_scripts.py` | **edit, limited to what the delivery makes untrue:** runtime-layout fixtures that must now contain `client/custom`, and assertions on the printed lines or the `docker` call sequence of `deploy_custom.sh`. Every edited assertion is listed in the delivery report with the reason. No test is removed, skipped or weakened, and every existing assertion about `custom/Espo/Custom` still holds |
+| `docs/BUILD.md` | **edit, limited** to the two statements that are now untrue (section 7.2: "It only manages `custom/Espo/Custom/`" and "The repository has no `client/custom/` content at present"), the order of the swap and the rollback instruction. Nothing else |
+| `docs/WIP-LINK.md` | **new.** Operator note: the `wipBaseUrl` runtime parameter (what, where, how to set it per environment, with placeholders only), the delivery and rollback commands, the verification steps and the failure messages. No address, hostname or credential |
+
+**Everything else is unchanged**, including every other file in `scripts/`, `deploy/`, `config/`, `security/`, the rest of `docs/`, the other tests and every file under `.forge/`.
+
+### 3.1 Handler behaviour (the contract the Engineer implements and the operator's browser run checks)
+
+1. **Inputs:** the record id is `this.view.model.id`; the base is `this.view.getConfig().get('wipBaseUrl')`.
+2. **Id:** a non-empty string of letters and digits only (EspoCRM ids). Anything else: warn and stop.
+3. **Base:** must parse as an absolute URL with protocol `http:` or `https:`, a host, **no user-info, no query, no fragment**. A path prefix is allowed. A single trailing `/` is ignored. Anything else, or a missing value: show the warning "The WIP link is not configured." and stop. It never falls back to a default address and never invents a host.
+4. **Target:** `<base without trailing slash>/crm/firm/<encodeURIComponent(id)>`. It opens in a new tab with `noopener` (and `noreferrer`). No other parameter is added in this WO.
+5. **Failure isolation:** the handler makes no network request and reads no storage; an exception is caught and shown as a warning. The Account page must still work if the handler fails.
+6. **Policy:** the existing client-code rules apply unchanged (no remote URL literal, `eval`, `new Function`, `document.write`, `innerHTML` assignment, absolute-URL fetch or open, storage API, `import` or `export`).
+
+Operator behaviour table (the browser run asserts every row):
+
+| `wipBaseUrl` | id | Result |
+|---|---|---|
+| `http://wip.example:8310` | `ID1` | opens `http://wip.example:8310/crm/firm/ID1` |
+| `https://wip.example/app/` | `ID1` | opens `https://wip.example/app/crm/firm/ID1` |
+| missing, empty, or not a string | any | warning; nothing opens |
+| `javascript:...`, `data:...`, `ftp:...` | any | warning; nothing opens |
+| contains `user:pass@`, `?x=1` or `#x` | any | warning; nothing opens |
+| valid | empty or not alphanumeric | warning; nothing opens |
+
+### 3.2 Minimal client-asset delivery (the allowlisted change to `scripts/deploy_custom.sh`)
+
+**Why (VERIFIED 2026-11-18):** the script today delivers only `custom/Espo/Custom`; the runtime `client/custom` is a read-write bind mount that the container entrypoint re-owns on every start; backups and restore already cover `client-custom.tar.gz`; EspoCRM 10.0.12 has the `update-app-timestamp` console command; and the development runtime's `client/custom` exists and is empty. Required behaviour, in the script's own style (the Engineer chooses names and structure):
+
+1. **Scope.** Only `$CRM_RUNTIME_DIR/client/custom/src` is managed. `client/custom/modules` and every other entry of `client/custom` are never read, written, moved, deleted or listed. The source is `$CRM_REPO_DIR/client/custom/src`: a real directory with no symlink anywhere inside (refuse otherwise). No new environment variable and no new path outside `client/custom/src`.
+2. **Path safety** (the same discipline as the existing `custom/`): with the stack stopped, `client/` must be a real, canonical, privately owned directory (owned by the invoking user, not group- or world-writable) and `client/custom` is secured like `custom/` (owner and mode of that one directory, never recursive, never through a symlink); `src` (if present) must be real and canonical; every working name must be unused.
+3. **Update.** Copy to a staging directory beside `src` (`.src.deploy-<stamp>`, same filesystem), then swap with `mv -T`: the live `src` becomes `.src.old-<stamp>`, staging becomes `src`. The previous trees (`src` and the existing `custom/Espo/Custom`) are kept until every post-swap step has succeeded. The `src` directory's parent is never replaced (it is the bind-mount source).
+4. **Cache-bust.** After `clear-cache` and `rebuild`, run `update-app-timestamp` and check that the stored `appTimestamp` strictly increased (whole seconds: one retry after one second, then fail), so browsers fetch the new client code. When neither the repository nor the runtime has a managed `src`, the script's behaviour and output are **identical to the base's** (so the base's tests stay valid).
+5. **Failure and restore.** If a swap or post-swap step fails, or the script is interrupted after the stack stopped, **both** trees are put back as they were, staging is removed, the new trees are kept under `.failed-<stamp>` names, the failing step is named on stderr (`FAILED STEP: <step>`), and the script exits non-zero with a **distinct code per step** (documented in the script header and pinned by tests). If the stack was running it is started again and the cache steps re-run (`RECOVERED`), otherwise it is left stopped and says so (`RECOVERY FAILED`). The candidate `07bfaf1c` used exit codes 20 to 24 and 41 to 48 for exactly these cases; the Engineer may reuse the idea, not the code.
+6. **Rollback by deploying the base (managed removal).** A marker file `client/custom/.src-managed-by-git` (a sibling of `src`, written by the script after a successful install) records that the script manages `src`. When the repository has **no** `client/custom/src`, the script removes the runtime `src` **only if the marker is present** (swap aside, cache-bust, delete after success, restore on failure) and removes the marker; if `src` exists **without** the marker it is left untouched with a notice. Thus deploying the base, or any commit without the extension, restores the original Account page, and unmanaged content is never deleted.
+7. **Leftovers.** Working trees of earlier failed runs (names beginning `.src.` or `.Custom.` with `deploy-`, `old-` or `failed-`) are only listed on stderr (`LEFTOVER: <name>`), never read, moved or deleted by this script.
+8. **Out of scope:** `backup.sh`, `restore.sh`, `deploy_release.sh`, compose files, the beta, any change to who may reach the CRM. If the Engineer finds that any of them must change, that is a stop condition (section 9), not a quiet edit.
+
+## 4. Exclusions and protected items
+
+No PHP file; no entity, field, link, scope, ACL, role, layout or route change; no change to `Account.json` entity metadata; no `client/custom/modules`; no change to `scripts/` other than `deploy_custom.sh`, and none to `deploy/`, compose files, `backup.sh`, `restore.sh` or the release tooling; no WIP loader, API call, token, database access or WIP table; no new dependency, image, CDN or vendored file; nothing taken from the candidate `07bfaf1c` by copy or merge (its ideas and tests are read-only evidence); no Node or browser tooling in the repository; no change to ForgeV2, Foundry, the host, `crm-dev`, `crm-beta`, WIP or Salesforce. No deployment or merge by any specialist.
+
+## 5. Verification
+
+- **Engineer (mechanical):** the whole unit suite on the base (564 tests, OK, 1 skipped, as recorded in section 2; report the count before and after, with no new skip); the new `tests/unit/test_wip_link.py` and `tests/unit/test_client_delivery.py`; every edited assertion of `test_scripts.py` listed with its reason.
+- **`test_wip_link.py` must prove, without Node, a browser or a network:** (a) `clientDefs/Account.json` parses, keeps `relationshipPanels` byte-identical (compare to the base blob) and the `menu` item has exactly the keys of section 3, with `handler` resolving to the new file by the `custom:` rule; (b) the diff touches no other `custom/` file and adds no PHP; (c) the handler passes the **client-code policy**, enforced here by static checks because the base has no policy test: no remote URL literal, no `eval`, `new Function` or `document.write`, no `innerHTML` assignment, no absolute-URL `fetch`, `XMLHttpRequest` or `window.open` target other than the computed one, no `localStorage`, `sessionStorage`, `indexedDB` or cookie access, no `import` or `export`; and it contains the required elements: `encodeURIComponent`, a protocol check for `http:` and `https:`, rejection of user-info, query and fragment, `noopener`, no other host; (d) a **table-driven reference model** of the section 3.1 rules written in Python and checked against the handler's constants and branch structure (static), so that a weakened check (for example dropping the user-info test) is detected; (e) removing the metadata item makes (a) fail (a non-vacuity proof).
+- **`test_client_delivery.py` must prove, with the fake-`docker` harness and temporary directories (no real Docker, no network):** (a) first install: the staged tree appears at `client/custom/src`, equal to the repository tree, the marker is written, `modules/` and any other sibling are byte-identical afterwards, and the `docker` call sequence includes `update-app-timestamp` after `rebuild`; (b) update: a changed and a removed repository file are reflected exactly, the previous tree is gone only after the last step succeeded, and the timestamp-did-not-advance case fails with the named step; (c) each post-swap failure (`up`, `clear-cache`, `rebuild`, `update-app-timestamp`) and a swap failure restores **both** trees byte-identically, keeps the new ones as `.failed-<stamp>`, prints `FAILED STEP: <step>` and exits with that step's distinct code, and an interruption after the stack stopped does the same; (d) managed removal: no repository `src` plus the marker removes `src` and the marker (and restores on failure); no repository `src` and **no** marker leaves `src` untouched with a notice; (e) path safety: a symlinked `src`, `client` or `client/custom`, a symlink inside the repository tree, group- or world-writable `client/` and a pre-existing working name are each refused before the swap; (f) leftovers are listed and never touched; (g) with no repository `src` and no runtime `src` the script's calls and output equal the base's; (h) each rule is non-vacuous: removing it from a copy of the script makes the matching test fail.
+- **Auditor:** conformance to this WO and the allowlist, the limited test edits, no scope creep. **Tester:** the new tests are real (the Tester breaks each rule and shows a test fail), the whole suite, and states plainly that **JavaScript behaviour is not executed in the sandbox**; the behaviour table is verified by the operator annex. **DevSecOps:** no URL, host or credential in the diff; open-redirect and scheme handling (javascript/data), `noopener`, no storage, no network; no dependency; gitleaks 0 findings.
+- A FINDINGS verdict from any reviewer returns to the Engineer while the cap allows; it is never presented as PASS.
+
+## 6. Acceptance criteria
+
+| AC | Criterion | Evidence |
+|---|---|---|
+| AC1 | The diff against `6e1766980e24d781d498727d4fe5db43cdeadbb7` is exactly the allowlist (section 3); `test_scripts.py` and `docs/BUILD.md` are changed only as allowed; no other file differs | `git diff --stat`, Auditor, Orchestrator source-identity check |
+| AC2 | `Account.json` keeps `relationshipPanels` byte-identical and adds exactly the one `menu` item of section 3 | `test_wip_link.py`, Auditor |
+| AC3 | The handler meets section 3.1 and the client policy | static tests, Tester, DevSecOps |
+| AC4 | No PHP, entity, field, scope, ACL, layout, route, compose or dependency change; no script other than `deploy_custom.sh` and no `deploy/` change | Auditor, DevSecOps |
+| AC5 | The whole unit suite passes with 0 failures; the count on the base is 564 and the counts before and after are reported; no new skip; each edited `test_scripts.py` assertion is listed and justified | delivery record, Orchestrator re-run |
+| AC6 | Auditor, Tester and DevSecOps return **PASS on the same unchanged candidate commit**; the Tester returns no FINDINGS | ledger, delivery record |
+| AC7 | gitleaks 0 findings; no host, address or credential in the diff | scan |
+| AC8 | **Orchestrator independent checks:** a fresh re-run from an export of the final candidate; a source-identity check against the base; a mutation sweep of the handler's rules (each of: drop the protocol check, drop the user-info check, drop the query or fragment check, drop `encodeURIComponent`, drop `noopener`, hard-code a host, add a fallback host) in which every mutation is **caught** or is reported as an equivalent | Orchestrator report |
+| AC9 | **Operator browser assurance (section 8)** passes on the final candidate, **including first install, update, rollback, failure restore and isolation of the other `client/custom` entries**, on a synthetic CRM target | operator evidence package |
+| AC11 | **Delivery regression:** the delivery changes nothing for `custom/Espo/Custom` behaviour; `backup.sh` still archives `client/custom` including the handler; the rest of the suite is unchanged | the two new test files, the unchanged suites, annex D7 |
+| AC10 | No merge, no deployment, no `crm-beta` or live change by any specialist; earlier candidates, branches, ledgers and PRs unchanged | state record |
+
+## 7. Gates
+
+| Gate | Requirement | State |
+|---|---|---|
+| G1 | CGPT exact-version approval of this WO | open |
+| G2 | **G-CLIENT:** resolved by CGPT on 2026-11-18 in favour of the minimal delivery inside this Work Order (option 2); the candidate `07bfaf1c…` is evidence only | **closed (this revision implements it)** |
+| G3 | Budget: the dispatch record states at most 2 Engineer executions and no replacement WO | at dispatch |
+| G4 | Exact-base gate EB1 to EB8 (below) | open |
+
+**Exact-base gate (read-only, `GIT_OPTIONAL_LOCKS=0`, run as the PL account).** EB1: in the PL repository `6e1766980e24d781d498727d4fe5db43cdeadbb7` is the tip of local `main`; it has no `client/` directory; the blobs of `scripts/deploy_custom.sh`, `tests/unit/test_scripts.py`, `docs/BUILD.md` and `custom/Espo/Custom/Resources/metadata/clientDefs/Account.json` are recorded (full ids, by the Orchestrator at dispatch); the baseline suite gives 564 tests, OK, 1 skipped. EB2: this WO's documents are merged and GitHub `main` has advanced by documents only; a tree comparison, excluding `docs/`, `work-orders/` and the product records, between `6e176698…` and GitHub `main` is empty (checked 2026-11-18 against `e157bd51…`). EB3: the PL's local `main` equals `6e1766980e24d781d498727d4fe5db43cdeadbb7`, clean, canonical origin, no `url.*` rewrite. EB4: no `forge/CRM-WIP-LINK-001` branch, worktree or scratch directory exists, and the ledger for this identity does not exist; the ledgers of every earlier WO are unchanged. EB5: the engine installation and plugin version are as pinned and protected. EB6: the exact approved WO file is staged for the PL with its dispatch record, and every reference file is readable as `forgev2-pl` inside the EB8 sandbox. EB7: the stage-1 knowledge check: the Orchestrator re-greps the tests that run or pin `deploy_custom.sh`, `client/custom`, the Account clientDefs or the runtime layout and finds no pinned surface other than the allowlisted `test_scripts.py` and `docs/BUILD.md`. EB8: a read test as `forgev2-pl` in a sandbox that hides the PL home with no network.
+
+
+## 8. Annex: operator real-browser assurance (Orchestrator-run; zero specialist executions)
+
+Run after the candidate is DELIVERED and its three PASS verdicts are recorded, on a **synthetic CRM target** (step 1 below) with synthetic data only and the independent WIP application serving synthetic data (see `WIP-CRM-CONTEXT-001` and the operator plan `docs/operations/D1-SYNTHETIC-INTEGRATION-PLAN.md` in the WIP repository). It is the evidence for acceptance criteria A, B, C, F and G of Issue #81 for the CRM side.
+
+1. **Prepare (operator, approved with this WO):** on a **synthetic CRM target** (`crm-dev` if a counts-only check shows that every Account is synthetic, otherwise a disposable stack of the same build, per the operator plan), deploy the candidate with the Work Order's own script (`scripts/deploy_custom.sh dev`, which now also delivers `client/custom/src` and advances the application timestamp); set `wipBaseUrl` in that target's runtime configuration to the synthetic WIP service address; create synthetic firm A and firm B through the REST API (clearly synthetic names; firm A with a synthetic legacy key matching the WIP synthetic dataset, firm B likewise; and a third CRM-native firm with no legacy key); create one non-admin user with Account read.
+2. **Browser:** Chrome for Testing in the digest-pinned Playwright image, run as an unprivileged user on a per-run network whose subnet is checked against every existing Docker network first (the earlier S4 stop was a subnet overlap). The run's access to the CRM is admitted only for the run (never a standing change to the allow-list) and removed after.
+3. **Journeys:** J1 (admin) open firm A, click the button, assert a new tab at exactly `<wipBaseUrl>/crm/firm/<A id>`, the WIP page shows firm A and not B, and the "back to CRM" link returns to firm A; J2 the same for firm B and the CRM-native firm; J3 a non-admin user sees the button and it opens the right route (and, if the runtime parameter is not delivered to non-admin users, **this is the failing case that must be reported with a concrete finding**: E8); J4 every row of the behaviour table, by setting `wipBaseUrl` to each value in turn (each change followed by a reload); J5 stop the WIP service and reload the Account: the page, relationships and Enquiries panel still work and clicking the button leaves the CRM page unharmed; J6 deploy the base (the customisation removed): the button is gone, the runtime `client/custom/src` and the marker are gone, and the page matches the earlier screenshot; J7 console: no errors from the customisation; network: no request from the Account page to the WIP host and no credential in any URL.
+   **Delivery journeys (the minimum browser-asset delivery, section 3.2):** D1 first install on a runtime whose `client/custom` is empty: the handler file is served to the browser and J1 passes; D2 update: deploy a throw-away scratch commit (never pushed) that changes only the handler's visible label, and without clearing the browser cache the new label appears after the script finishes (the cache-bust works); D3 rollback: J6 again, then redeploy the candidate and J1 passes again; D4 failure restore: with a `docker` shim on the operator's `PATH` that fails exactly one named step (`rebuild`, then `update-app-timestamp`), the script exits with that step's code and prints `FAILED STEP`, both runtime trees are byte-identical to before (tree checksums), the stack is running again and J1 still passes with the **previous** version; D5 isolation: a canary file placed by the operator in `client/custom/modules` and an unmanaged `client/custom` entry are byte-identical after every run above, and with the marker removed a base deploy leaves `src` untouched with the notice; D6 container restart: after `scripts/up.sh dev --force-recreate crm-app` the entrypoint's re-ownership leaves the handler served and J1 passes; D7 `backup.sh dev` archives `client/custom` including the handler (list of the archive, counts and names only).
+4. **Evidence:** screenshots, a request log, the console log, the exact candidate and runtime commit ids, and the browser identity, assembled as the earlier annex's package (sanitised: no address, hostname or customer name in anything committed). A skipped or inconclusive journey is **not** a pass.
+
+## 9. Execution limits, stop conditions, communications
+
+- **Limits:** section 0. Auditor, Tester and DevSecOps counters start at 0; the engine limit 4 applies.
+- **Stop (BLOCKED, reported, never worked around):** any change outside the allowlist, including a needed change to `backup.sh`, `restore.sh`, `deploy_release.sh`, compose files or the beta; a need for PHP, a database, the network, Node or a browser; a test that cannot be made non-vacuous without relaxing a policy rule; the engine refusing `main` as `BASE` or the known commit; a failed entry gate; any finding that cannot be reported safely. No firewall rules. No change to ForgeV2, Foundry or the host.
+- **Communications:** Issue https://github.com/infosec-estateresearch/CRM/issues/82. PL record `/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-WIP-LINK-001/` and, on the candidate branch, `.forge/CRM-WIP-LINK-001/`; per-specialist output under `dispatch/`. Mode: MANUAL fallback (CGPT's decisions are relayed by Matt; the Orchestrator records them on the Issue). Escalation: PL to Orchestrator; Orchestrator to CGPT (architecture) and Matt (product, permission, material risk).
+- **Completion report (PL):** outcome, changed paths, starting and final commit ids, acceptance criteria with results, the three verdicts and the candidate each assessed, the non-vacuity evidence, counts, deviations and remaining risks. If delivery fails, return BLOCKED with evidence; **do not create a replacement WO.**
