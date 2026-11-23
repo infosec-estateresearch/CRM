@@ -5,5 +5,20 @@
             "create": true,
             "select": true
         }
+    },
+    "menu": {
+        "detail": {
+            "buttons": [
+                {
+                    "name": "openWip",
+                    "text": "Open WIP / Revenue",
+                    "handler": "custom:handlers/account-open-wip",
+                    "actionFunction": "openWip",
+                    "acl": "read",
+                    "aclScope": "Account",
+                    "style": "default"
+                }
+            ]
+        }
     }
 }
