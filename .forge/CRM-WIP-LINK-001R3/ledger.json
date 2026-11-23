@@ -1,0 +1,170 @@
+{
+  "base": "cbfeca7668374a8c02945b21930845394501fad6",
+  "base_sha": "cbfeca7668374a8c02945b21930845394501fad6",
+  "branch": "forge/CRM-WIP-LINK-001R3",
+  "candidate": "5c56fcd8c1fe7b6257e11aae2276ce0878f9be20",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-23T16:18:35Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-23T16:18:44Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-23T16:27:13Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "624 tests OK; N01-N03 proved",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-23T16:27:15Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "5c56fcd8c1fe7b6257e11aae2276ce0878f9be20",
+      "t": "2026-11-23T16:27:20Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "5c56fcd8c1fe7b6257e11aae2276ce0878f9be20",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-23T16:27:26Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "5c56fcd8c1fe7b6257e11aae2276ce0878f9be20",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-23T16:27:26Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "5c56fcd8c1fe7b6257e11aae2276ce0878f9be20",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-23T16:27:26Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-23T16:30:53Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-23T16:30:53Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-23T16:30:53Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "5c56fcd8c1fe7b6257e11aae2276ce0878f9be20",
+      "findings": [
+        {
+          "key": "redef-app_exec",
+          "severity": "advisory"
+        }
+      ],
+      "note": "PASS on 5c56fcd8",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-23T16:30:55Z",
+      "type": "result"
+    },
+    {
+      "candidate": "5c56fcd8c1fe7b6257e11aae2276ce0878f9be20",
+      "findings": [
+        {
+          "key": "n01-merge-only-escapes",
+          "severity": "advisory"
+        }
+      ],
+      "note": "PASS on 5c56fcd8; PHP not executed",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-23T16:30:55Z",
+      "type": "result"
+    },
+    {
+      "candidate": "5c56fcd8c1fe7b6257e11aae2276ce0878f9be20",
+      "findings": [],
+      "note": "PASS on 5c56fcd8; gitleaks 0",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-23T16:30:55Z",
+      "type": "result"
+    },
+    {
+      "note": "Three PASS on 5c56fcd8",
+      "outcome": "DELIVERED",
+      "t": "2026-11-23T16:31:05Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-WIP-LINK-001R3",
+  "host": "docker1",
+  "known_commit": "cbfeca7668374a8c02945b21930845394501fad6",
+  "limit": 4,
+  "outcome": "DELIVERED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-WIP-LINK-001R3",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-WIP-LINK-001R3",
+  "wo": "CRM-WIP-LINK-001R3",
+  "worktree": "/srv/CRM/worktrees/CRM-WIP-LINK-001R3"
+}
