@@ -12,11 +12,11 @@ BROWSER: yes
 
 | Item | Value |
 |---|---|
-| Version | v0.1 **PREPARED TEXT**, 2026-11-26. **Not approved. Cannot be dispatched:** the base is unbound. Dispatch needs a later version that names the base and its Issue, approved at that exact path and commit |
+| Version | v0.2 **PREPARED TEXT**, 2026-11-26. **Not approved. Cannot be dispatched:** the base is unbound. Dispatch needs a later version that names the base and its Issue, approved at that exact path and commit |
 | Issue | https://github.com/infosec-estateresearch/CRM/issues/95 (package); this order's own Issue is opened when the base is bound |
 | Priority and parent item | P1. CRM-PBI-041, CRM-PBI-043 |
 | Product outcome | Salesforce changes reach ERm until phase-out without losing identifiers or staff work |
-| Direction and decisions | Issue https://github.com/infosec-estateresearch/CRM/issues/91; CRM-D050, CRM-D054; `PROJECT-INITIATION-MANDATE.md` |
+| Direction and decisions | Issue https://github.com/infosec-estateresearch/CRM/issues/91; CRM-D050, CRM-D054; `PROJECT-INITIATION-MANDATE.md`. Decisions CRM-D044 to D054, `docs/IDENTITY.md` and `docs/LOGGING.md` are on pull request 94 until merged |
 | Governing FOUNDRY | `maff0000/foundry@39cc45c25aa5305b60f4c4af1557bee8cec0bf20`: `standards/work-order-contract.md`, `standards/secure-engineering.md`, `standards/product-records.md` |
 | Engine | ForgeV2 plugin 0.3.0, `63b6b8ab6c6d3c12d1ef3f0aeabe2ca22fbefb82`, at `/srv/forgev2`, unmodified |
 | Assignment | The Orchestrator (Rogue) dispatches one Project Lead (`forgev2-pl` on DOCKER1). Roles: Engineer, Auditor, Tester, DevSecOps |
@@ -51,7 +51,7 @@ Source changes apply to ERm on the existing extractor and loader without regener
 | In scope | `load/`, `migrate/` (interfaces only), `custom/Espo/Custom/`, `client/custom/`, `config/`, `scripts/`, `deploy/` (definitions for the worker), `tests/`, `docs/` |
 | Must not change | `.forge/` of other orders unless the scope row names them, `work-orders/`, root product records, EspoCRM core |
 | Excluded | live Salesforce access; a new extraction or load engine; scheduled sync; writing to Salesforce |
-| Dependencies and constraints | no new package, image, extension or vendored file; supported EspoCRM extension points only; no secret in the repository |
+| Dependencies and constraints | no dependency beyond those registered by CRM-002-INT; its extraction image may be added to the release for the retrieval worker, pinned by digest; no secret in the repository |
 | Data and systems | synthetic data only. No beta, production, real data, off-host store or Salesforce access. No deployment or merge. No WIP change (on hold) |
 
 ### Existing behaviour this order supersedes
@@ -59,6 +59,7 @@ Only the following existing expectations change. Another existing assertion may 
 
 1. Loader behaviour that updates a staff-changed value is replaced by conflict listing, with its tests.
 2. The Admin section gains the second entry for administrators; the one-entry assertion of CRM-ACC-001 is extended.
+3. If the worker ships in the release, the release image-set expectation includes the registered extraction image, with an equally strict assertion.
 
 ## 5. Acceptance criteria
 
@@ -91,7 +92,7 @@ The order is complete only when A1 to A11 hold. A closed ledger alone is not acc
 
 ## 7. Budget and stop conditions
 
-- At most **3** executions each for Engineer, Auditor, Tester and DevSecOps. Any Engineer change restarts the three reviews. **Effective ceiling: two review rounds**, because the engine closes a ledger when one reviewer is inconclusive twice in a row, so a second round can end ESCALATED with findings open.
+- At most **3** executions each for Engineer, Auditor, Tester and DevSecOps. Any Engineer change restarts the three reviews. **Where the Tester reports inconclusive, the effective ceiling is two review rounds**, because the engine closes a ledger when one reviewer is inconclusive twice in a row, so a second round can end ESCALATED with findings open.
 - A corrective successor, if later needed, is a separate Work Order whose exact text is approved before dispatch; **at most 4 executions per role across both**.
 - **BLOCKED and escalated:** an exhausted budget, a failed gate, a needed change outside section 4, or a criterion that cannot be met safely.
 
@@ -103,7 +104,7 @@ On a disposable runtime of the pinned images (own project name, internal network
 
 | Gate | Requirement |
 |---|---|
-| E0 | Predecessor accepted and its result on GitHub `main` |
+| E0 | Predecessor accepted and its result on GitHub `main`, together with the decision, identity and logging records of pull request 94 |
 | E1 | Exact-version approval: path, commit, file SHA-256, bound base, budget, and the decisions of section 11 |
 | E2 | Base resolves in the Project Lead repository and satisfies section 2; `forge-start` accepts it, proved on a scratch copy |
 | E3 | Engine and plugin as pinned; no `CRM-LOAD-001` branch, worktree, ledger or record exists |
@@ -120,7 +121,8 @@ On a disposable runtime of the pinned images (own project name, internal network
 
 ## 11. Decisions the approval must state
 
-1. Dispatch of the exact bound version, with this budget.
+1. Dispatch, with this budget, of the later version that binds the base. This item cannot be given to this prepared text.
 2. The superseded expectations of section 4 and the verification assignment of section 6.
 3. The unusual-volume threshold.
-4. Split into two orders (engine first, screen second) if the Architect prefers: this is the largest order and may not fit the budget.
+4. Whether the extraction image ships in the release for the retrieval worker (proposed: yes, disabled until a read-only source is authorised).
+5. Split into two orders (engine first, screen second) if the Architect prefers: this is the largest order and may not fit the budget.

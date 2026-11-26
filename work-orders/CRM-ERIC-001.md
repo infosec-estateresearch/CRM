@@ -11,11 +11,11 @@ BASE: BOUND-AT-ENTRY
 
 | Item | Value |
 |---|---|
-| Version | v0.1 **PREPARED TEXT**, 2026-11-26. **Not approved. Cannot be dispatched:** the base is unbound. Dispatch needs a later version that names the base and its Issue, approved at that exact path and commit |
+| Version | v0.2 **PREPARED TEXT**, 2026-11-26. **Not approved. Cannot be dispatched:** the base is unbound. Dispatch needs a later version that names the base and its Issue, approved at that exact path and commit |
 | Issue | https://github.com/infosec-estateresearch/CRM/issues/95 (package); this order's own Issue is opened when the base is bound |
 | Priority and parent item | P2. CRM-PBI-007 |
 | Product outcome | A consuming system resolves FirmID, GroupID and ContactID without any write access |
-| Direction and decisions | Issue https://github.com/infosec-estateresearch/CRM/issues/91; CRM-D046; `docs/IDENTITY.md` (integration); `PROJECT-INITIATION-MANDATE.md` |
+| Direction and decisions | Issue https://github.com/infosec-estateresearch/CRM/issues/91; CRM-D046; `docs/IDENTITY.md` (integration); `PROJECT-INITIATION-MANDATE.md`. Decisions CRM-D044 to D054, `docs/IDENTITY.md` and `docs/LOGGING.md` are on pull request 94 until merged |
 | Governing FOUNDRY | `maff0000/foundry@39cc45c25aa5305b60f4c4af1557bee8cec0bf20`: `standards/work-order-contract.md`, `standards/secure-engineering.md`, `standards/product-records.md` |
 | Engine | ForgeV2 plugin 0.3.0, `63b6b8ab6c6d3c12d1ef3f0aeabe2ca22fbefb82`, at `/srv/forgev2`, unmodified |
 | Assignment | The Orchestrator (Rogue) dispatches one Project Lead (`forgev2-pl` on DOCKER1). Roles: Engineer, Auditor, Tester, DevSecOps |
@@ -47,7 +47,7 @@ A consumer-specific, revocable, read-only access that exposes the contract resou
 | In scope | `custom/Espo/Custom/`, `config/`, `scripts/`, `tests/`, `docs/` |
 | Must not change | `.forge/` of other orders unless the scope row names them, `work-orders/`, root product records, EspoCRM core |
 | Excluded | any change to a consuming system or its database; real consumer keys; use before identity genesis |
-| Dependencies and constraints | no new package, image, extension or vendored file; supported EspoCRM extension points only; no secret in the repository |
+| Dependencies and constraints | no new package, image, third-party or installable extension, or vendored file; custom code at supported EspoCRM extension points only; no secret in the repository |
 | Data and systems | synthetic data only. No beta, production, real data, off-host store or Salesforce access. No deployment or merge. No WIP change (on hold) |
 
 ### Existing behaviour this order supersedes
@@ -65,7 +65,7 @@ Only the following existing expectations change. Another existing assertion may 
 | A4 | Access records show consumer, time and resource | suite |
 | A5 | The conformance check passes against the disposable runtime and fails on a deliberate contract break | operator report |
 | A6 | Every test suite present at the base, run as a non-root user as documented in the repository: **0 failures**. The only new skips allowed are tests needing PHP, gated like existing ones, each listed; the operator proof runs them with PHP present, none skipped for lack of PHP | delivery record, operator report |
-| A7 | On the same unchanged candidate commit: Auditor **PASS**, DevSecOps **PASS**, and Tester **PASS** within the scope of section 6 | ledger |
+| A7 | On the same unchanged candidate commit: Auditor **PASS**, DevSecOps **PASS**, and Tester **PASS**, or **INCONCLUSIVE solely for live-runtime behaviour** with every sandbox-executable criterion passing | ledger |
 | A8 | Operator proof (section 8) passes on that unchanged candidate | Orchestrator report |
 | A9 | Secret scan: 0 findings; no credential, host address, personal, customer or firm data in the change | scan |
 
@@ -77,14 +77,14 @@ The order is complete only when A1 to A9 hold. A closed ledger alone is not acce
 |---|---|
 | Engineer | implementation; automated tests for every criterion executable without a runtime; scripts for the runtime criteria that the operator proof runs; suite counts before and after; every changed existing test line listed |
 | Auditor | conformance to this order and section 4; superseded expectations limited to the list; no weakened assertion. PASS or FINDINGS with the candidate commit |
-| Tester | every criterion executable in the sandbox, including mutations showing new tests fail when a control is removed; states what was **not** executed. PASS or FINDINGS; live-runtime behaviour is assigned to section 8 and is not claimed |
+| Tester | every criterion executable in the sandbox, including mutations showing new tests fail when a control is removed; states what was **not** executed. PASS, FINDINGS, or INCONCLUSIVE solely for live-runtime behaviour |
 | DevSecOps | authorisation and bypass review of every server change; secrets, dependencies and secret scan. PASS or FINDINGS |
 
-**Runtime.** The sandbox has no network, Docker, browser or EspoCRM, and PHP is not assumed. This order assigns live-runtime behaviour to the operator proof of section 8, which is mandatory. Approval of this order approves this assignment.
+**Runtime.** The sandbox has no network, Docker or EspoCRM, and PHP is not assumed. Criteria that need a runtime are assigned to the operator proof of section 8. Where the Tester cannot execute one it reports it `inconclusive`, never passed, and, when everything else passes, the Project Lead closes the ledger **ESCALATED** with that reason. This is an acceptable intermediate result and **never final acceptance**: that needs section 8. Approval of this order approves this assignment.
 
 ## 7. Budget and stop conditions
 
-- At most **3** executions each for Engineer, Auditor, Tester and DevSecOps. Any Engineer change restarts the three reviews.
+- At most **3** executions each for Engineer, Auditor, Tester and DevSecOps. Any Engineer change restarts the three reviews. **Where the Tester reports inconclusive, the effective ceiling is two review rounds**, because the engine closes a ledger when one reviewer is inconclusive twice in a row, so a second round can end ESCALATED with findings open.
 - A corrective successor, if later needed, is a separate Work Order whose exact text is approved before dispatch; **at most 4 executions per role across both**.
 - **BLOCKED and escalated:** an exhausted budget, a failed gate, a needed change outside section 4, or a criterion that cannot be met safely.
 
@@ -96,7 +96,7 @@ On a disposable runtime of the pinned images (own project name, internal network
 
 | Gate | Requirement |
 |---|---|
-| E0 | Predecessor accepted and its result on GitHub `main` |
+| E0 | Predecessor accepted and its result on GitHub `main`, together with the decision, identity and logging records of pull request 94 |
 | E1 | Exact-version approval: path, commit, file SHA-256, bound base, budget, and the decisions of section 11 |
 | E2 | Base resolves in the Project Lead repository and satisfies section 2; `forge-start` accepts it, proved on a scratch copy |
 | E3 | Engine and plugin as pinned; no `CRM-ERIC-001` branch, worktree, ledger or record exists |
@@ -112,6 +112,6 @@ On a disposable runtime of the pinned images (own project name, internal network
 
 ## 11. Decisions the approval must state
 
-1. Dispatch of the exact bound version, with this budget.
+1. Dispatch, with this budget, of the later version that binds the base. This item cannot be given to this prepared text.
 2. The superseded expectations of section 4 and the verification assignment of section 6.
 3. The first consumer to be conformance-tested.
