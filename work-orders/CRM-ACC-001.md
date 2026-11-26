@@ -12,11 +12,11 @@ BROWSER: yes
 
 | Item | Value |
 |---|---|
-| Version | v0.2 **PREPARED TEXT**, 2026-11-26. **Not approved. Cannot be dispatched:** the base is unbound. Dispatch needs a later version that names the base and its Issue, approved at that exact path and commit |
+| Version | v0.3 **PREPARED TEXT**, 2026-11-26. **Not approved. Cannot be dispatched:** the base is unbound. Dispatch needs a later version that names the base and its Issue, approved at that exact path and commit |
 | Issue | https://github.com/infosec-estateresearch/CRM/issues/95 (package); this order's own Issue is opened when the base is bound |
 | Priority and parent item | P0. CRM-PBI-036 |
 | Product outcome | Staff can be given named access safely, and only administrators administer |
-| Direction and decisions | Issue https://github.com/infosec-estateresearch/CRM/issues/91; CRM-D044, CRM-D049; `PROJECT-INITIATION-MANDATE.md`. Decisions CRM-D044 to D054, `docs/IDENTITY.md` and `docs/LOGGING.md` are on pull request 94 until merged |
+| Direction and decisions | Issue https://github.com/infosec-estateresearch/CRM/issues/91; CRM-D044, CRM-D049, CRM-D057; `PROJECT-INITIATION-MANDATE.md`. Decisions CRM-D044 to D062, `docs/IDENTITY.md` and `docs/LOGGING.md` are on pull request 94 until merged |
 | Governing FOUNDRY | `maff0000/foundry@39cc45c25aa5305b60f4c4af1557bee8cec0bf20`: `standards/work-order-contract.md`, `standards/secure-engineering.md`, `standards/product-records.md` |
 | Engine | ForgeV2 plugin 0.3.0, `63b6b8ab6c6d3c12d1ef3f0aeabe2ca22fbefb82`, at `/srv/forgev2`, unmodified |
 | Assignment | The Orchestrator (Rogue) dispatches one Project Lead (`forgev2-pl` on DOCKER1). Roles: Engineer, Auditor, Tester, DevSecOps |
@@ -46,6 +46,7 @@ Two human user types with equal ordinary business access; only administrators ad
 9. Tooling (provisioning, release and acceptance scripts) stops signing in as a human administrator. It uses native command-line operations inside the application, or a separate named non-human account with the least privilege that works, restricted to the host, with its secret outside Git. Any task that needs an administrator-type account is listed, with the account and its controls, for the approval.
 10. Clients behind the proxy are seen with their own addresses, so one client cannot lock out another; only the trusted front end may state a client address.
 11. Extension upload and impersonation are off. A configuration check fails when any setting of this order is changed.
+12. The "Open WIP / Revenue" action on the firm page is **hidden** for every user, including administrators. Its handler, code, identifiers and documentation are preserved so that it can be offered again by a small change. WIP is on hold; nothing else about it changes.
 
 ## 4. Delivery boundary
 
@@ -55,7 +56,7 @@ Two human user types with equal ordinary business access; only administrators ad
 | Must not change | `.forge/` of other orders unless the scope row names them, `work-orders/`, root product records, EspoCRM core |
 | Excluded | FirmGroup permissions beyond reserving them for both user types; logging beyond the audit named here; e-mail delivery of passwords (the native generate-and-send route needs a mail server and is not used); any change to a running environment |
 | Dependencies and constraints | no new package, image, third-party or installable extension, or vendored file; custom code at supported EspoCRM extension points only; no secret in the repository |
-| Data and systems | synthetic data only. No beta, production, real data, off-host store or Salesforce access. No deployment or merge. No WIP change (on hold) |
+| Data and systems | synthetic data only. No beta, production, real data, off-host store or Salesforce access. No deployment or merge. No WIP change beyond hiding the action of section 3 (WIP is on hold) |
 
 ### Existing behaviour this order supersedes
 Only the following existing expectations change. Another existing assertion may change only where it contradicts a criterion in section 5, and then it is extended or replaced with an equally strict one. Every changed existing test line is listed; the Auditor checks each. Nothing else is removed or weakened:
@@ -63,6 +64,7 @@ Only the following existing expectations change. Another existing assertion may 
 1. The three business roles and their expected levels (`config/access/roles.json`, `tests/unit/access_policy.py`, fixtures, `docs/ACCESS.md`) are replaced by `ER User`.
 2. The shared temporary password option (`provision_users.py --common-password-file`) and its documentation are removed.
 3. Acceptance suites and scripts that sign in with a human administrator password use the non-human route of section 3; staff journeys include the second factor and the forced change.
+4. Tests and documentation asserting that the firm page offers the "Open WIP / Revenue" action are changed to assert that it is not offered. Tests of its handler and identifiers are kept.
 
 ## 5. Acceptance criteria
 
@@ -77,12 +79,13 @@ Only the following existing expectations change. Another existing assertion may 
 | A7 | Passwords under 14 characters refused on every setting route | suite |
 | A8 | Two client addresses behind the proxy are recorded as different, a forged address header from another source is ignored, and lock-out of one leaves the other working | operator report |
 | A9 | The configuration check fails on each deliberate change | unit tests, operator report |
-| A10 | Every test suite present at the base, run as a non-root user as documented in the repository: **0 failures**. The only new skips allowed are tests needing PHP, gated like existing ones, each listed; the operator proof runs them with PHP present, none skipped for lack of PHP | delivery record, operator report |
-| A11 | On the same unchanged candidate commit: Auditor **PASS**, DevSecOps **PASS**, and Tester **PASS**, or **INCONCLUSIVE solely for browser and live-runtime behaviour** with every sandbox-executable criterion passing | ledger |
-| A12 | Operator proof (section 8) passes on that unchanged candidate | Orchestrator report |
-| A13 | Secret scan: 0 findings; no credential, host address, personal, customer or firm data in the change | scan |
+| A10 | The WIP action is absent from the firm page for both user types, by browser; its handler file is unchanged against the base | unit tests, operator browser run |
+| A11 | Every test suite present at the base, run as a non-root user as documented in the repository: **0 failures**. The only new skips allowed are tests needing PHP, gated like existing ones, each listed; the operator proof runs them with PHP present, none skipped for lack of PHP | delivery record, operator report |
+| A12 | On the same unchanged candidate commit: Auditor **PASS**, DevSecOps **PASS**, and Tester **PASS**, or **INCONCLUSIVE solely for browser and live-runtime behaviour** with every sandbox-executable criterion passing | ledger |
+| A13 | Operator proof (section 8) passes on that unchanged candidate | Orchestrator report |
+| A14 | Secret scan: 0 findings; no credential, host address, personal, customer or firm data in the change | scan |
 
-The order is complete only when A1 to A13 hold. A closed ledger alone is not acceptance.
+The order is complete only when A1 to A14 hold. A closed ledger alone is not acceptance.
 
 ## 6. Verification by role
 
@@ -132,4 +135,3 @@ On a disposable runtime of the pinned images (own project name, internal network
 4. Custom server code for the forced password change.
 5. Which second factor method staff use (native authenticator app proposed).
 6. The non-human tooling access, including any administrator-type account it needs, which is host-restricted and carries no second factor.
-7. WIP navigation (WIP is on hold): whether this order also hides the "Open WIP / Revenue" action on the firm page, keeping its code and the identifiers. Proposed: yes. If approved, the bound version adds that behaviour and the matching test change.
