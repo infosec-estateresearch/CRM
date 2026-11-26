@@ -270,8 +270,9 @@ class TestControllers(unittest.TestCase):
 
     def test_controllers_are_only_for_custom_entity_scopes(self):
         names = sorted(f[:-4] for f in os.listdir(CONTROLLERS) if f.endswith(".php"))
-        # CRM-IDINT-001 adds Account and Contact controllers that only refuse merge (3.4).
-        self.assertEqual(names, sorted(self.custom_entity_scopes() + ["Account", "Contact"]))
+        # CRM-IDINT-001R: merge is refused by recordDefs actions.merge.disabled, so the Account and
+        # Contact merge controllers of CRM-IDINT-001 are gone again.
+        self.assertEqual(names, sorted(self.custom_entity_scopes()))
 
     @unittest.skipUnless(shutil.which("php"), "php not installed")
     def test_controllers_lint(self):

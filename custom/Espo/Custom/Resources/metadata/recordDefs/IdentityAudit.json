@@ -1,0 +1,18 @@
+{
+    "massActions": {
+        "delete": {
+            "disabled": true
+        },
+        "update": {
+            "disabled": true
+        }
+    },
+    "actions": {
+        "merge": {
+            "disabled": true
+        }
+    },
+    "beforeDeleteHookClassNameList": [
+        "Espo\\Custom\\Classes\\Identity\\RecordHooks\\BeforeDelete"
+    ]
+}

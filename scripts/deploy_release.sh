@@ -30,7 +30,7 @@
 #     3.6: deleted-record cleanup off, audit cleanup off, user action history
 #     6 months, sign-in records 13 months): each is set with bin/command
 #     config:set (with its type) and read back from data/config.php with php -r +
-#     var_export. A setting that is not a known EspoCRM setting, or that does not
+#     var_export. A setting that EspoCRM neither defines nor reads, or that does not
 #     read back exactly as required, fails the deploy;
 #  7. provision access (CRM-003) and run the beta-safe acceptance suite
 #     (read-only, GET only). Both are mandatory (CRM-007R): the script refuses
@@ -208,6 +208,20 @@ check_setting_value() {
     [ "$3" = "$2" ] || die "setting $1 read back as '$3', not exactly $2"
 }
 
+# known_setting_php <name>: the PHP that prints "true" when the platform in the image knows the
+# setting: it is in application/Espo/Resources/defaults/config.php, or the platform's cleanup code
+# (Classes/Jobs/Cleanup.php, Classes/Cleanup/Audit.php) reads it with a default of its own
+# (cleanupAuthLogPeriod is one: read there, absent from the defaults). A name in neither is not
+# known. tests/unit/test_platform_reference.py runs this snippet against the pinned sources.
+known_setting_php() {
+    local name=$1
+    printf '%s' "\$d = include 'application/Espo/Resources/defaults/config.php'; " \
+        "\$c = (string) @file_get_contents('application/Espo/Classes/Jobs/Cleanup.php') . " \
+        "(string) @file_get_contents('application/Espo/Classes/Cleanup/Audit.php'); " \
+        "\$n = 'get(' . chr(39) . '$name' . chr(39); " \
+        "echo var_export(array_key_exists('$name', \$d) || strpos(\$c, \$n) !== false, true);"
+}
+
 apply_release_settings() {
     local dest=$1 name kind value expect known got rows
     # shellcheck source=lib/common.sh
@@ -220,9 +234,8 @@ apply_release_settings() {
         [[ "$name" =~ ^[A-Za-z][A-Za-z0-9]*$ ]] || die "bad setting name in the release settings"
         compose exec -T -u www-data -w /var/www/html crm-app php bin/command config:set "$name" "$value" --type="$kind" \
             || die "config:set $name failed"
-        # The key must be one EspoCRM defines, or the set would be a silent no-op.
-        known=$(compose exec -T -u www-data -w /var/www/html crm-app php -r \
-            "\$d = include 'application/Espo/Resources/defaults/config.php'; echo var_export(array_key_exists('$name', \$d), true);")
+        # The key must be one EspoCRM defines or reads, or the set would be a silent no-op.
+        known=$(compose exec -T -u www-data -w /var/www/html crm-app php -r "$(known_setting_php "$name")")
         got=$(compose exec -T -u www-data -w /var/www/html crm-app php -r \
             "\$c = include 'data/config.php'; echo var_export(\$c['$name'] ?? null, true);")
         check_setting_value "$name" "$expect" "$got" "$known"

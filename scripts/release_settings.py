@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Retention settings that travel with the release (CRM-IDINT-001, 3.6).
+"""Retention settings that travel with the release (CRM-IDINT-001R, 3.6).
 
 config/release-settings.json names the EspoCRM settings a release must leave in
 force: deleted-record cleanup off, audit cleanup off, user action history kept
@@ -28,7 +28,7 @@ TYPES = ("bool", "string")
 # What 3.6 requires; the file may add settings but may never relax these.
 REQUIRED = {
     "cleanupDeletedRecords": ("bool", False),
-    "cleanupAuditLog": ("bool", False),
+    "cleanupAudit": ("bool", False),
     "cleanupActionHistoryPeriod": ("string", "6 months"),
     "cleanupAuthLogPeriod": ("string", "13 months"),
 }

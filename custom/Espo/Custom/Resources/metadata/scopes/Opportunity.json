@@ -1,3 +1,4 @@
 {
-    "importable": false
+    "importable": false,
+    "preserveAuditLog": true
 }

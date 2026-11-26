@@ -165,11 +165,11 @@ Points for the operator stage and the importer:
 
 ## 6. Firm deletion guard
 
-**CRM-IDINT-001 extends this.** No firm and no contact is deleted, mass deleted or merged, by any account including an administrator; the refusal is general and does not depend on enquiries. See [IDENTITY-INTEGRITY.md](IDENTITY-INTEGRITY.md). The guard below stays in place and still applies first.
+**CRM-IDINT-001R extends this.** No firm and no contact is deleted, mass deleted or merged, by any account including an administrator; the refusal is general and does not depend on enquiries (the record delete hook and the ORM remove hook, `massActions.delete.disabled` and `actions.merge.disabled`). See [IDENTITY-INTEGRITY.md](IDENTITY-INTEGRITY.md). The guard below stays in place.
 
 Before an Account is removed, `RestrictDeleteWithEnquiries` (a `beforeRemove` hook) counts its related Opportunities. If there are any, it throws `Forbidden`, which the API returns as HTTP 403.
 - There is no exception for admins, or for any option.
-- Removing the enquiries first no longer lets the firm go: the general refusal of CRM-IDINT-001 applies. Retire the firm, or supersede it with a successor.
+- Removing the enquiries first no longer lets the firm go: the general refusal of CRM-IDINT-001R applies. Retire the firm, or supersede it with a successor.
 - The roles already deny Account delete to every non-admin, so the hooks are what stop admins.
 
 ## 7. Audit: where an admin finds it

@@ -1,4 +1,4 @@
-"""CRM-IDINT-001: the route matrix (WO section 3.0), the unit of acceptance.
+"""CRM-IDINT-001R: the route matrix (WO section 3.0), the unit of acceptance.
 
 For each identity relationship, each route that can reach it and each account
 kind, the result is either "refused, with nothing changed" or "performed, with
@@ -13,7 +13,10 @@ Expectation values:
   refused    the server must refuse and change nothing, for every kind
   performed  the change must succeed and leave its identity audit record
   either     a route the product may or may not expose for this cell: refused with
-             nothing changed, or performed with its audit record; anything else fails
+             nothing changed, or performed with its audit record; anything else fails.
+             The supplied-identifier route is one: it must also never use the identifier
+  A refused cell must also show the control's own refusal on a route that exists (A18):
+  the suite checks the status of every call (400 or 403, never 404 or 405).
   na         the route cannot reach the relationship; the reason is recorded
 """
 
@@ -43,9 +46,8 @@ REFUSED_ROUTES = {
     "bulk_link": "bulk linking would change many identity relationships without a per-record audit",
     "delete": "firms and contacts are never deleted (3.4)",
     "mass_delete": "firms and contacts are never deleted (3.4)",
-    "merge": "a merge ends by deleting the source records (3.4)",
+    "merge": "a merge ends by deleting the source records; the platform's merge action (POST /Action) is disabled for firms and contacts (3.4)",
     "csv_import": "identifiers are issued only by ERm; import is unavailable (3.7)",
-    "supplied_id": "identifiers are issued only by ERm (3.7)",
     "cleanup_job": "the cleanup job removes no firm, contact or audit record (3.6, 3.4)",
 }
 
@@ -74,6 +76,10 @@ def expectation(relationship, route, kind):
         raise KeyError((relationship, route, kind))
     if route in REFUSED_ROUTES:
         return "refused", REFUSED_ROUTES[route]
+    if route == "supplied_id":
+        return "either", ("the platform discards a supplied identifier and assigns its own: the request is "
+                          "refused unchanged, or performed with the record's own identifier and its audit "
+                          "record; the supplied identifier is never used (3.7)")
     if (relationship, route) in NA:
         return "na", NA[(relationship, route)]
     if route == "mass_update":

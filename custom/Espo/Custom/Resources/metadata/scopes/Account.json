@@ -1,4 +1,5 @@
 {
     "importable": false,
-    "mergeable": false
+    "mergeable": false,
+    "preserveAuditLog": true
 }

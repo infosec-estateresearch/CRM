@@ -87,7 +87,7 @@ TLS ends at the PO's HAProxy. EspoCRM must still generate `https://` links, so `
    - renders the edge config;
    - runs `up.sh beta` and `deploy_custom.sh beta`;
    - sets `siteUrl` (`config:set ... --type=string`) and `phoneNumberInternational=false` (`config:set ... --type=bool`; `config:set` defaults to `--type=string`, which would store the string `'false'`), then reads `phoneNumberInternational` back with `php -r` + `var_export`. Only the PHP boolean `false` passes; the string `'false'` fails;
-   - sets the four retention settings of `config/release-settings.json` (CRM-IDINT-001: deleted-record cleanup off, audit cleanup off, user action history 6 months, sign-in records 13 months) with `config:set`, each with its type, and reads each back from `data/config.php`; a name EspoCRM does not define, or a value that does not read back exactly, fails the deploy;
+   - sets the four retention settings of `config/release-settings.json` (CRM-IDINT-001R: `cleanupDeletedRecords` off, `cleanupAudit` off, `cleanupActionHistoryPeriod` 6 months, `cleanupAuthLogPeriod` 13 months) with `config:set`, each with its type, and reads each back from `data/config.php`; a name EspoCRM neither defines (`defaults/config.php`) nor reads (`cleanupAuthLogPeriod` is read by the cleanup job only), or a value that does not read back exactly, fails the deploy;
    - provisions the CRM-003 teams, roles and `ER Import` API user;
    - runs the beta-safe acceptance suite;
    - writes the sanitised `deploy-report-<stamp>.json` (`0600`).

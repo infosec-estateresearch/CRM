@@ -1,108 +1,97 @@
 <?php
 /**
- * CRM-IDINT-001 test harness: runs the real custom PHP (IdentityPolicy,
- * IdentityAuditor, IdentityGuard, the hooks, the merge controllers) against the
- * stand-ins in identity_stubs.php. It prints one line per scenario:
- *   <name>=<outcome>|<audit records written>
+ * CRM-IDINT-001R test harness: runs the real custom PHP (IdentityPolicy, IdentityAuditor,
+ * IdentityGuard, the hooks and the record hooks) in the order the platform runs it, on the
+ * fake persistence layer of identity_fake.php, with the platform's real hook interfaces,
+ * options and GeneralInvoker loaded from the pinned reference.
+ *
+ * It prints one line per scenario:   <name>=<outcome>|<audit records written>
  * where outcome is ok, Forbidden or BadRequest and an audit record reads
- * relationship:recordType:recordId:previous>new.
- * Usage: php identity_harness.php <path to custom/Espo/Custom>
+ * relationship:recordType:recordId:previous>new. Some scenarios print extra state lines.
+ *
+ * Usage: php identity_harness.php <reference dir> <path to custom/Espo/Custom>
  */
 
 namespace {
-    require __DIR__ . '/identity_stubs.php';
-
+    use CrmTest\FakeEntity;
+    use CrmTest\FakePlatform;
     use Espo\Core\Exceptions\BadRequest;
     use Espo\Core\Exceptions\Forbidden;
-    use Espo\ORM\Entity;
-    use Espo\ORM\EntityManager;
-    use Espo\ORM\Repository\Option as O;
     use Espo\Custom\Classes\Identity\IdentityPolicy as P;
 
-    $root = $argv[1];
-    foreach (['Identity/IdentityPolicy', 'Identity/IdentityAuditor', 'Identity/IdentityGuard'] as $c) {
-        require "$root/Classes/$c.php";
-    }
-    require "$root/Hooks/IdentityAudit/ProtectIdentityAudit.php";
-    foreach (['Account', 'Contact', 'Opportunity'] as $e) {
-        foreach (glob("$root/Hooks/$e/Identity*.php") as $f) {
-            require $f;
+    [, $reference, $root] = $argv;
+
+    require $reference . '/vendor/autoload.php';
+    require __DIR__ . '/identity_stubs.php';
+    spl_autoload_register(function (string $class) use ($root): void {
+        $prefix = 'Espo\\Custom\\';
+
+        if (str_starts_with($class, $prefix)) {
+            $file = $root . '/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
+
+            if (is_file($file)) {
+                require $file;
+            }
         }
-    }
-    require "$root/Controllers/Account.php";
-    require "$root/Controllers/Contact.php";
+    });
+    require __DIR__ . '/identity_fake.php';
 
-    function guard(EntityManager $em, bool $admin = false): \Espo\Custom\Classes\Identity\IdentityGuard
+    function run(string $name, callable $fn, bool $admin = false): void
     {
-        return new \Espo\Custom\Classes\Identity\IdentityGuard(
-            $em,
-            new \Espo\Custom\Classes\Identity\IdentityAuditor($em, new \Espo\Entities\User($admin)),
-            new \Espo\Core\Utils\Metadata()
-        );
-    }
+        global $root;
+        $p = new FakePlatform($root, $admin);
 
-    function hook(string $entity, string $kind, EntityManager $em, bool $admin = false): object
-    {
-        $cls = "Espo\\Custom\\Hooks\\$entity\\Identity$kind";
-
-        return new $cls(guard($em, $admin));
-    }
-
-    /** Save as EspoCRM does: before hook, insert or update, after hook. */
-    function save(EntityManager $em, Entity $e, array $opts = [], bool $admin = false): void
-    {
-        $o = new O\SaveOptions($opts);
-        $t = $e->getEntityType();
-        hook($t, 'BeforeSave', $em, $admin)->beforeSave($e, $o);
-        $wasNew = $e->isNew();
-        $em->saveEntity($e);
-        if ($wasNew) {
-            // EspoCRM keeps isNew() true until the after-save hooks have run.
-            $e->forceNew();
-        }
-        hook($t, 'AfterSave', $em, $admin)->afterSave($e, $o);
-    }
-
-    function relate(EntityManager $em, Entity $e, string $link, Entity $f, bool $on = true, bool $admin = false): void
-    {
-        $t = $e->getEntityType();
-        if ($on) {
-            hook($t, 'BeforeRelate', $em, $admin)->beforeRelate($e, $link, $f, [], new O\RelateOptions());
-        } else {
-            hook($t, 'BeforeUnrelate', $em, $admin)->beforeUnrelate($e, $link, $f, new O\UnrelateOptions());
-        }
-    }
-
-    function run(string $name, callable $fn): void
-    {
-        $em = new EntityManager();
         try {
-            $fn($em);
+            $fn($p);
             $r = 'ok';
         } catch (Forbidden) {
             $r = 'Forbidden';
         } catch (BadRequest) {
             $r = 'BadRequest';
         }
-        echo $name . '=' . $r . '|' . implode(',', $em->audits()) . "\n";
+
+        echo $name . '=' . $r . '|' . implode(',', $p->audits()) . "\n";
     }
 
-    function seed(EntityManager $em, string $type, string $id, array $f = []): Entity
+    function line(string $name, mixed $value): void
     {
-        return $em->seed($type, $id, $f);
+        echo $name . '=' . (is_string($value) ? $value : json_encode($value)) . "\n";
     }
 
-    function edit(Entity $e, array $changes): void
+    function newOf(string $type, array $f = []): FakeEntity
     {
-        $e->set($changes);
-    }
-
-    function newOf(string $type, array $f = []): Entity
-    {
-        $e = new Entity($type, true);
+        $e = new FakeEntity($type, true);
         $e->set($f);
 
         return $e;
+    }
+
+    function edit(FakeEntity $e, array $changes): FakeEntity
+    {
+        $e->set($changes);
+
+        return $e;
+    }
+
+    /** POST /<Entity>: the platform discards a client-supplied identifier, then the record hooks, then the save. */
+    function apiCreate(FakePlatform $p, string $type, array $data, array $options = []): FakeEntity
+    {
+        unset($data['id']);
+        $e = newOf($type, $data);
+        $p->recordCreateInput($e);
+        $p->save($e, $options + ['api' => true]);
+
+        return $e;
+    }
+
+    function firmLinks(FakePlatform $p, string $contact): string
+    {
+        return implode(',', $p->linkedFirms($contact));
+    }
+
+    function field(FakePlatform $p, string $type, string $id, string $attribute): string
+    {
+        return (string) ($p->rows[$type][$id][$attribute] ?? '');
     }
 
     // ---- pure policy ----
@@ -118,194 +107,320 @@ namespace {
         P::statusProblem('superseded', 'b', false), P::statusProblem('superseded', 'b', true), P::statusProblem('gone', null, false),
     ]) . "\n";
 
-    // ---- create ----
-    run('create.plain_account', fn($em) => save($em, newOf('Account')));
-    run('create.supplied_id', fn($em) => save($em, newOf('Account', ['id' => 'chosen'])));
-    run('create.supplied_id_contact', fn($em) => save($em, newOf('Contact', ['id' => 'chosen'])));
-    run('create.supplied_id_enquiry', fn($em) => save($em, newOf('Opportunity', ['id' => 'chosen'])));
-    run('create.supplied_id_admin', fn($em) => save($em, newOf('Account', ['id' => 'chosen']), [], true));
-    run('create.import_option', fn($em) => save($em, newOf('Account'), ['import' => true]));
-    run('create.with_parent', function ($em) { seed($em, 'Account', 'p1'); save($em, newOf('Account', ['parentId' => 'p1'])); });
-    run('create.with_parent_audit_unwritable', function ($em) {
-        seed($em, 'Account', 'p1');
-        $em->failAudit = true;
+    // ---- create (the platform has assigned the identifier before the before-save hook runs) ----
+    run('create.plain_account', fn($p) => apiCreate($p, 'Account', ['name' => 'n']));
+    run('create.plain_contact', fn($p) => apiCreate($p, 'Contact', ['lastName' => 'n']));
+    run('create.plain_enquiry', fn($p) => apiCreate($p, 'Opportunity', ['name' => 'n']));
+    run('create.plain_account_admin', fn($p) => apiCreate($p, 'Account', ['name' => 'n']), true);
+    run('create.plain_contact_admin', fn($p) => apiCreate($p, 'Contact', ['lastName' => 'n']), true);
+    foreach (['Account', 'Contact', 'Opportunity'] as $type) {
+        run("create.supplied_id_is_never_used_$type", function ($p) use ($type) {
+            $e = apiCreate($p, $type, ['id' => 'chosen']);
+            line("supplied_id_used_$type", isset($p->rows[$type]['chosen']) ? 'yes' : 'no');
+            line("supplied_id_created_$type", $p->count($type) === 1 && $e->getId() !== 'chosen' ? 'one-with-its-own-id' : 'other');
+        });
+    }
+    run('create.import_option', fn($p) => $p->save(newOf('Account'), ['import' => true]));
+    run('create.import_option_contact_admin', fn($p) => $p->save(newOf('Contact'), ['import' => true]), true);
+    run('create.import_option_enquiry', fn($p) => $p->save(newOf('Opportunity'), ['import' => true]));
+    run('create.import_with_identifier', fn($p) => $p->save(newOf('Account', ['id' => 'chosen']), ['import' => true]));
+    run('create.with_parent', function ($p) { $p->seed('Account', 'p1'); apiCreate($p, 'Account', ['parentId' => 'p1']); });
+    run('create.with_parent_audit_unwritable', function ($p) {
+        $p->seed('Account', 'p1');
+        $p->failAudit = true;
         try {
-            save($em, newOf('Account', ['parentId' => 'p1']));
+            apiCreate($p, 'Account', ['parentId' => 'p1']);
         } finally {
-            echo 'accounts_left=' . count($em->store['Account']) . "\n";
+            line('accounts_left_after_failed_create', $p->count('Account'));
         }
     });
-    run('create.contact_with_primary', function ($em) { seed($em, 'Account', 'a1'); save($em, newOf('Contact', ['accountId' => 'a1'])); });
-    run('create.enquiry_with_firm', function ($em) { seed($em, 'Account', 'a1'); save($em, newOf('Opportunity', ['accountId' => 'a1'])); });
-    run('create.contact_primary_not_linked', fn($em) => save($em, newOf('Contact', ['accountId' => 'a1', 'accountsIds' => ['a2']])));
-    run('create.contact_primary_linked', fn($em) => save($em, newOf('Contact', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']])));
-    run('create.contact_with_links', function ($em) { save($em, newOf('Contact', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']])); });
-    run('create.contact_links_without_primary', function ($em) { save($em, newOf('Contact', ['accountsIds' => ['a1', 'a2']])); });
-    run('create.contact_links_duplicate_ids', function ($em) { save($em, newOf('Contact', ['accountsIds' => ['a1', 'a1']])); });
-    run('create.contact_links_then_core_fires_relate', function ($em) {
-        // Core may also fire beforeRelate for each link while it writes the rows: no double record.
-        $c = newOf('Contact', ['accountsIds' => ['a1', 'a2']]);
-        save($em, $c);
-        $c->forceNew();
-        relate($em, $c, 'accounts', seed($em, 'Account', 'a1'));
-        relate($em, $c, 'accounts', seed($em, 'Account', 'a2'));
-    });
-    run('create.contact_links_relate_fires_before_after_save', function ($em) {
-        $c = newOf('Contact', ['accountsIds' => ['a1']]);
-        $o = new O\SaveOptions([]);
-        hook('Contact', 'BeforeSave', $em)->beforeSave($c, $o);
-        $em->saveEntity($c);
-        $c->forceNew();
-        relate($em, $c, 'accounts', seed($em, 'Account', 'a1'));
-        hook('Contact', 'AfterSave', $em)->afterSave($c, $o);
-    });
-    run('create.contact_links_audit_unwritable', function ($em) {
-        $em->failAudit = true;
+    run('create.contact_with_primary', function ($p) { $p->seed('Account', 'a1'); apiCreate($p, 'Contact', ['accountId' => 'a1']); line('links_after_create', firmLinks($p, 'c1')); });
+    run('create.enquiry_with_firm', function ($p) { $p->seed('Account', 'a1'); apiCreate($p, 'Opportunity', ['accountId' => 'a1']); });
+    run('create.contact_primary_not_linked', fn($p) => apiCreate($p, 'Contact', ['accountId' => 'a1', 'accountsIds' => ['a2']]));
+    run('create.contact_primary_linked', fn($p) => apiCreate($p, 'Contact', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']]));
+    run('create.contact_links_without_primary', fn($p) => apiCreate($p, 'Contact', ['accountsIds' => ['a1', 'a2']]));
+    run('create.contact_links_duplicate_ids', fn($p) => apiCreate($p, 'Contact', ['accountsIds' => ['a1', 'a1']]));
+    run('create.contact_links_audit_unwritable', function ($p) {
+        $p->failAudit = true;
         try {
-            save($em, newOf('Contact', ['accountsIds' => ['a1', 'a2']]));
+            apiCreate($p, 'Contact', ['accountsIds' => ['a1', 'a2']]);
         } finally {
-            echo 'link_create_contacts_left=' . count($em->store['Contact'] ?? []) . "\n";
-            echo 'link_create_link_rows_left=' . count($em->links['AccountContact'] ?? []) . "\n";
+            line('create_links_contacts_left', $p->count('Contact'));
+            line('create_links_link_rows_left', $p->linkRows());
         }
     });
-    run('create.contact_links_audit_fails_on_second_link', function ($em) {
+    run('create.contact_links_audit_fails_on_second_link', function ($p) {
         // The first link is audited, the store then fails: the create is undone, links and all.
-        $em->failAuditAfter = 2;
+        $p->failAuditAfter = 2;
         try {
-            save($em, newOf('Contact', ['accountsIds' => ['a1', 'a2']]));
+            apiCreate($p, 'Contact', ['accountsIds' => ['a1', 'a2']]);
         } finally {
-            echo 'link_create2_contacts_left=' . count($em->store['Contact'] ?? []) . "\n";
-            echo 'link_create2_link_rows_left=' . count($em->links['AccountContact'] ?? []) . "\n";
+            line('create_links2_contacts_left', $p->count('Contact'));
+            line('create_links2_link_rows_left', $p->linkRows());
         }
     });
-    run('create.contact_links_undo_cannot_delete_link_rows', function ($em) {
-        $em->failAudit = true;
-        $em->failLinkDelete = true;
+    run('create.contact_links_undo_cannot_delete', function ($p) {
+        // The documented residual: if the undo itself cannot run, the create is still refused.
+        $p->failAudit = true;
+        $p->failExecutor = true;
         try {
-            save($em, newOf('Contact', ['accountsIds' => ['a1']]));
+            apiCreate($p, 'Contact', ['accountsIds' => ['a1']]);
         } finally {
-            echo 'link_undo_fail_contacts_left=' . count($em->store['Contact'] ?? []) . "\n";
-            echo 'link_undo_fail_link_rows_left=' . count($em->links['AccountContact'] ?? []) . "\n";
+            line('create_undo_fail_contacts_left', $p->count('Contact'));
+            line('create_undo_fail_link_rows_left', $p->linkRows());
         }
     });
-    run('create.retired_new', fn($em) => save($em, newOf('Account', ['identityStatus' => 'retired'])));
-    run('create.successor_new', function ($em) { seed($em, 'Account', 'a1'); save($em, newOf('Account', ['identityStatus' => 'superseded', 'successorId' => 'a1'])); });
+    run('create.retired_new', fn($p) => apiCreate($p, 'Account', ['identityStatus' => 'retired']));
+    run('create.successor_new', function ($p) { $p->seed('Account', 'a1'); apiCreate($p, 'Account', ['identityStatus' => 'superseded', 'successorId' => 'a1']); });
+    run('create.branches_input_refused', fn($p) => apiCreate($p, 'Account', ['branchesIds' => ['x']]));
+    run('create.predecessors_input_refused', fn($p) => apiCreate($p, 'Contact', ['predecessorsIds' => ['x']]));
 
     // ---- edit ----
-    run('edit.parent_change', function ($em) { $a = seed($em, 'Account', 'a1', ['parentId' => 'p1']); edit($a, ['parentId' => 'p2']); save($em, $a); });
-    run('edit.parent_clear', function ($em) { $a = seed($em, 'Account', 'a1', ['parentId' => 'p1']); edit($a, ['parentId' => null]); save($em, $a); });
-    run('edit.parent_same_value', function ($em) { $a = seed($em, 'Account', 'a1', ['parentId' => 'p1']); edit($a, ['parentId' => 'p1']); save($em, $a); });
-    run('edit.parent_audit_unwritable', function ($em) { $a = seed($em, 'Account', 'a1', ['parentId' => 'p1']); $em->failAudit = true; edit($a, ['parentId' => 'p2']); save($em, $a); });
-    run('edit.parent_audit_readback_differs', function ($em) { $a = seed($em, 'Account', 'a1', ['parentId' => 'p1']); $em->lieOnReadBack = true; edit($a, ['parentId' => 'p2']); save($em, $a); });
-    run('edit.parent_admin', function ($em) { $a = seed($em, 'Account', 'a1', ['parentId' => 'p1']); edit($a, ['parentId' => 'p2']); save($em, $a, [], true); });
-    run('edit.unrelated_field', function ($em) { $a = seed($em, 'Account', 'a1'); edit($a, ['name' => 'x']); save($em, $a); });
-    run('edit.contact_primary', function ($em) { $c = seed($em, 'Contact', 'c1', ['accountId' => 'a1']); edit($c, ['accountId' => 'a2']); save($em, $c); });
-    run('edit.contact_primary_clear', function ($em) { $c = seed($em, 'Contact', 'c1', ['accountId' => 'a1']); edit($c, ['accountId' => null]); save($em, $c); });
-    run('edit.contact_drops_primary_link', function ($em) { $c = seed($em, 'Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']]); edit($c, ['accountsIds' => ['a2']]); save($em, $c); });
-    run('edit.contact_moves_primary_and_link', function ($em) { $c = seed($em, 'Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']]); edit($c, ['accountId' => 'a2', 'accountsIds' => ['a2']]); save($em, $c); });
-    run('edit.contact_clears_primary_and_link', function ($em) { $c = seed($em, 'Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']]); edit($c, ['accountId' => null, 'accountsIds' => ['a2']]); save($em, $c); });
-    run('edit.contact_adds_link', function ($em) { $c = seed($em, 'Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]); edit($c, ['accountsIds' => ['a1', 'a3']]); save($em, $c); });
-    run('edit.enquiry_firm', function ($em) { $o = seed($em, 'Opportunity', 'o1', ['accountId' => 'a1']); edit($o, ['accountId' => 'a2']); save($em, $o); });
-    run('edit.enquiry_firm_audit_unwritable', function ($em) { $o = seed($em, 'Opportunity', 'o1', ['accountId' => 'a1']); $em->failAudit = true; edit($o, ['accountId' => 'a2']); save($em, $o); });
-    run('edit.exception_primary_unlinked_then_other_edit', function ($em) {
-        // An existing exception (primary not among the links) can still be edited for other reasons.
-        $c = seed($em, 'Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a2']]);
-        edit($c, ['title' => 'x']);
-        save($em, $c);
+    run('edit.parent_change', function ($p) { $a = $p->seed('Account', 'a1', ['parentId' => 'p1']); edit($a, ['parentId' => 'p2']); $p->save($a); });
+    run('edit.parent_clear', function ($p) { $a = $p->seed('Account', 'a1', ['parentId' => 'p1']); edit($a, ['parentId' => null]); $p->save($a); });
+    run('edit.parent_same_value', function ($p) { $a = $p->seed('Account', 'a1', ['parentId' => 'p1']); edit($a, ['parentId' => 'p1']); $p->save($a); });
+    run('edit.parent_audit_unwritable', function ($p) {
+        $a = $p->seed('Account', 'a1', ['parentId' => 'p1']);
+        $p->failAudit = true;
+        edit($a, ['parentId' => 'p2']);
+        try { $p->save($a); } finally { line('parent_after_refused_edit', field($p, 'Account', 'a1', 'parentId')); }
     });
+    run('edit.parent_audit_readback_differs', function ($p) { $a = $p->seed('Account', 'a1', ['parentId' => 'p1']); $p->lieOnReadBack = true; edit($a, ['parentId' => 'p2']); $p->save($a); });
+    run('edit.parent_admin', function ($p) { $a = $p->seed('Account', 'a1', ['parentId' => 'p1']); edit($a, ['parentId' => 'p2']); $p->save($a); }, true);
+    run('edit.unrelated_field', function ($p) { $a = $p->seed('Account', 'a1'); edit($a, ['name' => 'x']); $p->save($a); });
+    run('edit.contact_primary', function ($p) {
+        $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]);
+        edit($c, ['accountId' => 'a2']);
+        $p->save($c);
+        line('links_after_primary_move', firmLinks($p, 'c1'));
+    });
+    run('edit.contact_primary_clear', function ($p) {
+        $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]);
+        edit($c, ['accountId' => null]);
+        $p->save($c);
+        line('links_after_primary_clear', firmLinks($p, 'c1') ?: 'none');
+    });
+    run('edit.contact_drops_primary_link', function ($p) { $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']]); edit($c, ['accountsIds' => ['a2']]); $p->save($c); });
+    run('edit.contact_moves_primary_and_link', function ($p) {
+        $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']]);
+        edit($c, ['accountId' => 'a2', 'accountsIds' => ['a2']]);
+        $p->save($c);
+        line('links_after_move', firmLinks($p, 'c1'));
+    });
+    run('edit.contact_clears_primary_and_drops_its_link', function ($p) {
+        $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']]);
+        edit($c, ['accountId' => null, 'accountsIds' => ['a2']]);
+        $p->save($c);
+        line('links_after_clear', firmLinks($p, 'c1'));
+    });
+    run('edit.contact_clears_primary_and_all_links', function ($p) {
+        $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]);
+        edit($c, ['accountId' => null, 'accountsIds' => []]);
+        $p->save($c);
+        line('links_after_clear_all', firmLinks($p, 'c1') ?: 'none');
+        line('primary_after_clear_all', field($p, 'Contact', 'c1', 'accountId') ?: 'none');
+    });
+    run('edit.contact_adds_link', function ($p) { $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]); edit($c, ['accountsIds' => ['a1', 'a3']]); $p->save($c); });
+    run('edit.contact_adds_link_audit_unwritable', function ($p) {
+        $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]);
+        $p->failAudit = true;
+        edit($c, ['accountsIds' => ['a1', 'a3']]);
+        try { $p->save($c); } finally { line('links_after_refused_add', firmLinks($p, 'c1')); }
+    });
+    run('edit.enquiry_firm', function ($p) { $o = $p->seed('Opportunity', 'o1', ['accountId' => 'a1']); edit($o, ['accountId' => 'a2']); $p->save($o); });
+    run('edit.enquiry_firm_audit_unwritable', function ($p) { $o = $p->seed('Opportunity', 'o1', ['accountId' => 'a1']); $p->failAudit = true; edit($o, ['accountId' => 'a2']); $p->save($o); });
+    run('edit.exception_primary_unlinked_then_other_edit', function ($p) {
+        // An existing exception (primary not among the links) can still be edited for other reasons.
+        $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a2']]);
+        edit($c, ['title' => 'x']);
+        $p->save($c);
+    });
+    run('edit.branches_input_refused', function ($p) { $a = $p->seed('Account', 'a1'); edit($a, ['branchesIds' => ['x']]); $p->recordUpdateInput($a); });
+    run('edit.predecessors_input_refused', function ($p) { $a = $p->seed('Contact', 'c1'); edit($a, ['predecessorsIds' => ['x']]); $p->recordUpdateInput($a); });
+    run('edit.plain_input_allowed', function ($p) { $a = $p->seed('Account', 'a1'); edit($a, ['name' => 'x']); $p->recordUpdateInput($a); });
 
     // ---- over-length input ----
-    run('length.title_at_limit', fn($em) => save($em, newOf('Contact', ['title' => str_repeat('a', 255)])));
-    run('length.title_over_limit', fn($em) => save($em, newOf('Contact', ['title' => str_repeat('a', 256)])));
-    run('length.title_over_limit_multibyte', fn($em) => save($em, newOf('Contact', ['title' => str_repeat("\u{e9}", 256)])));
-    run('length.title_multibyte_at_limit', fn($em) => save($em, newOf('Contact', ['title' => str_repeat("\u{e9}", 255)])));
-    run('length.account_name_over_limit', fn($em) => save($em, newOf('Account', ['name' => str_repeat('a', 250)])));
-    run('length.title_over_limit_on_edit', function ($em) { $c = seed($em, 'Contact', 'c1'); edit($c, ['title' => str_repeat('a', 300)]); save($em, $c); });
-    run('length.legacy_long_value_untouched_on_other_edit', function ($em) { $c = seed($em, 'Contact', 'c1', ['title' => str_repeat('a', 300)]); edit($c, ['description' => 'x']); save($em, $c); });
-    run('length.nothing_stored_when_refused', function ($em) {
-        try { save($em, newOf('Contact', ['title' => str_repeat('a', 256)])); } finally { echo 'contacts_stored=' . count($em->store['Contact'] ?? []) . "\n"; }
+    run('length.title_at_limit', fn($p) => apiCreate($p, 'Contact', ['title' => str_repeat('a', 255)]));
+    run('length.title_over_limit', fn($p) => apiCreate($p, 'Contact', ['title' => str_repeat('a', 256)]));
+    run('length.title_over_limit_multibyte', fn($p) => apiCreate($p, 'Contact', ['title' => str_repeat("\u{e9}", 256)]));
+    run('length.title_multibyte_at_limit', fn($p) => apiCreate($p, 'Contact', ['title' => str_repeat("\u{e9}", 255)]));
+    run('length.account_name_over_limit', fn($p) => apiCreate($p, 'Account', ['name' => str_repeat('a', 250)]));
+    run('length.title_over_limit_on_edit', function ($p) { $c = $p->seed('Contact', 'c1'); edit($c, ['title' => str_repeat('a', 300)]); $p->save($c); });
+    run('length.legacy_long_value_untouched_on_other_edit', function ($p) { $c = $p->seed('Contact', 'c1', ['title' => str_repeat('a', 300)]); edit($c, ['description' => 'x']); $p->save($c); });
+    run('length.nothing_stored_when_refused', function ($p) {
+        try { apiCreate($p, 'Contact', ['title' => str_repeat('a', 256)]); } finally { line('contacts_stored_after_refused_title', $p->count('Contact')); }
     });
 
     // ---- retire and supersede ----
-    run('status.retire', function ($em) { $a = seed($em, 'Account', 'a1'); edit($a, ['identityStatus' => 'retired']); save($em, $a); });
-    run('status.retire_contact', function ($em) { $a = seed($em, 'Contact', 'c1'); edit($a, ['identityStatus' => 'retired']); save($em, $a); });
-    run('status.supersede', function ($em) { $a = seed($em, 'Account', 'a1'); seed($em, 'Account', 'a2'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'a2']); save($em, $a); });
-    run('status.supersede_contact', function ($em) { $a = seed($em, 'Contact', 'c1'); seed($em, 'Contact', 'c2'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'c2']); save($em, $a); });
-    run('status.supersede_self', function ($em) { $a = seed($em, 'Account', 'a1'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'a1']); save($em, $a); });
-    run('status.supersede_missing', function ($em) { $a = seed($em, 'Account', 'a1'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'nope']); save($em, $a); });
-    run('status.supersede_wrong_kind', function ($em) { $a = seed($em, 'Account', 'a1'); seed($em, 'Contact', 'c9'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'c9']); save($em, $a); });
-    run('status.supersede_cycle', function ($em) { seed($em, 'Account', 'a2', ['identityStatus' => 'superseded', 'successorId' => 'a1']); $a = seed($em, 'Account', 'a1'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'a2']); save($em, $a); });
-    run('status.supersede_long_cycle', function ($em) { seed($em, 'Account', 'a3', ['identityStatus' => 'superseded', 'successorId' => 'a1']); seed($em, 'Account', 'a2', ['identityStatus' => 'superseded', 'successorId' => 'a3']); $a = seed($em, 'Account', 'a1'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'a2']); save($em, $a); });
-    run('status.supersede_into_a_chain', function ($em) { seed($em, 'Account', 'a3'); seed($em, 'Account', 'a2', ['identityStatus' => 'superseded', 'successorId' => 'a3']); $a = seed($em, 'Account', 'a1'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'a2']); save($em, $a); });
-    run('status.superseded_without_successor', function ($em) { $a = seed($em, 'Account', 'a1'); edit($a, ['identityStatus' => 'superseded']); save($em, $a); });
-    run('status.retired_with_successor', function ($em) { $a = seed($em, 'Account', 'a1'); seed($em, 'Account', 'a2'); edit($a, ['identityStatus' => 'retired', 'successorId' => 'a2']); save($em, $a); });
-    run('status.active_with_successor', function ($em) { $a = seed($em, 'Account', 'a1'); seed($em, 'Account', 'a2'); edit($a, ['successorId' => 'a2']); save($em, $a); });
-    run('status.unknown_value', function ($em) { $a = seed($em, 'Account', 'a1'); edit($a, ['identityStatus' => 'deleted']); save($em, $a); });
-    run('status.reactivate', function ($em) { $a = seed($em, 'Account', 'a1', ['identityStatus' => 'retired']); edit($a, ['identityStatus' => 'active']); save($em, $a); });
-    run('status.audit_unwritable', function ($em) { $a = seed($em, 'Account', 'a1'); $em->failAudit = true; edit($a, ['identityStatus' => 'retired']); save($em, $a); });
+    run('status.retire', function ($p) { $a = $p->seed('Account', 'a1'); edit($a, ['identityStatus' => 'retired']); $p->save($a); });
+    run('status.retire_contact', function ($p) { $a = $p->seed('Contact', 'c1'); edit($a, ['identityStatus' => 'retired']); $p->save($a); });
+    run('status.supersede', function ($p) { $a = $p->seed('Account', 'a1'); $p->seed('Account', 'a2'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'a2']); $p->save($a); });
+    run('status.supersede_contact', function ($p) { $a = $p->seed('Contact', 'c1'); $p->seed('Contact', 'c2'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'c2']); $p->save($a); });
+    run('status.supersede_self', function ($p) { $a = $p->seed('Account', 'a1'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'a1']); $p->save($a); });
+    run('status.supersede_missing', function ($p) { $a = $p->seed('Account', 'a1'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'nope']); $p->save($a); });
+    run('status.supersede_wrong_kind', function ($p) { $a = $p->seed('Account', 'a1'); $p->seed('Contact', 'c9'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'c9']); $p->save($a); });
+    run('status.supersede_cycle', function ($p) { $p->seed('Account', 'a2', ['identityStatus' => 'superseded', 'successorId' => 'a1']); $a = $p->seed('Account', 'a1'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'a2']); $p->save($a); });
+    run('status.supersede_long_cycle', function ($p) { $p->seed('Account', 'a3', ['identityStatus' => 'superseded', 'successorId' => 'a1']); $p->seed('Account', 'a2', ['identityStatus' => 'superseded', 'successorId' => 'a3']); $a = $p->seed('Account', 'a1'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'a2']); $p->save($a); });
+    run('status.supersede_into_a_chain', function ($p) { $p->seed('Account', 'a3'); $p->seed('Account', 'a2', ['identityStatus' => 'superseded', 'successorId' => 'a3']); $a = $p->seed('Account', 'a1'); edit($a, ['identityStatus' => 'superseded', 'successorId' => 'a2']); $p->save($a); });
+    run('status.superseded_without_successor', function ($p) { $a = $p->seed('Account', 'a1'); edit($a, ['identityStatus' => 'superseded']); $p->save($a); });
+    run('status.retired_with_successor', function ($p) { $a = $p->seed('Account', 'a1'); $p->seed('Account', 'a2'); edit($a, ['identityStatus' => 'retired', 'successorId' => 'a2']); $p->save($a); });
+    run('status.active_with_successor', function ($p) { $a = $p->seed('Account', 'a1'); $p->seed('Account', 'a2'); edit($a, ['successorId' => 'a2']); $p->save($a); });
+    run('status.unknown_value', function ($p) { $a = $p->seed('Account', 'a1'); edit($a, ['identityStatus' => 'deleted']); $p->save($a); });
+    run('status.reactivate', function ($p) { $a = $p->seed('Account', 'a1', ['identityStatus' => 'retired']); edit($a, ['identityStatus' => 'active']); $p->save($a); });
+    run('status.audit_unwritable', function ($p) { $a = $p->seed('Account', 'a1'); $p->failAudit = true; edit($a, ['identityStatus' => 'retired']); $p->save($a); });
+    run('status.retire_admin', function ($p) { $a = $p->seed('Account', 'a1'); edit($a, ['identityStatus' => 'retired']); $p->save($a); }, true);
 
-    // ---- links ----
-    run('link.contact_unlink_primary', function ($em) { $c = seed($em, 'Contact', 'c1', ['accountId' => 'a1']); relate($em, $c, 'accounts', seed($em, 'Account', 'a1'), false); });
-    run('link.contact_unlink_primary_admin', function ($em) { $c = seed($em, 'Contact', 'c1', ['accountId' => 'a1']); relate($em, $c, 'accounts', seed($em, 'Account', 'a1'), false, true); });
-    run('link.contact_unlink_other', function ($em) { $c = seed($em, 'Contact', 'c1', ['accountId' => 'a1']); relate($em, $c, 'accounts', seed($em, 'Account', 'a2'), false); });
-    run('link.contact_link', function ($em) { $c = seed($em, 'Contact', 'c1', ['accountId' => 'a1']); relate($em, $c, 'accounts', seed($em, 'Account', 'a2')); });
-    run('link.contact_link_audit_unwritable', function ($em) { $c = seed($em, 'Contact', 'c1'); $em->failAudit = true; relate($em, $c, 'accounts', seed($em, 'Account', 'a2')); });
-    run('link.firm_side_unlink_primary', function ($em) { $a = seed($em, 'Account', 'a1'); relate($em, $a, 'contacts', seed($em, 'Contact', 'c1', ['accountId' => 'a1']), false); });
-    run('link.firm_side_unlink_other', function ($em) { $a = seed($em, 'Account', 'a2'); relate($em, $a, 'contacts', seed($em, 'Contact', 'c1', ['accountId' => 'a1']), false); });
-    run('link.firm_side_link', function ($em) { $a = seed($em, 'Account', 'a2'); relate($em, $a, 'contacts', seed($em, 'Contact', 'c1', ['accountId' => 'a1'])); });
-    run('link.branch_link', function ($em) { $p = seed($em, 'Account', 'p1'); relate($em, $p, 'branches', seed($em, 'Account', 'b1', ['parentId' => 'p0'])); });
-    run('link.branch_unlink', function ($em) { $p = seed($em, 'Account', 'p1'); relate($em, $p, 'branches', seed($em, 'Account', 'b1', ['parentId' => 'p1']), false); });
-    run('link.parent_unlink_from_child', function ($em) { $b = seed($em, 'Account', 'b1', ['parentId' => 'p1']); relate($em, $b, 'parent', seed($em, 'Account', 'p1'), false); });
-    run('link.branch_link_audit_unwritable', function ($em) { $p = seed($em, 'Account', 'p1'); $em->failAudit = true; relate($em, $p, 'branches', seed($em, 'Account', 'b1')); });
-    run('link.enquiry_link', function ($em) { $a = seed($em, 'Account', 'a1'); relate($em, $a, 'opportunities', seed($em, 'Opportunity', 'o1', ['accountId' => 'a0'])); });
-    run('link.enquiry_unlink', function ($em) { $a = seed($em, 'Account', 'a1'); relate($em, $a, 'opportunities', seed($em, 'Opportunity', 'o1', ['accountId' => 'a1']), false); });
-    run('link.enquiry_side_link', function ($em) { $o = seed($em, 'Opportunity', 'o1'); relate($em, $o, 'account', seed($em, 'Account', 'a1')); });
-    run('link.primary_firm_from_firm', function ($em) { $a = seed($em, 'Account', 'a1'); relate($em, $a, 'contactsPrimary', seed($em, 'Contact', 'c1')); });
-    run('link.successor_link', function ($em) { $a = seed($em, 'Account', 'a1'); relate($em, $a, 'successor', seed($em, 'Account', 'a2')); });
-    run('link.predecessors_link', function ($em) { $a = seed($em, 'Account', 'a1'); relate($em, $a, 'predecessors', seed($em, 'Account', 'a2')); });
-    run('link.contact_successor_unlink', function ($em) { $c = seed($em, 'Contact', 'c1'); relate($em, $c, 'successor', seed($em, 'Contact', 'c2'), false); });
-    run('link.other_link_untouched', function ($em) { $a = seed($em, 'Account', 'a1'); relate($em, $a, 'documents', seed($em, 'Account', 'a2')); });
-    run('link.new_record_audit_unwritable_is_undone', function ($em) {
-        $c = newOf('Contact', ['id' => 'c9']);
-        $em->store['Contact']['c9'] = $c;
-        $em->failAudit = true;
-        try {
-            relate($em, $c, 'accounts', seed($em, 'Account', 'a2'));
-        } finally {
-            echo 'contacts_left=' . count($em->store['Contact'] ?? []) . "\n";
+    // ---- links through the record link and unlink routes, and through the ORM directly ----
+    run('link.contact_unlink_primary', function ($p) { $p->seed('Account', 'a1'); $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]); $p->recordUnlink('Contact', 'c1', 'accounts', 'a1'); });
+    run('link.contact_unlink_primary_admin', function ($p) { $p->seed('Account', 'a1'); $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]); $p->recordUnlink('Contact', 'c1', 'accounts', 'a1'); }, true);
+    run('link.contact_unlink_other', function ($p) {
+        $p->seed('Account', 'a1'); $p->seed('Account', 'a2'); $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']]);
+        $p->recordUnlink('Contact', 'c1', 'accounts', 'a2');
+        line('links_left', firmLinks($p, 'c1'));
+    });
+    run('link.contact_link', function ($p) {
+        $p->seed('Account', 'a1'); $p->seed('Account', 'a2'); $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]);
+        $p->recordLink('Contact', 'c1', 'accounts', 'a2');
+        line('links_now', firmLinks($p, 'c1'));
+    });
+    run('link.contact_link_audit_unwritable', function ($p) {
+        $p->seed('Account', 'a2'); $p->seed('Contact', 'c1'); $p->failAudit = true;
+        try { $p->recordLink('Contact', 'c1', 'accounts', 'a2'); } finally { line('links_after_refused_link', firmLinks($p, 'c1') ?: 'none'); }
+    });
+    run('link.contact_unlink_audit_unwritable', function ($p) {
+        $p->seed('Account', 'a1'); $p->seed('Account', 'a2'); $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']]); $p->failAudit = true;
+        try { $p->recordUnlink('Contact', 'c1', 'accounts', 'a2'); } finally { line('links_after_refused_unlink', firmLinks($p, 'c1')); }
+    });
+    run('link.firm_side_unlink_primary', function ($p) { $p->seed('Account', 'a1'); $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]); $p->recordUnlink('Account', 'a1', 'contacts', 'c1'); });
+    run('link.firm_side_unlink_other', function ($p) {
+        $p->seed('Account', 'a2'); $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']]);
+        $p->recordUnlink('Account', 'a2', 'contacts', 'c1');
+        line('links_left', firmLinks($p, 'c1'));
+    });
+    run('link.firm_side_link', function ($p) {
+        $p->seed('Account', 'a2'); $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]);
+        $p->recordLink('Account', 'a2', 'contacts', 'c1');
+        line('links_now', firmLinks($p, 'c1'));
+    });
+    run('link.firm_side_link_audit_unwritable', function ($p) {
+        $p->seed('Account', 'a2'); $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]); $p->failAudit = true;
+        try { $p->recordLink('Account', 'a2', 'contacts', 'c1'); } finally { line('links_after_refused_firm_side_link', firmLinks($p, 'c1')); }
+    });
+    run('link.branch_link', function ($p) {
+        $p->seed('Account', 'p1'); $p->seed('Account', 'b1', ['parentId' => 'p0']);
+        $p->recordLink('Account', 'p1', 'branches', 'b1');
+        line('parent_now', field($p, 'Account', 'b1', 'parentId'));
+    });
+    run('link.branch_unlink', function ($p) {
+        $p->seed('Account', 'p1'); $p->seed('Account', 'b1', ['parentId' => 'p1']);
+        $p->recordUnlink('Account', 'p1', 'branches', 'b1');
+        line('parent_now', field($p, 'Account', 'b1', 'parentId') ?: 'none');
+    });
+    run('link.branch_link_audit_unwritable', function ($p) {
+        $p->seed('Account', 'p1'); $p->seed('Account', 'b1', ['parentId' => 'p0']); $p->failAudit = true;
+        try { $p->recordLink('Account', 'p1', 'branches', 'b1'); } finally { line('parent_after_refused_link', field($p, 'Account', 'b1', 'parentId')); }
+    });
+    run('link.branch_unlink_audit_unwritable', function ($p) {
+        $p->seed('Account', 'p1'); $p->seed('Account', 'b1', ['parentId' => 'p1']); $p->failAudit = true;
+        try { $p->recordUnlink('Account', 'p1', 'branches', 'b1'); } finally { line('parent_after_refused_unlink', field($p, 'Account', 'b1', 'parentId')); }
+    });
+    run('link.enquiry_link', function ($p) { $p->seed('Account', 'a1'); $p->seed('Opportunity', 'o1', ['accountId' => 'a0']); $p->recordLink('Account', 'a1', 'opportunities', 'o1'); });
+    run('link.enquiry_unlink', function ($p) { $p->seed('Account', 'a1'); $p->seed('Opportunity', 'o1', ['accountId' => 'a1']); $p->recordUnlink('Account', 'a1', 'opportunities', 'o1'); });
+    run('link.enquiry_link_audit_unwritable', function ($p) {
+        $p->seed('Account', 'a1'); $p->seed('Opportunity', 'o1', ['accountId' => 'a0']); $p->failAudit = true;
+        try { $p->recordLink('Account', 'a1', 'opportunities', 'o1'); } finally { line('enquiry_firm_after_refused_link', field($p, 'Opportunity', 'o1', 'accountId')); }
+    });
+    run('link.enquiry_belongs_to_relate', function ($p) { $o = $p->seed('Opportunity', 'o1'); $p->relate($o, 'account', $p->seedOnly('Account', 'a1')); });
+    run('link.enquiry_belongs_to_audit_unwritable', function ($p) {
+        $o = $p->seed('Opportunity', 'o1'); $p->failAudit = true;
+        try { $p->relate($o, 'account', $p->seedOnly('Account', 'a1')); } finally { line('enquiry_firm_after_refused_relate', field($p, 'Opportunity', 'o1', 'accountId') ?: 'none'); }
+    });
+    run('link.primary_firm_from_firm', function ($p) { $p->seed('Account', 'a1'); $p->seed('Contact', 'c1'); $p->recordLink('Account', 'a1', 'contactsPrimary', 'c1'); });
+    run('link.primary_firm_from_firm_audit_unwritable', function ($p) {
+        $p->seed('Account', 'a1'); $p->seed('Contact', 'c1', ['accountId' => 'a0']); $p->failAudit = true;
+        try { $p->recordLink('Account', 'a1', 'contactsPrimary', 'c1'); } finally { line('primary_after_refused_link', field($p, 'Contact', 'c1', 'accountId')); }
+    });
+    run('link.record_link_hook_refuses_a_successor_on_its_own', function ($p) { $p->seed('Account', 'a1'); $p->seed('Account', 'a2'); $p->recordLink('Account', 'a1', 'predecessors', 'a2', true); });
+    run('link.record_unlink_hook_refuses_a_successor_on_its_own', function ($p) { $p->seed('Contact', 'c1'); $p->seed('Contact', 'c2', ['successorId' => 'c1']); $p->recordUnlink('Contact', 'c1', 'predecessors', 'c2', true); });
+    run('link.record_unlink_hook_refuses_the_primary_on_its_own', function ($p) { $p->seed('Account', 'a1'); $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]); $p->recordUnlink('Contact', 'c1', 'accounts', 'a1', true); });
+    run('link.record_unlink_hook_allows_another_firm_on_its_own', function ($p) { $p->seed('Account', 'a1'); $p->seed('Account', 'a2'); $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']]); $p->recordUnlink('Contact', 'c1', 'accounts', 'a2', true); });
+    run('link.successor_link', function ($p) { $p->seed('Account', 'a1'); $p->seed('Account', 'a2'); $p->recordLink('Account', 'a1', 'predecessors', 'a2'); });
+    run('link.successor_link_admin', function ($p) { $p->seed('Account', 'a1'); $p->seed('Account', 'a2'); $p->recordLink('Account', 'a1', 'predecessors', 'a2'); }, true);
+    run('link.contact_predecessors_unlink', function ($p) { $p->seed('Contact', 'c1'); $p->seed('Contact', 'c2', ['successorId' => 'c1']); $p->recordUnlink('Contact', 'c1', 'predecessors', 'c2'); });
+    run('link.successor_orm_relate_is_put_back', function ($p) {
+        $a = $p->seed('Account', 'a1'); $p->seed('Account', 'a2', ['successorId' => 'a9']);
+        try { $p->relate($a, 'predecessors', $p->load('Account', 'a2')); } finally { line('successor_after_refused_relate', field($p, 'Account', 'a2', 'successorId')); }
+    });
+    run('link.successor_orm_belongs_to_relate', function ($p) {
+        $a = $p->seed('Account', 'a1');
+        try { $p->relate($a, 'successor', $p->seedOnly('Account', 'a2')); } finally { line('successor_after', field($p, 'Account', 'a1', 'successorId') ?: 'none'); }
+    });
+    run('link.other_link_untouched', function ($p) { $a = $p->seed('Account', 'a1'); $p->seed('Account', 'a2'); $p->recordLink('Account', 'a1', 'documents', 'a2'); });
+    run('link.orm_unlink_primary_is_put_back', function ($p) {
+        // Code that unrelates through the ORM directly (no record hook) is caught by the after hook.
+        $p->crmHooks = false;
+        $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]);
+        try { $p->unrelate($c, 'accounts', $p->seedOnly('Account', 'a1')); } finally { line('links_after_orm_unlink', firmLinks($p, 'c1')); }
+    });
+    run('link.orm_firm_side_unlink_primary_is_put_back_before_the_platform_clears_it', function ($p) {
+        // The platform's own Account hook clears a contact's primary firm when it is unlinked from
+        // that firm. The identity hook runs first, so the unlink is refused and put back, and the
+        // primary firm is never cleared behind the audit's back.
+        $a = $p->seed('Account', 'a1');
+        $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]);
+        try { $p->unrelate($a, 'contacts', $p->load('Contact', 'c1')); } finally {
+            line('primary_after_orm_firm_side_unlink', field($p, 'Contact', 'c1', 'accountId') ?: 'none');
+            line('links_after_orm_firm_side_unlink', firmLinks($p, 'c1'));
         }
     });
+    run('link.orm_link_by_identifier', function ($p) {
+        $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]);
+        $p->relate($c, 'accounts', $p->seedOnly('Account', 'a2'));
+    });
+    run('link.orm_link_audit_unwritable_is_put_back', function ($p) {
+        $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]); $p->failAudit = true;
+        try { $p->relate($c, 'accounts', $p->seedOnly('Account', 'a2')); } finally { line('links_after_refused_orm_link', firmLinks($p, 'c1')); }
+    });
+    run('link.put_back_cannot_run', function ($p) {
+        // The documented residual: the refusal is still raised when the change cannot be put back.
+        $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]); $p->failAudit = true; $p->failExecutor = true;
+        try { $p->relate($c, 'accounts', $p->seedOnly('Account', 'a2')); } finally { line('links_when_put_back_fails', firmLinks($p, 'c1')); }
+    });
 
-    // ---- bulk link ----
-    foreach ([
-        'Account' => ['branches', 'contacts', 'contactsPrimary', 'opportunities', 'parent', 'predecessors', 'documents'],
-        'Contact' => ['accounts', 'account', 'predecessors', 'opportunities'],
-    ] as $type => $links) {
-        foreach ($links as $link) {
-            run("bulk.$type.$link", function ($em) use ($type, $link) {
-                hook($type, 'BeforeMassRelate', $em)->beforeMassRelate(seed($em, $type, 'x1'), $link, [], new O\MassRelateOptions());
-            });
-        }
-    }
+    // ---- bulk link (the platform refuses it first; this is the after-hook backstop) ----
+    run('bulk.Account.contacts', function ($p) {
+        $a = $p->seed('Account', 'a1'); $p->seed('Contact', 'c1'); $p->seed('Contact', 'c2');
+        try { $p->massRelate($a, 'contacts', 'Contact', ['c1', 'c2']); } finally { line('link_rows_left_after_bulk', $p->linkRows()); }
+    });
+    run('bulk.Account.branches', fn($p) => $p->massRelate($p->seed('Account', 'a1'), 'branches', 'Account', []));
+    run('bulk.Account.opportunities', fn($p) => $p->massRelate($p->seed('Account', 'a1'), 'opportunities', 'Opportunity', []));
+    run('bulk.Account.predecessors', fn($p) => $p->massRelate($p->seed('Account', 'a1'), 'predecessors', 'Account', []));
+    run('bulk.Contact.accounts', function ($p) {
+        $c = $p->seed('Contact', 'c1'); $p->seed('Account', 'a1'); $p->seed('Account', 'a2');
+        try { $p->massRelate($c, 'accounts', 'Account', ['a1', 'a2']); } finally { line('link_rows_left_after_bulk_contact', $p->linkRows()); }
+    });
+    run('bulk.Account.documents', fn($p) => $p->massRelate($p->seed('Account', 'a1'), 'documents', 'Account', []));
 
     // ---- remove ----
     foreach (['Account', 'Contact'] as $type) {
-        run("remove.$type", fn($em) => hook($type, 'BeforeRemove', $em)->beforeRemove(seed($em, $type, 'x1'), new O\RemoveOptions()));
-        run("remove.{$type}_admin", fn($em) => hook($type, 'BeforeRemove', $em, true)->beforeRemove(seed($em, $type, 'x1'), new O\RemoveOptions()));
+        run("remove.$type", function ($p) use ($type) { $p->remove($p->seed($type, 'x1')); });
+        run("remove.{$type}_admin", function ($p) use ($type) { $p->remove($p->seed($type, 'x1')); }, true);
+        run("remove.{$type}_record_route", function ($p) use ($type) {
+            $p->seed($type, 'x1');
+            try { $p->recordDelete($type, 'x1'); } finally { line("remove_{$type}_rows_left", $p->count($type)); }
+        }, true);
     }
-
-    // ---- merge ----
     foreach (['Account', 'Contact'] as $type) {
-        $cls = "Espo\\Custom\\Controllers\\$type";
-        run("merge.$type", fn($em) => (new $cls())->postActionMerge(new stdClass(), new stdClass()));
-        run("merge.{$type}_no_args", fn($em) => (new $cls())->postActionMerge());
+        run("remove.{$type}_record_hook_on_its_own", function ($p) use ($type) { $p->seed($type, 'x1'); $p->recordDelete($type, 'x1', true); }, true);
     }
+    run('remove.Opportunity_is_not_an_identity_record', function ($p) { $p->remove($p->seed('Opportunity', 'o1')); });
 
     // ---- the audit records are protected ----
-    $protect = new Espo\Custom\Hooks\IdentityAudit\ProtectIdentityAudit();
-    run('audit.create_without_option', fn($em) => $protect->beforeSave(newOf('IdentityAudit'), new O\SaveOptions([])));
-    run('audit.create_with_option', fn($em) => $protect->beforeSave(newOf('IdentityAudit'), new O\SaveOptions(['identityAuditWrite' => true])));
-    run('audit.create_with_wrong_option_value', fn($em) => $protect->beforeSave(newOf('IdentityAudit'), new O\SaveOptions(['identityAuditWrite' => 'yes'])));
-    run('audit.edit', fn($em) => $protect->beforeSave($em->seed('IdentityAudit', 'i1'), new O\SaveOptions(['identityAuditWrite' => true])));
-    run('audit.delete', fn($em) => $protect->beforeRemove($em->seed('IdentityAudit', 'i1'), new O\RemoveOptions()));
+    run('audit.create_without_option', fn($p) => $p->save(newOf('IdentityAudit')));
+    run('audit.create_with_option', fn($p) => $p->save(newOf('IdentityAudit', ['relationship' => 'status', 'recordType' => 'Account', 'recordId' => 'a1', 'previousValue' => '', 'newValue' => 'x']), ['identityAuditWrite' => true]));
+    run('audit.create_with_wrong_option_value', fn($p) => $p->save(newOf('IdentityAudit'), ['identityAuditWrite' => 'yes']));
+    run('audit.edit', function ($p) { $a = new FakeEntity('IdentityAudit', false); $a->set(['id' => 'i1']); $p->save($a, ['identityAuditWrite' => true]); });
+    run('audit.delete', fn($p) => $p->remove((new FakeEntity('IdentityAudit', false))->set(['id' => 'i1'])));
+    run('audit.edit_admin', function ($p) { $a = new FakeEntity('IdentityAudit', false); $a->set(['id' => 'i1']); $p->save($a); }, true);
+    run('audit.delete_admin', fn($p) => $p->remove((new FakeEntity('IdentityAudit', false))->set(['id' => 'i1'])), true);
 }

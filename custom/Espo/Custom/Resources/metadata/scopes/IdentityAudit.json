@@ -12,5 +12,6 @@
     "disabled": false,
     "type": "Base",
     "module": "Custom",
-    "isCustom": true
+    "isCustom": true,
+    "preserveAuditLog": true
 }

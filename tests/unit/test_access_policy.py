@@ -511,9 +511,12 @@ class TestSettingsFile(unittest.TestCase):
         self.assertIn(mapping["currency"], settings["currencyList"])
 
 
-# CRM-IDINT-001: hook file stems under Hooks/{Account,Contact}; Opportunity has the first four.
-IDENTITY_HOOKS = ["BeforeSave", "AfterSave", "BeforeRelate", "BeforeUnrelate", "BeforeMassRelate",
-                  "BeforeRemove"]
+# CRM-IDINT-001R: hook file stems under Hooks/{Account,Contact} (the platform has no before-relation
+# hook for custom code, so the relation hooks are the after hooks); Opportunity has no remove or
+# mass-relate hook.
+IDENTITY_HOOKS = ["BeforeSave", "AfterSave", "BeforeRemove", "AfterRelate", "AfterUnrelate",
+                  "AfterMassRelate"]
+OPPORTUNITY_IDENTITY_HOOKS = ["BeforeSave", "AfterSave", "AfterRelate", "AfterUnrelate"]
 
 
 class TestHookFile(unittest.TestCase):
@@ -530,7 +533,7 @@ class TestHookFile(unittest.TestCase):
         # CRM-IDINT-001 adds the identity hooks (every other expected hook is unchanged).
         identity = [os.path.join(entity, f"Identity{kind}.php")
                     for entity, kinds in (("Account", IDENTITY_HOOKS), ("Contact", IDENTITY_HOOKS),
-                                          ("Opportunity", IDENTITY_HOOKS[:4]))
+                                          ("Opportunity", OPPORTUNITY_IDENTITY_HOOKS))
                     for kind in kinds]
         self.assertEqual(sorted(found), sorted(identity + [
             os.path.join("Account", "RestrictDeleteWithEnquiries.php"),

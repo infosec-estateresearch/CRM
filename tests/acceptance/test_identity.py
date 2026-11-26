@@ -1,4 +1,4 @@
-"""Live acceptance suite for CRM-IDINT-001, identity integrity (A1 to A10).
+"""Live acceptance suite for CRM-IDINT-001R, identity integrity (A1 to A10 and A18).
 
 NOT run by the unit loop, and NOT run in the build sandbox (no EspoCRM, Docker or
 browser there). It is the operator stage's proof, against a disposable synthetic
@@ -13,7 +13,7 @@ stack with the candidate deployed:
     export CRM_AUDIT_FAULT_OFF_CMD=...  # restores it
     export CRM_CLEANUP_AGE_CMD=...      # ages data past every retention period (A7)
     export CRM_CLEANUP_RUN_CMD=...      # runs the scheduled cleanup job once (A7)
-    export CRM_DB_COUNT_CMD=...         # prints "<accounts> <contacts> <audit records>", deleted rows included (A7)
+    export CRM_DB_COUNT_CMD=...         # prints "<accounts> <contacts> <audit records> <audit-history entries>", deleted rows included (A7)
     export CRM_SEEDED_EXCEPTION_IDS=id1,id2   # optional: the contacts seeded as 3.3 exceptions (A5)
     python3 -m unittest discover -s tests/acceptance -p test_identity.py -v
 
@@ -21,7 +21,10 @@ Every record the suite creates is synthetic, uniquely named and never deleted (t
 product refuses deleting firms and contacts): run it on a stack that is torn down
 afterwards. The whole matrix of tests/acceptance/identity_matrix.py is driven:
 every (relationship, route, kind) cell must be refused-and-unchanged, or
-performed-and-audited, as the matrix says. Missing configuration fails loudly.
+performed-and-audited, as the matrix says. A18: a refused cell must also show the
+control's own refusal on a route that exists: every call answers 400 or 403 (never 404,
+405 or a server error), or, for CSV import, is counted as an import error with nothing
+created. Missing configuration fails loudly.
 """
 
 import base64
@@ -231,6 +234,31 @@ def attempt(fn):
         return err.status
 
 
+REFUSAL_STATUSES = (400, 403)   # the controls answer 403 (refusal) or 400 (validation); a 404 or 405 is a missing route
+
+
+def observe(fn):
+    """One call as ("status", code) for an API refusal, or ("ok", payload)."""
+    try:
+        return ("ok", fn())
+    except crm_api.ApiError as err:
+        return ("status", err.status)
+
+
+def refusal_proved(observations):
+    """A18: every call was refused by a control on a route that exists. An import that
+    answers 200 counts as refused only if it reports an error and created nothing."""
+    if not observations:
+        return False
+    for kind, value in observations:
+        if kind == "status":
+            if value not in REFUSAL_STATUSES:
+                return False
+        elif not (isinstance(value, dict) and value.get("importRefused") is True):
+            return False
+    return True
+
+
 def mass(client, action, entity, ids, data=None):
     body = {"action": action, "entityType": entity, "params": {"ids": list(ids)}}
     if data is not None:
@@ -311,22 +339,33 @@ def payload_for_create(w):
 
 
 def import_csv(client, w, include_id=False):
-    """Upload a one-row CSV and ask for it to be imported as the world's record kind."""
+    """Upload a one-row CSV (POST Import/file) and import it (POST Import) as the world's record kind.
+
+    Returns the import result with "importRefused": True when the platform reports an error and
+    nothing was created. A refusal of the route itself (no Import access) is an ApiError.
+    """
     entity, data = payload_for_create(w)
     columns = [k for k in data if not isinstance(data[k], list)]
     if include_id:
         data = dict(data, id=secrets.token_hex(8))
         columns.append("id")
     csv_text = ",".join(columns) + "\n" + ",".join(f'"{data[c]}"' for c in columns) + "\n"
-    att = client.create("Attachment", {
-        "name": "identity.csv", "type": "text/csv", "role": "Import File", "relatedType": "Import",
-        "field": "file", "file": "data:text/csv;base64," + base64.b64encode(csv_text.encode()).decode()})
-    client.create("Import", {
-        "entityType": entity, "attachmentId": att["id"], "action": "create", "headerRow": True,
-        "fieldDelimiter": ",", "textQualifier": "\"", "attributeList": columns, "idleMode": False,
-        "silentMode": True, "dateFormat": "YYYY-MM-DD", "timeFormat": "HH:mm", "personNameFormat": "f l",
-        "decimalMark": ".", "currency": "GBP", "defaultValues": {}, "skipDuplicateChecking": False,
-        "manualMode": False, "timezone": "UTC", "updateBy": []})
+    status, raw = client.transport.request(
+        "POST", f"{client.base_url}/api/v1/Import/file", dict(client._headers), csv_text.encode("utf-8"))
+    if not 200 <= status < 300:
+        raise crm_api.ApiError("POST", "Import/file", status, raw[:500] if raw else b"")
+    attachment_id = json.loads(raw.decode("utf-8"))["attachmentId"]
+    result = client.call("POST", "Import", data={
+        "entityType": entity, "attachmentId": attachment_id, "attributeList": columns, "action": "create",
+        "headerRow": True, "delimiter": ",", "textQualifier": "\"", "idleMode": False, "silentMode": True,
+        "dateFormat": "YYYY-MM-DD", "timeFormat": "HH:mm", "personNameFormat": "f l", "decimalMark": ".",
+        "currency": "GBP", "defaultValues": {}, "skipDuplicateChecking": False, "manualMode": False,
+        "timezone": "UTC", "updateBy": []}) or {}
+    result = dict(result)
+    created = int(result.get("countCreated") or 0) + int(result.get("countUpdated") or 0)
+    errors = int(result.get("countError") or 0)
+    result["importRefused"] = created == 0 and errors >= 1
+    return result
 
 
 def link_routes(w):
@@ -357,66 +396,72 @@ def link_routes(w):
 
 
 def act(w, route, client):
-    """Perform one route as one account. Returns nothing: the outcome is read from the stack."""
+    """Perform one route as one account. Returns the observations: ("status", code) or ("ok", payload)."""
     rel, E = w.rel, w.entity
     if route == "record_create":
         entity, data = payload_for_create(w)
-        return client.create(entity, data)
+        return [observe(lambda: client.create(entity, data))]
     if route == "supplied_id":
         entity, data = payload_for_create(w)
-        return client.create(entity, dict(data, id=secrets.token_hex(8)))
+        w.supplied = "chosen" + secrets.token_hex(6)
+        return [observe(lambda: client.create(entity, dict(data, id=w.supplied)))]
     if route == "csv_import":
-        return import_csv(client, w, include_id=True)
+        return [observe(lambda: import_csv(client, w, include_id=True))]
     if route == "record_edit":
         body = {"parentFirm": {"parentId": w.p2}, "primaryFirm": {"accountId": w.p2},
                 "contactFirmLink": {"accountsIds": [w.p1, w.p2, w.p3]}, "enquiryFirm": {"accountId": w.p2},
                 "successor": {"identityStatus": "superseded", "successorId": w.succ if rel == "successor" else None,
                               "description": "edited"}}[rel]
-        return client.call("PUT", f"{E}/{w.record}", data=body)
+        return [observe(lambda: client.call("PUT", f"{E}/{w.record}", data=body))]
     if route == "retire":
-        return client.call("PUT", f"{E}/{w.record}", data={"identityStatus": "retired"})
+        return [observe(lambda: client.call("PUT", f"{E}/{w.record}", data={"identityStatus": "retired"}))]
     if route == "supersede":
-        return client.call("PUT", f"{E}/{w.record}", data={"identityStatus": "superseded", "successorId": w.succ})
+        return [observe(lambda: client.call("PUT", f"{E}/{w.record}",
+                                            data={"identityStatus": "superseded", "successorId": w.succ}))]
     links = link_routes(w)
     if route in links:
         method, path, body = links[route]
         if route == "bulk_link":
             body = {"massRelate": True, "where": [{"type": "equals", "attribute": "id", "value": w.record}]}
-        return client.call(method, path, data=body)
+        return [observe(lambda: client.call(method, path, data=body))]
     if route == "mass_update":
         data = {"parentFirm": {"parentId": w.p2}, "primaryFirm": {"accountId": w.p2},
                 "enquiryFirm": {"accountId": w.p2}, "successor": {"identityStatus": "retired"}}[rel]
-        return mass(client, "update", E, [w.record], data)
+        return [observe(lambda: mass(client, "update", E, [w.record], data))]
     if route == "delete":
-        for target in w.targets:
-            attempt(lambda t=target: client.delete(E if t == w.record else "Account", t))
-        return None
+        return [observe(lambda t=target: client.delete(E if t == w.record else "Account", t))
+                for target in w.targets]
     if route == "mass_delete":
-        for target in w.targets:
-            attempt(lambda t=target: mass(client, "delete", E if t == w.record else "Account", [t]))
-        return None
+        return [observe(lambda t=target: mass(client, "delete", E if t == w.record else "Account", [t]))
+                for target in w.targets]
     if route == "merge":
+        # The platform's own merge route: POST /api/v1/Action (Core/Action/Api/PostProcess).
         if E == "Contact":
             other = mk_contact(w.p1, [w.p1])
-            return client.call("POST", "Contact/action/merge",
-                               data={"targetId": w.record, "sourceIdList": [other], "attributes": {}})
-        other = w.p2
-        target = w.p1 if rel in ("parentFirm", "enquiryFirm") else w.record
-        if rel == "successor":
-            other = w.succ
-        return client.call("POST", "Account/action/merge",
-                           data={"targetId": target, "sourceIdList": [other], "attributes": {}})
+            target = w.record
+        else:
+            other = w.succ if rel == "successor" else w.p2
+            target = w.p1 if rel in ("parentFirm", "enquiryFirm") else w.record
+        return [observe(lambda: client.call("POST", "Action", data={
+            "entityType": E, "id": target, "action": "merge",
+            "data": {"sourceIdList": [other], "attributes": {}}}))]
     raise AssertionError(f"no action for route {route}")
 
 
-def evaluate(expect, before, after, audit_before, audit_after, created_before, created_after):
-    """(ok, outcome, audited, detail) for one attempted cell."""
+def evaluate(expect, before, after, audit_before, audit_after, created_before, created_after,
+             refusals=None, identifier_used=False):
+    """(ok, outcome, audited, detail) for one attempted cell.
+
+    refusals (A18): None when not measured, else whether every call of the cell was refused by a
+    control on a route that exists. identifier_used: a supplied identifier was used (never allowed).
+    """
     changed = before != after or created_after != created_before
     audited = audit_after > audit_before
-    if changed:
-        outcome = "performed"
-    else:
-        outcome = "refused"
+    outcome = "performed" if changed else "refused"
+    if identifier_used:
+        return False, outcome, audited, "a supplied identifier was used"
+    if not changed and refusals is False and expect in ("refused", "either"):
+        return False, outcome, audited, "refused, but not by a control on an existing route (A18)"
     if expect == "refused":
         return (not changed), outcome, audited, "a change got through" if changed else ""
     if expect == "performed":
@@ -438,19 +483,23 @@ def run_cell(relationship, route, kind):
                 "detail": "" if ok else "the cleanup job removed records"}
     w = World(relationship, kind)
     before, audit_before, created_before = w.state(), w.audit_count(), w.created_ids()
-    attempt(lambda: act(w, route, CLIENTS[kind]))
+    observations = act(w, route, CLIENTS[kind])
     after, audit_after, created_after = w.state(), w.audit_count(), w.created_ids()
+    supplied = getattr(w, "supplied", None)
+    used = bool(supplied) and exists(w.entity, supplied)
     ok, outcome, audited, detail = evaluate(expect, before, after, audit_before, audit_after,
-                                            created_before, created_after)
-    return {"ok": ok, "outcome": outcome, "audited": audited, "detail": detail}
+                                            created_before, created_after,
+                                            refusals=refusal_proved(observations), identifier_used=used)
+    return {"ok": ok, "outcome": outcome, "audited": audited, "detail": detail,
+            "observed": [list(o[:1]) + [o[1] if o[0] == "status" else "ok"] for o in observations]}
 
 
 def cleanup_observation():
     """A7: age every retention period, run the cleanup job, count rows before and after."""
     def counts():
         parts = run_operator_command(ENV_COUNT).split()
-        if len(parts) != 3 or not all(p.isdigit() for p in parts):
-            raise AssertionError(f"{ENV_COUNT} must print three integers")
+        if len(parts) != 4 or not all(p.isdigit() for p in parts):
+            raise AssertionError(f"{ENV_COUNT} must print four integers")
         return [int(p) for p in parts]
 
     before = counts()
@@ -482,7 +531,7 @@ class TestIdentityAcceptance(unittest.TestCase):
                 with self.subTest(relationship=rel, kind=kind):
                     done = [r for r in matrix.ROUTES
                             if RESULTS[(rel, r, kind)]["outcome"] == "performed" and RESULTS[(rel, r, kind)]["audited"]
-                            and r not in matrix.REFUSED_ROUTES]
+                            and r not in matrix.REFUSED_ROUTES and r != "supplied_id"]
                     self.assertTrue(done, "no supported route changed it with an audit record")
 
     def test_a03_audit_storage_unwritable_nothing_changes(self):
@@ -516,14 +565,17 @@ class TestIdentityAcceptance(unittest.TestCase):
         record = audits(firm)[0]
         for kind, client in CLIENTS.items():
             with self.subTest(kind=kind):
-                for fn in (lambda: client.call("PUT", f"IdentityAudit/{record['id']}", data={"newValue": "x"}),
-                           lambda: client.delete("IdentityAudit", record["id"]),
-                           lambda: mass(client, "delete", "IdentityAudit", [record["id"]]),
-                           lambda: mass(client, "update", "IdentityAudit", [record["id"]], {"newValue": "x"}),
-                           lambda: client.create("IdentityAudit", {"name": "forged", "recordId": firm,
-                                                                  "relationship": "parentFirm",
-                                                                  "recordType": "Account"})):
-                    attempt(fn)
+                for label, fn in (
+                        ("edit", lambda: client.call("PUT", f"IdentityAudit/{record['id']}", data={"newValue": "x"})),
+                        ("delete", lambda: client.delete("IdentityAudit", record["id"])),
+                        ("mass delete", lambda: mass(client, "delete", "IdentityAudit", [record["id"]])),
+                        ("mass update", lambda: mass(client, "update", "IdentityAudit", [record["id"]],
+                                                     {"newValue": "x"})),
+                        ("create", lambda: client.create("IdentityAudit", {
+                            "name": "forged", "recordId": firm, "relationship": "parentFirm",
+                            "recordType": "Account"}))):
+                    # A18: the control's own refusal, on a route that exists (never a 404 or 405).
+                    self.assertIn(attempt(fn), REFUSAL_STATUSES, f"{label} was not refused by a control")
                 self.assertEqual(ADMIN.call("GET", f"IdentityAudit/{record['id']}")["newValue"], record["newValue"])
                 self.assertEqual(len(audits(firm)), 1)
 
@@ -562,11 +614,19 @@ class TestIdentityAcceptance(unittest.TestCase):
                 for kind in matrix.KINDS:
                     with self.subTest(cell=f"{rel}/{route}/{kind}"):
                         self.assertEqual(RESULTS[(rel, route, kind)]["outcome"], "refused")
+                        # A18: every call of the cell was refused by a control, on a route that exists
+                        self.assertTrue(all(o[0] == "status" and o[1] in REFUSAL_STATUSES
+                                            for o in RESULTS[(rel, route, kind)]["observed"]),
+                                        RESULTS[(rel, route, kind)]["observed"])
 
     def test_a07_cleanup_job_removes_nothing(self):
         self.assertTrue(CLEANUP, "run test_a01 first")
-        self.assertEqual(CLEANUP["removed"], 0, "the cleanup job removed firm, contact or audit rows")
-        self.assertGreaterEqual(CLEANUP["after"][2], CLEANUP["before"][2])
+        # The run must have audit history to lose (an empty history would prove nothing).
+        self.assertGreater(CLEANUP["before"][3], 0, "no audit-history entry existed before the cleanup job")
+        self.assertEqual(CLEANUP["removed"], 0,
+                         "the cleanup job removed firm, contact, identity audit or audit-history rows")
+        for index, name in enumerate(("firms", "contacts", "identity audit records", "audit-history entries")):
+            self.assertGreaterEqual(CLEANUP["after"][index], CLEANUP["before"][index], name)
 
     def test_a08_supplied_identifiers_are_never_used_and_import_is_refused(self):
         for kind, client in CLIENTS.items():

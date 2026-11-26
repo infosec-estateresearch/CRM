@@ -11,13 +11,11 @@ use Espo\ORM\Repository\Option\RemoveOptions;
 use Espo\ORM\Repository\Option\SaveOptions;
 
 /**
- * CRM-IDINT-001 (3.2): identity audit records are written only by the server
+ * CRM-IDINT-001R (3.2): identity audit records are written only by the server
  * (IdentityAuditor sets a save option no API request can carry) and are never
  * edited or deleted through the application. There is no exemption for
  * administrators: they bypass role ACL, not hooks.
  *
- * @implements BeforeSave<Entity>
- * @implements BeforeRemove<Entity>
  */
 class ProtectIdentityAudit implements BeforeSave, BeforeRemove
 {
@@ -27,7 +25,7 @@ class ProtectIdentityAudit implements BeforeSave, BeforeRemove
             throw new Forbidden('Identity audit records cannot be changed.');
         }
 
-        if (IdentityPolicy::option($options, IdentityPolicy::AUDIT_WRITE_OPTION) !== true) {
+        if ($options->get(IdentityPolicy::AUDIT_WRITE_OPTION) !== true) {
             throw new Forbidden('Identity audit records are written by ERm only.');
         }
     }

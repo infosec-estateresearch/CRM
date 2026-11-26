@@ -1,7 +1,7 @@
 {
     "settings": [
         {"name": "cleanupDeletedRecords", "type": "bool", "value": false},
-        {"name": "cleanupAuditLog", "type": "bool", "value": false},
+        {"name": "cleanupAudit", "type": "bool", "value": false},
         {"name": "cleanupActionHistoryPeriod", "type": "string", "value": "6 months"},
         {"name": "cleanupAuthLogPeriod", "type": "string", "value": "13 months"}
     ]

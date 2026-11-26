@@ -1,11 +1,12 @@
-"""CRM-IDINT-001 unit tests: identity integrity.
+"""CRM-IDINT-001R unit tests: identity integrity.
 
 No EspoCRM, Docker or browser runs here. What is executed:
 - the route matrix definition (completeness, consistency with the roles);
-- the custom PHP (IdentityPolicy, IdentityAuditor, IdentityGuard, the hooks and the
-  merge controllers) under php, against the stand-ins in tests/unit/php/, when php is
-  installed (gated like the other php tests); mutations of that PHP prove the checks fail
-  when a control is removed;
+- the custom PHP (IdentityPolicy, IdentityAuditor, IdentityGuard, the hooks and the record
+  hooks) under php, in the order the platform runs it, with the platform's REAL hook
+  interfaces and options loaded from the pinned reference (CRM_PLATFORM_REFERENCE) and
+  only the heavy collaborators stood in (tests/unit/php/); gated on php and on that
+  variable; mutations of the PHP prove the checks fail when a control is removed;
 - the release settings of 3.6 and the deploy step that applies and reads them back
   (a fake docker, like tests/unit/test_beta.py);
 - the read-only primary-firm report of 3.3 against a fake transport;
@@ -46,6 +47,9 @@ sys.modules["acceptance_identity_under_test"] = _module
 _spec.loader.exec_module(_module)
 
 HAVE_PHP = bool(shutil.which("php"))
+REFERENCE = os.environ.get("CRM_PLATFORM_REFERENCE", "")
+NEEDS_REFERENCE = unittest.skipUnless(
+    HAVE_PHP and REFERENCE, "needs php and CRM_PLATFORM_REFERENCE (the pinned EspoCRM sources)")
 
 
 def read(*parts):
@@ -108,9 +112,16 @@ class TestMatrix(unittest.TestCase):
     def test_destructive_routes_are_refused_for_every_cell(self):
         for rel in matrix.RELATIONSHIPS:
             for kind in matrix.KINDS:
-                for route in ("delete", "mass_delete", "merge", "csv_import", "supplied_id", "bulk_link",
-                              "cleanup_job"):
+                for route in ("delete", "mass_delete", "merge", "csv_import", "bulk_link", "cleanup_job"):
                     self.assertEqual(matrix.expectation(rel, route, kind)[0], "refused", (rel, route, kind))
+
+    def test_a_supplied_identifier_is_refused_or_performed_with_its_own_identifier_never_used(self):
+        for rel in matrix.RELATIONSHIPS:
+            for kind in matrix.KINDS:
+                self.assertEqual(matrix.expectation(rel, "supplied_id", kind)[0], "either", (rel, kind))
+        ev = _module.evaluate
+        self.assertEqual(ev("either", 1, 2, 0, 1, [], ["new"], refusals=None, identifier_used=True)[0], False)
+        self.assertEqual(ev("either", 1, 2, 0, 1, [], ["new"], identifier_used=False)[0], True)
 
     def test_every_editing_kind_has_a_performing_route_for_each_relationship(self):
         for rel in matrix.RELATIONSHIPS:
@@ -197,27 +208,80 @@ class TestMetadata(unittest.TestCase):
         client = read(RES, "metadata", "clientDefs", "Account.json")
         self.assertIn('"openWip"', client)
         self.assertIn("custom:handlers/account-open-wip", client)
-        self.assertFalse(os.path.exists(os.path.join(REPO, "docs", "IDENTITY.md")))
-        self.assertFalse(os.path.exists(os.path.join(REPO, "docs", "LOGGING.md")))
+
+    # The hooks the platform really calls (Core/Hook/Hook): before hooks only for save and remove,
+    # after hooks for the relations. CRM-IDINT-001R: no before-relation hook exists for custom code.
+    IDENTITY_HOOKS = {
+        "Account": ("BeforeSave", "AfterSave", "BeforeRemove", "AfterRelate", "AfterUnrelate", "AfterMassRelate"),
+        "Contact": ("BeforeSave", "AfterSave", "BeforeRemove", "AfterRelate", "AfterUnrelate", "AfterMassRelate"),
+        "Opportunity": ("BeforeSave", "AfterSave", "AfterRelate", "AfterUnrelate"),
+    }
 
     def test_the_hook_files_are_present_for_every_route_that_changes_an_identity(self):
-        for entity, kinds in (("Account", ("BeforeSave", "AfterSave", "BeforeRelate", "BeforeUnrelate",
-                                           "BeforeMassRelate", "BeforeRemove")),
-                              ("Contact", ("BeforeSave", "AfterSave", "BeforeRelate", "BeforeUnrelate",
-                                           "BeforeMassRelate", "BeforeRemove")),
-                              ("Opportunity", ("BeforeSave", "AfterSave", "BeforeRelate", "BeforeUnrelate"))):
+        for entity, kinds in self.IDENTITY_HOOKS.items():
             for kind in kinds:
                 path = os.path.join(CUSTOM, "Hooks", entity, f"Identity{kind}.php")
                 self.assertTrue(os.path.isfile(path), path)
                 self.assertRegex(read(path), rf"class Identity{kind} implements {kind}\b")
+            present = sorted(f for f in os.listdir(os.path.join(CUSTOM, "Hooks", entity)) if f.startswith("Identity"))
+            self.assertEqual(present, sorted(f"Identity{k}.php" for k in kinds), entity)
         self.assertTrue(os.path.isfile(os.path.join(CUSTOM, "Hooks", "IdentityAudit", "ProtectIdentityAudit.php")))
+
+    def test_no_hook_names_a_before_relation_interface_the_platform_lacks(self):
+        for root, _, files in os.walk(CUSTOM):
+            for name in files:
+                if name.endswith(".php"):
+                    text = read(root, name)
+                    for missing in ("BeforeRelate", "BeforeUnrelate", "BeforeMassRelate"):
+                        self.assertNotRegex(text, rf"Hook\\{missing}\b|\b{missing}\b", f"{name}: {missing}")
+
+    def test_hook_order_runs_save_hooks_last_and_relation_hooks_first(self):
+        for entity, kinds in self.IDENTITY_HOOKS.items():
+            for kind in kinds:
+                text = read(CUSTOM, "Hooks", entity, f"Identity{kind}.php")
+                match = re.search(r"public static int \$order = (\d+);", text)
+                if kind in ("BeforeSave", "AfterSave"):
+                    self.assertTrue(match and int(match.group(1)) > 9, f"{entity} {kind}")
+                elif kind.startswith("After") and kind != "AfterSave":
+                    self.assertTrue(match and int(match.group(1)) < 9, f"{entity} {kind}")
+
+    def test_record_defs_wire_the_record_hooks_and_the_platform_switches(self):
+        hooks = "Espo\\Custom\\Classes\\Identity\\RecordHooks\\"
+        for entity in ("Account", "Contact"):
+            defs = load(RES, "metadata", "recordDefs", f"{entity}.json")
+            self.assertEqual(defs["actions"]["merge"], {"disabled": True}, entity)
+            self.assertEqual(defs["massActions"]["delete"], {"disabled": True}, entity)
+            self.assertEqual(defs["beforeLinkHookClassNameList"], [hooks + "BeforeLink"])
+            self.assertEqual(defs["beforeUnlinkHookClassNameList"], [hooks + "BeforeUnlink"])
+            self.assertEqual(defs["beforeDeleteHookClassNameList"], [hooks + "BeforeDelete"])
+            self.assertEqual(defs["beforeCreateHookClassNameList"], [hooks + "BeforeCreateInput"])
+            self.assertEqual(defs["beforeUpdateHookClassNameList"], [hooks + "BeforeUpdateInput"])
+            self.assertIn("duplicateWhereBuilderClassName", defs)
+            for link, rel in defs["relationships"].items():
+                self.assertIs(rel["massLink"], False, f"{entity}.{link}")
+        links = {e: set(load(RES, "metadata", "recordDefs", f"{e}.json")["relationships"])
+                 for e in ("Account", "Contact")}
+        self.assertEqual(links["Account"], {"branches", "parent", "contacts", "contactsPrimary", "opportunities",
+                                            "successor", "predecessors"})
+        self.assertEqual(links["Contact"], {"accounts", "account", "successor", "predecessors"})
+        audit = load(RES, "metadata", "recordDefs", "IdentityAudit.json")
+        self.assertEqual(audit["massActions"], {"delete": {"disabled": True}, "update": {"disabled": True}})
+        self.assertEqual(audit["beforeDeleteHookClassNameList"], [hooks + "BeforeDelete"])
+
+    def test_the_cleanup_job_cannot_remove_audit_history_of_identity_scopes(self):
+        for scope in ("Account", "Contact", "Opportunity", "IdentityAudit"):
+            self.assertIs(load(RES, "metadata", "scopes", f"{scope}.json")["preserveAuditLog"], True, scope)
+
+    def test_the_old_merge_controllers_are_gone(self):
+        # Merge is refused by recordDefs actions.merge.disabled (Core/Action/ActionFactory), not by a controller.
+        for name in ("Account.php", "Contact.php"):
+            self.assertFalse(os.path.exists(os.path.join(CUSTOM, "Controllers", name)), name)
 
     def test_no_identity_php_has_an_administrator_or_service_account_exemption(self):
         files = [os.path.join(r, f) for r, _, fs in os.walk(CUSTOM) for f in fs
                  if f.endswith(".php") and ("Identity" in r or f.startswith("Identity")
                                             or f in ("ProtectIdentityAudit.php",))]
-        self.assertGreaterEqual(len(files), 17)
-        files += [os.path.join(CUSTOM, "Controllers", n) for n in ("Account.php", "Contact.php")]
+        self.assertGreaterEqual(len(files), 25)
         for path in files:
             code = re.sub(r"/\*.*?\*/", "", read(path), flags=re.S)
             for forbidden in ("isAdmin", "isApi", "getType()", "er-import", "skipHooks", "SKIP_HOOKS"):
@@ -247,7 +311,7 @@ class TestMetadata(unittest.TestCase):
 
 def run_harness(custom_dir):
     res = subprocess.run(["php", "-d", "display_errors=stderr", os.path.join(PHP_DIR, "identity_harness.php"),
-                          custom_dir], capture_output=True, text=True, timeout=120)
+                          REFERENCE, custom_dir], capture_output=True, text=True, timeout=300)
     return res.returncode, res.stdout, res.stderr
 
 
@@ -255,12 +319,12 @@ def parse(stdout):
     return dict(line.split("=", 1) for line in stdout.splitlines() if "=" in line)
 
 
-@unittest.skipUnless(HAVE_PHP, "php not installed")
+@NEEDS_REFERENCE
 class TestIdentityPhp(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         code, out, err = run_harness(CUSTOM)
-        assert code == 0, err
+        assert code == 0 and not err.strip(), err
         cls.out = out
         cls.result = parse(out)
         cls.expected = parse(read(PHP_DIR, "identity_expected.txt"))
@@ -277,69 +341,121 @@ class TestIdentityPhp(unittest.TestCase):
     def audits(self, name):
         return [a for a in self.result[name].split("|", 1)[1].split(",") if a]
 
-    def test_delete_mass_delete_and_merge_are_refused_even_for_an_administrator(self):
-        for name in ("remove.Account", "remove.Account_admin", "remove.Contact", "remove.Contact_admin",
-                     "merge.Account", "merge.Account_no_args", "merge.Contact", "merge.Contact_no_args"):
+    def test_delete_mass_delete_and_merge_routes_are_refused_even_for_an_administrator(self):
+        for name in ("remove.Account", "remove.Account_admin", "remove.Account_record_route",
+                     "remove.Account_record_hook_on_its_own", "remove.Contact", "remove.Contact_admin",
+                     "remove.Contact_record_route", "remove.Contact_record_hook_on_its_own"):
             self.assertEqual(self.outcome(name), "Forbidden", name)
+        self.assertEqual(self.result["remove_Account_rows_left"], "1")
+        self.assertEqual(self.result["remove_Contact_rows_left"], "1")
+        self.assertEqual(self.outcome("remove.Opportunity_is_not_an_identity_record"), "ok")
 
-    def test_a_supplied_identifier_and_import_are_refused(self):
-        for name in ("create.supplied_id", "create.supplied_id_contact", "create.supplied_id_enquiry",
-                     "create.supplied_id_admin", "create.import_option"):
+    def test_creation_works_for_every_account_and_a_supplied_identifier_is_never_used(self):
+        # P4: the platform has assigned the identifier before the before-save hook runs; creating must work.
+        for name in ("create.plain_account", "create.plain_contact", "create.plain_enquiry",
+                     "create.plain_account_admin", "create.plain_contact_admin"):
+            self.assertEqual(self.outcome(name), "ok", name)
+        for entity in ("Account", "Contact", "Opportunity"):
+            self.assertEqual(self.outcome(f"create.supplied_id_is_never_used_{entity}"), "ok")
+            self.assertEqual(self.result[f"supplied_id_used_{entity}"], "no")
+            self.assertEqual(self.result[f"supplied_id_created_{entity}"], "one-with-its-own-id")
+
+    def test_import_is_refused_for_every_kind_of_record(self):
+        for name in ("create.import_option", "create.import_option_contact_admin", "create.import_option_enquiry",
+                     "create.import_with_identifier"):
             self.assertEqual(self.outcome(name), "Forbidden", name)
-        self.assertEqual(self.outcome("create.plain_account"), "ok")
 
     def test_every_change_is_audited_with_previous_and_new(self):
         self.assertEqual(self.audits("edit.parent_change"), ["parentFirm:Account:a1:p1>p2"])
         self.assertEqual(self.audits("edit.parent_clear"), ["parentFirm:Account:a1:p1>"])
         self.assertEqual(self.audits("create.with_parent"), ["parentFirm:Account:a1:>p1"])
-        self.assertEqual(self.audits("edit.contact_primary"), ["primaryFirm:Contact:c1:a1>a2"])
+        self.assertEqual(self.audits("edit.contact_primary"),
+                         ["primaryFirm:Contact:c1:a1>a2", "contactFirmLink:Contact:c1:>a2"])
         self.assertEqual(self.audits("edit.enquiry_firm"), ["enquiryFirm:Opportunity:o1:a1>a2"])
         self.assertEqual(self.audits("link.contact_link"), ["contactFirmLink:Contact:c1:>a2"])
         self.assertEqual(self.audits("link.firm_side_unlink_other"), ["contactFirmLink:Contact:c1:a2>"])
+        self.assertEqual(self.audits("link.branch_link"), ["parentFirm:Account:b1:p0>p1"])
+        self.assertEqual(self.audits("link.branch_unlink"), ["parentFirm:Account:b1:p1>"])
+        self.assertEqual(self.audits("link.enquiry_link"), ["enquiryFirm:Opportunity:o1:a0>a1"])
+        self.assertEqual(self.audits("link.enquiry_unlink"), ["enquiryFirm:Opportunity:o1:a1>"])
+        self.assertEqual(self.audits("link.primary_firm_from_firm"), ["primaryFirm:Contact:c1:>a1"])
         self.assertEqual(self.audits("status.retire"), ["status:Account:a1:active>retired"])
         self.assertEqual(self.audits("status.supersede"), ["successor:Account:a1:>a2",
                                                            "status:Account:a1:active>superseded"])
         self.assertEqual(self.audits("edit.parent_same_value"), [])
 
+    def test_the_final_primary_firm_is_audited_after_the_platforms_own_hook_has_run(self):
+        # The platform's Contact hook makes the first linked firm primary when none is given: the
+        # identity hook runs after it (order 99), so the audit names the value that is stored.
+        self.assertEqual(self.audits("edit.contact_clears_primary_and_drops_its_link"),
+                         ["primaryFirm:Contact:c1:a1>a2", "contactFirmLink:Contact:c1:a1>"])
+        self.assertEqual(self.result["links_after_clear"], "a2")
+
     def test_every_firm_link_of_a_new_contact_is_audited_once(self):
         a1 = "contactFirmLink:Contact:c1:>a1"
         a2 = "contactFirmLink:Contact:c1:>a2"
-        self.assertEqual(self.audits("create.contact_with_links"), ["primaryFirm:Contact:c1:>a1", a1, a2])
-        self.assertEqual(self.audits("create.contact_links_without_primary"), [a1, a2])
-        self.assertEqual(self.audits("create.contact_links_duplicate_ids"), [a1])
-        # core firing the relate hooks as well (before or after the after-save hook) does not double-record
-        self.assertEqual(self.audits("create.contact_links_then_core_fires_relate"), [a1, a2])
-        self.assertEqual(self.audits("create.contact_links_relate_fires_before_after_save"), [a1])
+        primary = "primaryFirm:Contact:c1:>a1"
+        self.assertEqual(self.audits("create.contact_primary_linked"), [a1, a2, primary])
+        self.assertEqual(self.audits("create.contact_links_without_primary"), [a1, a2, primary])
+        self.assertEqual(self.audits("create.contact_links_duplicate_ids"), [a1, primary])
+        self.assertEqual(self.audits("create.contact_with_primary"), [a1, primary])
 
-    def test_a_create_with_links_whose_audit_fails_leaves_no_record_and_no_link_rows(self):
+    def test_clearing_a_primary_and_its_links_audits_each_change_once(self):
+        # The platform reports the unlink twice (link-multiple save, then its own hook): one record.
+        self.assertEqual(self.audits("edit.contact_clears_primary_and_all_links"),
+                         ["primaryFirm:Contact:c1:a1>", "contactFirmLink:Contact:c1:a1>"])
+        self.assertEqual(self.result["links_after_clear_all"], "none")
+        self.assertEqual(self.result["primary_after_clear_all"], "none")
+
+    def test_a_create_whose_audit_cannot_be_stored_leaves_no_record_and_no_link_rows(self):
         for name in ("create.contact_links_audit_unwritable", "create.contact_links_audit_fails_on_second_link",
-                     "create.contact_links_undo_cannot_delete_link_rows"):
+                     "create.contact_links_undo_cannot_delete", "create.with_parent_audit_unwritable"):
             self.assertEqual(self.outcome(name), "Forbidden", name)
-        for line in ("link_create_contacts_left=0", "link_create_link_rows_left=0",
-                     "link_create2_contacts_left=0", "link_create2_link_rows_left=0",
-                     "link_undo_fail_contacts_left=0"):
+        for line in ("create_links_contacts_left=0", "create_links_link_rows_left=0",
+                     "create_links2_contacts_left=0", "create_links2_link_rows_left=0",
+                     "accounts_left_after_failed_create=1"):    # only the seeded parent remains
             self.assertIn(line, self.out)
-        # the documented residual: if the link rows themselves cannot be removed they remain
-        self.assertIn("link_undo_fail_link_rows_left=1", self.out)
+        # the documented residual: if the undo itself cannot run, the create is still refused
+        self.assertIn("create_undo_fail_contacts_left=1", self.out)
 
-    def test_no_change_succeeds_when_the_audit_cannot_be_stored(self):
+    def test_no_change_succeeds_when_the_audit_cannot_be_stored_and_each_is_put_back(self):
         for name in ("edit.parent_audit_unwritable", "edit.enquiry_firm_audit_unwritable", "status.audit_unwritable",
-                     "link.contact_link_audit_unwritable", "link.branch_link_audit_unwritable",
-                     "create.with_parent_audit_unwritable", "edit.parent_audit_readback_differs",
-                     "link.new_record_audit_unwritable_is_undone"):
+                     "link.contact_link_audit_unwritable", "link.contact_unlink_audit_unwritable",
+                     "link.firm_side_link_audit_unwritable", "link.branch_link_audit_unwritable",
+                     "link.branch_unlink_audit_unwritable", "link.enquiry_link_audit_unwritable",
+                     "link.enquiry_belongs_to_audit_unwritable", "link.primary_firm_from_firm_audit_unwritable",
+                     "link.orm_link_audit_unwritable_is_put_back", "edit.contact_adds_link_audit_unwritable",
+                     "edit.parent_audit_readback_differs"):
             self.assertEqual(self.outcome(name), "Forbidden", name)
-        self.assertIn("accounts_left=1", self.out)    # the create was undone: only the seeded parent remains
-        self.assertIn("contacts_left=0", self.out)
+        state = {
+            "parent_after_refused_edit": "p1", "links_after_refused_link": "none",
+            "links_after_refused_unlink": "a1,a2", "links_after_refused_firm_side_link": "a1",
+            "parent_after_refused_link": "p0", "parent_after_refused_unlink": "p1",
+            "enquiry_firm_after_refused_link": "a0", "enquiry_firm_after_refused_relate": "none",
+            "primary_after_refused_link": "a0", "links_after_refused_orm_link": "a1",
+            "links_after_refused_add": "a1",
+        }
+        for key, value in state.items():
+            self.assertEqual(self.result[key], value, key)
+        # the documented residual: when the change cannot be put back the refusal is still raised
+        self.assertEqual(self.result["links_when_put_back_fails"], "a1,a2")
+        self.assertEqual(self.outcome("link.put_back_cannot_run"), "Forbidden")
 
     def test_the_primary_firm_stays_one_of_the_linked_firms(self):
         for name in ("link.contact_unlink_primary", "link.contact_unlink_primary_admin",
-                     "link.firm_side_unlink_primary", "edit.contact_drops_primary_link",
-                     "create.contact_primary_not_linked"):
-            self.assertEqual(self.outcome(name), "BadRequest" if name.startswith(("edit", "create")) else "Forbidden",
-                             name)
-        for name in ("edit.contact_moves_primary_and_link", "edit.contact_clears_primary_and_link",
-                     "link.contact_unlink_other", "edit.exception_primary_unlinked_then_other_edit",
-                     "create.contact_primary_linked"):
+                     "link.firm_side_unlink_primary", "link.orm_unlink_primary_is_put_back",
+                     "link.record_unlink_hook_refuses_the_primary_on_its_own",
+                     "link.orm_firm_side_unlink_primary_is_put_back_before_the_platform_clears_it"):
+            self.assertEqual(self.outcome(name), "Forbidden", name)
+        self.assertEqual(self.outcome("link.record_unlink_hook_allows_another_firm_on_its_own"), "ok")
+        self.assertEqual(self.result["links_after_orm_unlink"], "a1")
+        self.assertEqual(self.result["primary_after_orm_firm_side_unlink"], "a1")
+        self.assertEqual(self.result["links_after_orm_firm_side_unlink"], "a1")
+        for name in ("edit.contact_drops_primary_link", "create.contact_primary_not_linked"):
+            self.assertEqual(self.outcome(name), "BadRequest", name)
+        for name in ("edit.contact_moves_primary_and_link", "edit.contact_clears_primary_and_drops_its_link",
+                     "edit.contact_clears_primary_and_all_links", "link.contact_unlink_other",
+                     "edit.exception_primary_unlinked_then_other_edit", "create.contact_primary_linked"):
             self.assertEqual(self.outcome(name), "ok", name)
 
     def test_successor_rules(self):
@@ -349,24 +465,35 @@ class TestIdentityPhp(unittest.TestCase):
                      "create.retired_new", "create.successor_new"):
             self.assertEqual(self.outcome(name), "BadRequest", name)
             self.assertEqual(self.audits(name), [], name)
-        for name in ("status.retire", "status.retire_contact", "status.supersede", "status.supersede_contact",
-                     "status.supersede_into_a_chain", "status.reactivate"):
+        for name in ("status.retire", "status.retire_contact", "status.retire_admin", "status.supersede",
+                     "status.supersede_contact", "status.supersede_into_a_chain", "status.reactivate"):
             self.assertEqual(self.outcome(name), "ok", name)
-        for name in ("link.successor_link", "link.predecessors_link", "link.contact_successor_unlink"):
+        for name in ("link.successor_link", "link.successor_link_admin", "link.contact_predecessors_unlink",
+                     "link.successor_orm_relate_is_put_back", "link.successor_orm_belongs_to_relate",
+                     "link.record_link_hook_refuses_a_successor_on_its_own",
+                     "link.record_unlink_hook_refuses_a_successor_on_its_own"):
             self.assertEqual(self.outcome(name), "Forbidden", name)
+        self.assertEqual(self.result["successor_after_refused_relate"], "a9")
+        self.assertEqual(self.result["successor_after"], "none")
 
-    def test_bulk_links_of_identity_relationships_are_refused(self):
+    def test_link_lists_only_the_link_routes_may_change_are_refused_in_a_record_save(self):
+        for name in ("create.branches_input_refused", "create.predecessors_input_refused",
+                     "edit.branches_input_refused", "edit.predecessors_input_refused"):
+            self.assertEqual(self.outcome(name), "Forbidden", name)
+        self.assertEqual(self.outcome("edit.plain_input_allowed"), "ok")
+
+    def test_bulk_links_of_identity_relationships_are_refused_and_undone(self):
         for name in self.result:
             if name.startswith("bulk."):
-                self.assertEqual(self.outcome(name), "ok" if name.endswith(("documents", "opportunities")) and
-                                 name.startswith(("bulk.Account.documents", "bulk.Contact.opportunities")) else "Forbidden",
-                                 name)
+                self.assertEqual(self.outcome(name), "ok" if name == "bulk.Account.documents" else "Forbidden", name)
+        self.assertEqual(self.result["link_rows_left_after_bulk"], "0")
+        self.assertEqual(self.result["link_rows_left_after_bulk_contact"], "0")
 
     def test_over_length_input_is_a_validation_error_and_stores_nothing(self):
         for name in ("length.title_over_limit", "length.title_over_limit_multibyte", "length.account_name_over_limit",
                      "length.title_over_limit_on_edit", "length.nothing_stored_when_refused"):
             self.assertEqual(self.outcome(name), "BadRequest", name)
-        self.assertIn("contacts_stored=0", self.out)
+        self.assertEqual(self.result["contacts_stored_after_refused_title"], "0")
         for name in ("length.title_at_limit", "length.title_multibyte_at_limit",
                      "length.legacy_long_value_untouched_on_other_edit"):
             self.assertEqual(self.outcome(name), "ok", name)
@@ -375,8 +502,8 @@ class TestIdentityPhp(unittest.TestCase):
         self.assertEqual(self.outcome("audit.create_without_option"), "Forbidden")
         self.assertEqual(self.outcome("audit.create_with_wrong_option_value"), "Forbidden")
         self.assertEqual(self.outcome("audit.create_with_option"), "ok")
-        self.assertEqual(self.outcome("audit.edit"), "Forbidden")
-        self.assertEqual(self.outcome("audit.delete"), "Forbidden")
+        for name in ("audit.edit", "audit.delete", "audit.edit_admin", "audit.delete_admin"):
+            self.assertEqual(self.outcome(name), "Forbidden", name)
 
     def test_policy_helpers(self):
         self.assertEqual(json.loads(self.result["policy.primary_broken"]), [True, False, False, False])
@@ -387,19 +514,19 @@ class TestIdentityPhp(unittest.TestCase):
 
 # Each mutation removes one control from a copy of the PHP; the harness output must change.
 MUTATIONS = {
-    "supplied identifier accepted": (
-        "Classes/Identity/IdentityGuard.php",
-        r"if \(\$isNew && !IdentityPolicy::isEmpty\(\$entity->get\('id'\)\)\) \{", "if (false) {"),
     "csv import accepted": (
-        "Classes/Identity/IdentityGuard.php", r"if \(IdentityPolicy.{2}option\(\$options, 'import'\)\) \{", "if (false) {"),
+        "Classes/Identity/IdentityGuard.php", r"if \(\$options->get\('import'\)\) \{", "if (false) {"),
     "firm delete allowed": (
         "Classes/Identity/IdentityGuard.php",
-        r"(public function beforeRemove\(Entity \$entity\): void\s*\{\s*)throw new Forbidden\(", r"\1return; new Forbidden("),
-    "merge allowed": (
-        "Controllers/Account.php", r"throw new Forbidden\(", "exit(0); new Forbidden("),
+        r"(public function beforeRemove\(Entity \$entity\): void\s*\{\s*)throw \$this->removalRefusal\(\);", r"\1return;"),
+    "record delete route allowed": (
+        "Classes/Identity/RecordHooks/BeforeDelete.php", r"throw \$this->guard->removalRefusal\(\);", "return;"),
     "primary unlink allowed": (
         "Classes/Identity/IdentityPolicy.php",
         r"return !self.{2}isEmpty\(\$primaryId\) && \$primaryId === \$unlinkedFirmId;", "return false;"),
+    "primary unlink backstop removed": (
+        "Classes/Identity/IdentityGuard.php", r"!\$relate &&\s*\$relationship === IdentityPolicy::REL_CONTACT_FIRM_LINK",
+        "false && $relationship === IdentityPolicy::REL_CONTACT_FIRM_LINK"),
     "primary not required among links": (
         "Classes/Identity/IdentityPolicy.php", r"return !in_array\(\$primaryId, \$linkedIds, true\);", "return false;"),
     "audit failure swallowed": (
@@ -415,34 +542,44 @@ MUTATIONS = {
         r"\1return; new Forbidden("),
     "forged audit records accepted": (
         "Hooks/IdentityAudit/ProtectIdentityAudit.php",
-        r"IdentityPolicy.{2}option\(\$options, IdentityPolicy.{2}AUDIT_WRITE_OPTION\) !== true", "false"),
+        r"\$options->get\(IdentityPolicy[:][:]AUDIT_WRITE_OPTION\) !== true", "false"),
     "bulk link allowed": (
         "Classes/Identity/IdentityGuard.php",
-        r"if \(in_array\(\$link, IdentityPolicy.{2}BULK_REFUSED_LINKS\[\$type\] \?\? \[\], true\)\) \{", "if (false) {"),
+        r"if \(!in_array\(\$link, IdentityPolicy.{2}BULK_REFUSED_LINKS\[\$type\] \?\? \[\], true\)\) \{", "if (true) {"),
+    "bulk link not undone": (
+        "Classes/Identity/IdentityGuard.php", r"\$this->putBack\(\$kind, \$attribute, \$changed, \$firmId, true, ''\);", ";"),
     "successor cycle allowed": (
         "Classes/Identity/IdentityPolicy.php", r"\$current === \$selfId \|\| isset\(\$seen\[\$current\]\)", "false"),
     "wrong-kind successor allowed": (
         "Classes/Identity/IdentityPolicy.php", r"if \(!\$successorExists\) \{", "if (false) {"),
     "over-length input accepted": (
         "Classes/Identity/IdentityGuard.php", r"mb_strlen\(\$value\) > \$limit", "false"),
-    "edit-only successor links allowed": (
+    "successor set by linking allowed (record hook)": (
         "Classes/Identity/IdentityGuard.php",
-        r"if \(in_array\(\$link, IdentityPolicy.{2}EDIT_ONLY_LINKS\[\$type\] \?\? \[\], true\)\) \{", "if (false) {"),
+        r"if \(isset\(IdentityPolicy[:][:]EDIT_ONLY_LINKS\[\$type\]\[\$link\]\)\) \{\s*throw new Forbidden", "if (false) {\n throw new Forbidden"),
+    "successor set by linking allowed (after hook)": (
+        "Classes/Identity/IdentityGuard.php", r"if \(\$editOnly !== null\) \{", "if (false) {"),
     "create audit not undone": (
-        "Classes/Identity/IdentityGuard.php", r"->deleteFromDb\(\(string\) \$entity->getId\(\)\);", ";"),
-    "new contact firm links not audited": (
-        "Classes/Identity/IdentityGuard.php", r"if \(\$firmId !== ''\) \{", "if (false) {"),
-    "new contact link audited twice": (
-        "Classes/Identity/IdentityGuard.php", r"if \(\$existing === 0\) \{", "if (true) {"),
-    "undo leaves link rows": (
-        "Classes/Identity/IdentityGuard.php", r"\$this->deleteLinkRows\(\$entity\);", ";"),
+        "Classes/Identity/IdentityGuard.php", r"\$this->deleteRows\(\$entity\);", ";"),
     "update change not audited": (
         "Classes/Identity/IdentityGuard.php",
         r"foreach \(\$this->changes\(\$entity, \$type\) as \[\$relationship, \$previous, \$new\]\) \{", "foreach ([] as [$relationship, $previous, $new]) {"),
+    "link change not audited": (
+        "Classes/Identity/IdentityGuard.php", r"if \(\$previous === \$new\) \{", "if (true) {"),
+    "link audit failure not put back": (
+        "Classes/Identity/IdentityGuard.php", r"(        string \$previous\n    \): void \{\n)", r"\1        return;\n"),
+    "repeated link change audited twice": (
+        "Classes/Identity/IdentityGuard.php", r"if \(\(self[:][:]\$linkState\[\$ledgerKey\] \?\? null\) === \$state\) \{", "if (false) {"),
+    "link-list input accepted": (
+        "Classes/Identity/IdentityGuard.php", r"if \(\$entity->has\(\$attribute\)\) \{", "if (false) {"),
+    "save hook runs before the platform's own": (
+        "Hooks/Contact/IdentityBeforeSave.php", r"public static int \$order = 99;", "public static int $order = 1;"),
+    "relation hook runs after the platform's own": (
+        "Hooks/Account/IdentityAfterUnrelate.php", r"public static int \$order = 1;", "public static int $order = 99;"),
 }
 
 
-@unittest.skipUnless(HAVE_PHP, "php not installed")
+@NEEDS_REFERENCE
 class TestIdentityPhpMutations(unittest.TestCase):
     """Non-vacuity: with any one control removed, the PHP scenarios no longer match."""
 
@@ -483,7 +620,7 @@ class TestReleaseSettings(unittest.TestCase):
     def test_the_file_is_valid_and_as_required(self):
         found = {n: (k, v) for n, k, v in release_settings.load()}
         self.assertEqual(found["cleanupDeletedRecords"], ("bool", False))
-        self.assertEqual(found["cleanupAuditLog"], ("bool", False))
+        self.assertEqual(found["cleanupAudit"], ("bool", False))
         self.assertEqual(found["cleanupActionHistoryPeriod"], ("string", "6 months"))
         self.assertEqual(found["cleanupAuthLogPeriod"], ("string", "13 months"))
 
@@ -540,7 +677,7 @@ case "$*" in
         if [ "$name" = "${FAKE_UNKNOWN:-%none%}" ]; then printf false; else printf true; fi ;;
     *"data/config.php"*)
         case "$name" in
-            cleanupDeletedRecords|cleanupAuditLog) val=false ;;
+            cleanupDeletedRecords|cleanupAudit) val=false ;;
             cleanupActionHistoryPeriod) val="'6 months'" ;;
             cleanupAuthLogPeriod) val="'13 months'" ;;
             *) val=NULL ;;
@@ -578,7 +715,7 @@ class TestApplyReleaseSettings(tb.ShellEnv):
         self.assertEqual(res.returncode, 0, res.stderr)
         calls = self.docker_calls()
         sets = [c.split("config:set ", 1)[1] for c in calls if "config:set" in c]
-        self.assertEqual(sets, ["cleanupDeletedRecords false --type=bool", "cleanupAuditLog false --type=bool",
+        self.assertEqual(sets, ["cleanupDeletedRecords false --type=bool", "cleanupAudit false --type=bool",
                                 "cleanupActionHistoryPeriod 6 months --type=string",
                                 "cleanupAuthLogPeriod 13 months --type=string"])
         self.assertEqual(len([c for c in calls if "array_key_exists" in c]), 4)
@@ -586,7 +723,7 @@ class TestApplyReleaseSettings(tb.ShellEnv):
 
     def test_a_wrong_read_back_fails_the_deploy(self):
         for name, wrong in (("cleanupDeletedRecords", "true"), ("cleanupDeletedRecords", "'false'"),
-                            ("cleanupAuditLog", "NULL"), ("cleanupActionHistoryPeriod", "'15 months'"),
+                            ("cleanupAudit", "NULL"), ("cleanupActionHistoryPeriod", "'15 months'"),
                             ("cleanupAuthLogPeriod", "'2 months'"), ("cleanupAuthLogPeriod", "")):
             with self.subTest(setting=name, read_back=wrong):
                 res = self.step(f"apply_release_settings {REPO}; echo NOT-REACHED",
@@ -596,9 +733,9 @@ class TestApplyReleaseSettings(tb.ShellEnv):
                 self.assertNotIn("NOT-REACHED", res.stdout)
 
     def test_an_unknown_setting_name_fails_the_deploy(self):
-        res = self.step(f"apply_release_settings {REPO}; echo NOT-REACHED", extra={"FAKE_UNKNOWN": "cleanupAuditLog"})
+        res = self.step(f"apply_release_settings {REPO}; echo NOT-REACHED", extra={"FAKE_UNKNOWN": "cleanupAudit"})
         self.assertEqual(res.returncode, 1)
-        self.assertIn("setting cleanupAuditLog is not a known EspoCRM setting", res.stderr)
+        self.assertIn("setting cleanupAudit is not a known EspoCRM setting", res.stderr)
         self.assertNotIn("NOT-REACHED", res.stdout)
 
     def test_a_failing_config_set_fails_the_deploy(self):
@@ -664,6 +801,41 @@ class TestAcceptanceSuiteLogic(unittest.TestCase):
             os.environ.update(saved)
         for name in self.ti.REQUIRED_ENV:
             self.assertIn(name, str(ctx.exception))
+
+    def test_a_refusal_must_come_from_a_control_on_a_route_that_exists(self):
+        """A18: a 404, a 405 or a server error is never a refusal; an import counts only as an error with nothing created."""
+        proved = self.ti.refusal_proved
+        self.assertTrue(proved([("status", 403)]))
+        self.assertTrue(proved([("status", 400), ("status", 403)]))
+        for bad in (404, 405, 500, 409):
+            self.assertFalse(proved([("status", bad)]), bad)
+        self.assertFalse(proved([("status", 403), ("status", 404)]))
+        self.assertFalse(proved([("ok", {"id": "x"})]))
+        self.assertFalse(proved([]))
+        self.assertTrue(proved([("ok", {"importRefused": True})]))
+        self.assertFalse(proved([("ok", {"importRefused": False})]))
+
+    def test_an_unchanged_cell_refused_by_a_missing_route_fails_the_verdict(self):
+        ev = self.ti.evaluate
+        self.assertEqual(ev("refused", 1, 1, 0, 0, [], [], refusals=True)[0], True)
+        self.assertEqual(ev("refused", 1, 1, 0, 0, [], [], refusals=False)[0], False)
+        self.assertEqual(ev("either", 1, 1, 0, 0, [], [], refusals=False)[0], False)
+        self.assertEqual(ev("either", 1, 2, 0, 1, [], [], refusals=False)[0], True)    # performed, with its record
+        self.assertEqual(ev("performed", 1, 2, 0, 1, [], [], refusals=False)[0], True)
+
+    def test_the_suite_uses_the_platforms_own_merge_and_import_routes(self):
+        source = read(REPO, "tests", "acceptance", "test_identity.py")
+        self.assertIn('"POST", "Action"', source)                    # Core/Action/Api/PostProcess
+        self.assertIn('"action": "merge"', source)
+        self.assertNotIn("action/merge", source)                      # the controller route of CRM-IDINT-001
+        self.assertIn("Import/file", source)                          # Tools/Import/Api/PostFile
+        self.assertIn('client.call("POST", "Import"', source)         # Tools/Import/Api/Post
+        self.assertNotIn('client.create("Import"', source)
+
+    def test_the_cleanup_observation_counts_audit_history_too(self):
+        source = read(REPO, "tests", "acceptance", "test_identity.py")
+        self.assertIn("must print four integers", source)
+        self.assertIn('CLEANUP["before"][3], 0', source)
 
     def test_every_matrix_cell_has_a_driver(self):
         for route in matrix.ROUTES:

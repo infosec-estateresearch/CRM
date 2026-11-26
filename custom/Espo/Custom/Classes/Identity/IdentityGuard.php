@@ -8,24 +8,48 @@ use Espo\Core\Utils\Metadata;
 use Espo\ORM\Entity;
 use Espo\ORM\EntityManager;
 use Espo\ORM\Query\DeleteBuilder;
+use Espo\ORM\Query\Select;
+use Espo\ORM\Query\UpdateBuilder;
+use Espo\ORM\Repository\Option\SaveOptions;
 use Throwable;
 
 /**
- * CRM-IDINT-001: the server side of identity integrity. Every identity
- * relationship change on Account, Contact and Opportunity passes through here,
- * from the thin hooks under Hooks/<Entity>/ (see the route matrix in
- * docs/IDENTITY-INTEGRITY.md). There is no bypass for administrators or service
- * accounts: the hooks run for every caller.
+ * CRM-IDINT-001R: the server side of identity integrity. Every identity relationship
+ * change on Account, Contact and Opportunity passes through here, from the thin hooks
+ * under Hooks/<Entity>/ and the record hooks under Classes/Identity/RecordHooks/ (see
+ * the route matrix in docs/IDENTITY-INTEGRITY.md). There is no bypass for
+ * administrators or service accounts: the hooks run for every caller.
  *
- * - A change is audited before it happens (updates, links) or right after the
- *   record gets its identifier (creates). A create whose audit cannot be stored
- *   is undone, so it leaves nothing behind (3.1).
- * - Deleting, mass deleting and (through the controller) merging firms and
- *   contacts is refused (3.4, 3.7).
- * - Identifiers are issued only by ERm; CSV import is refused (3.7).
+ * Only extension points the platform really calls are used:
+ * - BeforeSave and BeforeRemove (before hooks), AfterSave, AfterRelate, AfterUnrelate and
+ *   AfterMassRelate (the platform has no before-relation hook for custom code);
+ * - the record link, unlink, delete, create and update hooks (recordDefs);
+ * - recordDefs switches (actions.merge.disabled, massActions.delete.disabled,
+ *   relationships.<link>.massLink).
+ *
+ * A relation change has already happened when its after hook runs, so the after hook
+ * records the audit and, if the audit cannot be stored, puts the change back and refuses
+ * (3.1). A save is audited before it is written (BeforeSave). A create whose audit cannot
+ * be stored is undone.
  */
 class IdentityGuard
 {
+    /**
+     * The last link change audited for each link in this request ("linked" or "unlinked").
+     * The platform may report the same change twice (when a contact's primary firm is
+     * cleared it unrelates a firm the link-multiple save has just unrelated); a second
+     * identical change cannot be a change, so it is not audited again.
+     *
+     * @var array<string, string>
+     */
+    private static array $linkState = [];
+
+    /** Forgets the per-request link ledger (a new request, or a test, starts clean). */
+    public static function resetRequestState(): void
+    {
+        self::$linkState = [];
+    }
+
     public function __construct(
         private EntityManager $entityManager,
         private IdentityAuditor $auditor,
@@ -34,7 +58,7 @@ class IdentityGuard
 
     // ---- save -----------------------------------------------------------------
 
-    public function beforeSave(Entity $entity, object $options): void
+    public function beforeSave(Entity $entity, SaveOptions $options): void
     {
         $type = $entity->getEntityType();
 
@@ -42,15 +66,14 @@ class IdentityGuard
             return;
         }
 
-        if (IdentityPolicy::option($options, 'import')) {
+        // The platform has already assigned the identifier of a new record when this hook
+        // runs, and its API discards a client-supplied one; import is the route that could
+        // carry identifiers in, so it is refused here (3.7).
+        if ($options->get('import')) {
             throw new Forbidden('Import is not available for firms, contacts and enquiries.');
         }
 
         $isNew = $entity->isNew();
-
-        if ($isNew && !IdentityPolicy::isEmpty($entity->get('id'))) {
-            throw new Forbidden('Identifiers are issued only by ERm. A supplied identifier is refused.');
-        }
 
         $this->checkLengths($entity, $type, $isNew);
 
@@ -69,10 +92,6 @@ class IdentityGuard
         foreach ($this->changes($entity, $type) as [$relationship, $previous, $new]) {
             $this->auditor->record($relationship, $type, (string) $entity->getId(), $previous, $new);
         }
-
-        if ($type === 'Contact') {
-            $this->auditLinkListChange($entity);
-        }
     }
 
     public function afterSave(Entity $entity): void
@@ -89,23 +108,6 @@ class IdentityGuard
 
                 if (!IdentityPolicy::isEmpty($value)) {
                     $this->auditor->record($relationship, $type, (string) $entity->getId(), '', (string) $value);
-                }
-            }
-
-            // A new contact's extra firm links are audited here, from the saved record, so
-            // that this does not depend on core firing the relate hooks when it writes the
-            // link rows. A link the relate hook has already audited is not recorded twice.
-            if ($type === 'Contact') {
-                foreach (array_unique(array_map('strval', (array) $entity->get('accountsIds'))) as $firmId) {
-                    if ($firmId !== '') {
-                        $this->recordNewOnce(
-                            IdentityPolicy::REL_CONTACT_FIRM_LINK,
-                            'Contact',
-                            (string) $entity->getId(),
-                            '',
-                            $firmId
-                        );
-                    }
                 }
             }
         });
@@ -224,7 +226,7 @@ class IdentityGuard
     private function checkPrimaryStaysLinked(Entity $entity): void
     {
         // Checked when the link list is part of this save (a new contact's links
-        // are otherwise written after the save and checked by beforeUnrelate).
+        // are otherwise written after the save and checked on unrelate).
         $listInSave = $entity->isNew() ? $entity->has('accountsIds') : $entity->isAttributeChanged('accountsIds');
 
         if (!$listInSave) {
@@ -241,141 +243,284 @@ class IdentityGuard
         }
     }
 
-    private function auditLinkListChange(Entity $entity): void
+    // ---- record input (create and update hooks) -------------------------------
+
+    /** A record create or update that carries a link list the link routes own is refused. */
+    public function refuseLinkListInput(Entity $entity): void
     {
-        if (!$entity->isAttributeChanged('accountsIds')) {
-            return;
-        }
-
-        $before = array_map('strval', (array) $entity->getFetched('accountsIds'));
-        $after = array_map('strval', (array) $entity->get('accountsIds'));
-
-        foreach (array_diff($after, $before) as $id) {
-            $this->auditor->record(IdentityPolicy::REL_CONTACT_FIRM_LINK, 'Contact', (string) $entity->getId(), '', $id);
-        }
-
-        foreach (array_diff($before, $after) as $id) {
-            $this->auditor->record(IdentityPolicy::REL_CONTACT_FIRM_LINK, 'Contact', (string) $entity->getId(), $id, '');
+        foreach (IdentityPolicy::REFUSED_INPUT_ATTRIBUTES[$entity->getEntityType()] ?? [] as $attribute) {
+            if ($entity->has($attribute)) {
+                throw new Forbidden(
+                    'Branches and predecessors are changed through the link routes, and a successor by ' .
+                    'retiring or superseding the record. They cannot be set in a record save.'
+                );
+            }
         }
     }
 
-    // ---- links ----------------------------------------------------------------
+    // ---- links: before the change (record link and unlink hooks) --------------
 
-    public function beforeRelate(Entity $entity, string $link, Entity $foreign): void
-    {
-        $this->linkChange($entity, $link, $foreign, true);
-    }
-
-    public function beforeUnrelate(Entity $entity, string $link, Entity $foreign): void
-    {
-        $this->linkChange($entity, $link, $foreign, false);
-    }
-
-    public function beforeMassRelate(Entity $entity, string $link): void
+    /**
+     * Refusals that need no audit and no change: a successor is never set by linking, and
+     * the primary firm's link is never removed on its own. Called by the record link and
+     * unlink hooks, which the platform runs before it relates or unrelates.
+     */
+    public function refuseLinkChange(Entity $entity, string $link, Entity $foreign, bool $relate): void
     {
         $type = $entity->getEntityType();
 
-        if (in_array($link, IdentityPolicy::BULK_REFUSED_LINKS[$type] ?? [], true)) {
-            throw new Forbidden('Bulk linking is not available for identity relationships. Link records one at a time.');
-        }
-    }
-
-    private function linkChange(Entity $entity, string $link, Entity $foreign, bool $relate): void
-    {
-        $type = $entity->getEntityType();
-
-        if (in_array($link, IdentityPolicy::EDIT_ONLY_LINKS[$type] ?? [], true)) {
+        if (isset(IdentityPolicy::EDIT_ONLY_LINKS[$type][$link])) {
             throw new Forbidden('Retire or supersede a record by editing it, not by linking.');
         }
 
+        if ($relate || !isset(IdentityPolicy::LINKS[$type][$link])) {
+            return;
+        }
+
+        [$relationship, $changedSide, $firmSide] = IdentityPolicy::LINKS[$type][$link];
+
+        if ($relationship !== IdentityPolicy::REL_CONTACT_FIRM_LINK) {
+            return;
+        }
+
+        $changed = $changedSide === 'self' ? $entity : $foreign;
+        $firm = $firmSide === 'self' ? $entity : $foreign;
+
+        if (IdentityPolicy::unlinkRemovesPrimary($changed->get('accountId'), (string) $firm->getId())) {
+            throw $this->primaryUnlinkRefusal();
+        }
+    }
+
+    private function primaryUnlinkRefusal(): Forbidden
+    {
+        return new Forbidden(
+            'This firm is the contact\'s primary firm. Set another linked firm as primary, ' .
+            'or clear the primary firm, before removing the link.'
+        );
+    }
+
+    // ---- links: after the change (hooks the platform calls on every relate) ----
+
+    public function afterRelate(Entity $entity, string $link, Entity $foreign): void
+    {
+        $this->linkChanged($entity, $link, $foreign, true);
+    }
+
+    public function afterUnrelate(Entity $entity, string $link, Entity $foreign): void
+    {
+        $this->linkChanged($entity, $link, $foreign, false);
+    }
+
+    private function linkChanged(Entity $entity, string $link, Entity $foreign, bool $relate): void
+    {
+        $type = $entity->getEntityType();
+
+        $editOnly = IdentityPolicy::EDIT_ONLY_LINKS[$type][$link] ?? null;
         $definition = IdentityPolicy::LINKS[$type][$link] ?? null;
+
+        if ($editOnly !== null) {
+            [$changedSide, $kind, $attribute] = $editOnly;
+            $changed = $changedSide === 'self' ? $entity : $foreign;
+            $firmId = (string) ($changedSide === 'self' ? $foreign : $entity)->getId();
+
+            $this->putBack($kind, $attribute, $changed, $firmId, $relate, $this->previousKey($changed, $kind, (string) $attribute));
+
+            throw new Forbidden('Retire or supersede a record by editing it, not by linking.');
+        }
 
         if ($definition === null) {
             return;
         }
 
-        [$relationship, $changedSide, $firmSide] = $definition;
+        [$relationship, $changedSide, $firmSide, $kind, $attribute] = $definition;
 
         $changed = $changedSide === 'self' ? $entity : $foreign;
         $firmId = (string) ($firmSide === 'self' ? $entity : $foreign)->getId();
         $changedType = $changed->getEntityType();
+        $changedId = (string) $changed->getId();
 
-        if ($relationship === IdentityPolicy::REL_CONTACT_FIRM_LINK) {
+        if ($kind === IdentityPolicy::KIND_MANY_MANY) {
             $previous = $relate ? '' : $firmId;
             $new = $relate ? $firmId : '';
-
-            if (!$relate && IdentityPolicy::unlinkRemovesPrimary($changed->get('accountId'), $firmId)) {
-                throw new Forbidden(
-                    'This firm is the contact\'s primary firm. Set another linked firm as primary, ' .
-                    'or clear the primary firm, before removing the link.'
-                );
-            }
+        } elseif ($relate) {
+            $previous = $this->previousKey($changed, $kind, (string) $attribute);
+            $new = $kind === IdentityPolicy::KIND_HAS_MANY ? $firmId : (string) $foreign->getId();
         } else {
-            $attribute = $relationship === IdentityPolicy::REL_PARENT_FIRM ? 'parentId' : 'accountId';
-            $previous = $relate ? (string) $changed->get($attribute) : $firmId;
-            $new = $relate ? $firmId : '';
+            $previous = $kind === IdentityPolicy::KIND_HAS_MANY ? $firmId : (string) $foreign->getId();
+            $new = '';
         }
 
         if ($previous === $new) {
             return;
         }
 
+        // Backstop for a contact's primary firm: its link is never removed on its own.
+        if (
+            !$relate &&
+            $relationship === IdentityPolicy::REL_CONTACT_FIRM_LINK &&
+            IdentityPolicy::unlinkRemovesPrimary($changed->get('accountId'), $firmId)
+        ) {
+            $this->putBack($kind, $attribute, $changed, $firmId, false, $previous);
+
+            throw $this->primaryUnlinkRefusal();
+        }
+
+        $ledgerKey = implode('|', [$changedType, $changedId, $relationship, $firmId]);
+        $state = $relate ? 'linked' : 'unlinked';
+
+        if ((self::$linkState[$ledgerKey] ?? null) === $state) {
+            return;
+        }
+
         if ($changed->isNew()) {
-            $this->undoCreateOnFailure($changed, function () use ($relationship, $changedType, $changed, $previous, $new): void {
-                $this->recordNewOnce($relationship, $changedType, (string) $changed->getId(), $previous, $new);
-            });
+            try {
+                $this->undoCreateOnFailure($changed, function () use ($relationship, $changedType, $changedId, $previous, $new): void {
+                    $this->auditor->record($relationship, $changedType, $changedId, $previous, $new);
+                });
+            } catch (Forbidden $e) {
+                unset(self::$linkState[$ledgerKey]);
+
+                throw $e;
+            }
+
+            self::$linkState[$ledgerKey] = $state;
 
             return;
         }
 
-        $this->auditor->record($relationship, $changedType, (string) $changed->getId(), $previous, $new);
+        try {
+            $this->auditor->record($relationship, $changedType, $changedId, $previous, $new);
+        } catch (Forbidden $e) {
+            unset(self::$linkState[$ledgerKey]);
+
+            $this->putBack(
+                $kind,
+                $attribute,
+                $changed,
+                $firmId,
+                $relate,
+                $relate ? $previous : $firmId
+            );
+
+            throw $e;
+        }
+
+        self::$linkState[$ledgerKey] = $state;
+    }
+
+    /**
+     * The identifier a foreign key held before a relate, as far as the record in hand
+     * knows it. For a link whose key is on the foreign record (hasMany) it is the value
+     * that record was loaded with; a record the platform only identified (relate by
+     * identifier) has none loaded, so the key is taken to have been empty. For a link
+     * whose key is on the record itself (belongsTo) the platform's mapper has already
+     * overwritten the value in hand, so the previous key is not known and is taken to
+     * have been empty (the platform's own use of such a relate is only to set a primary
+     * firm where there was none).
+     */
+    private function previousKey(Entity $changed, string $kind, string $attribute): string
+    {
+        if ($kind !== IdentityPolicy::KIND_HAS_MANY || $attribute === '' || !$changed->has($attribute)) {
+            return '';
+        }
+
+        return (string) $changed->get($attribute);
+    }
+
+    /**
+     * Puts a relation change back, so a change whose audit could not be stored does not
+     * stay. $firmId is the firm end of the link; $previous the key value to restore after
+     * a relate (empty for none). Everything goes through the ORM query builder, so no
+     * hook runs again.
+     */
+    private function putBack(
+        string $kind,
+        ?string $attribute,
+        Entity $changed,
+        string $firmId,
+        bool $relate,
+        string $previous
+    ): void {
+        try {
+            if ($kind === IdentityPolicy::KIND_MANY_MANY) {
+                $this->entityManager->getQueryExecutor()->execute(
+                    UpdateBuilder::create()
+                        ->in(IdentityPolicy::JUNCTION)
+                        ->set(['deleted' => $relate])
+                        ->where(['accountId' => $firmId, 'contactId' => (string) $changed->getId()])
+                        ->build()
+                );
+
+                return;
+            }
+
+            // A key restored after an unrelate is the firm that held it; after a relate, the
+            // value the record had before (null when there was none).
+            $value = $relate ? ($previous === '' ? null : $previous) : $firmId;
+
+            $this->entityManager->getQueryExecutor()->execute(
+                UpdateBuilder::create()
+                    ->in($changed->getEntityType())
+                    ->set([(string) $attribute => $value])
+                    ->where(['id' => (string) $changed->getId()])
+                    ->build()
+            );
+        } catch (Throwable) {
+            // Nothing more can be done here; the refusal that follows still stops the request.
+        }
+    }
+
+    public function afterMassRelate(Entity $entity, string $link, Select $query): void
+    {
+        $type = $entity->getEntityType();
+
+        if (!in_array($link, IdentityPolicy::BULK_REFUSED_LINKS[$type] ?? [], true)) {
+            return;
+        }
+
+        $foreignType = $query->getFrom();
+        $definition = IdentityPolicy::LINKS[$type][$link] ?? IdentityPolicy::EDIT_ONLY_LINKS[$type][$link] ?? null;
+
+        if ($definition !== null) {
+            $foreignId = (string) $entity->getId();
+
+            foreach ($this->entityManager->getRDBRepository($foreignType)->clone($query)->find() as $foreign) {
+                if (isset(IdentityPolicy::EDIT_ONLY_LINKS[$type][$link])) {
+                    [$changedSide, $kind, $attribute] = $definition;
+                } else {
+                    [, $changedSide, , $kind, $attribute] = $definition;
+                }
+
+                $changed = $changedSide === 'self' ? $entity : $foreign;
+                $firmId = $changedSide === 'self' ? (string) $foreign->getId() : $foreignId;
+
+                $this->putBack($kind, $attribute, $changed, $firmId, true, '');
+            }
+        }
+
+        throw new Forbidden('Bulk linking is not available for identity relationships. Link records one at a time.');
     }
 
     // ---- remove ---------------------------------------------------------------
 
     public function beforeRemove(Entity $entity): void
     {
-        throw new Forbidden(
-            'Firms and contacts are never deleted. Retire the record, or supersede it with a successor.'
+        throw $this->removalRefusal();
+    }
+
+    public function removalRefusal(): Forbidden
+    {
+        return new Forbidden(
+            'Identity records (firms, contacts and their audit history) are never deleted. Retire a firm or contact, or supersede it with a successor.'
         );
     }
 
     // ---- helpers --------------------------------------------------------------
 
     /**
-     * Records a change of a record that is being created, unless the identical record
-     * is already stored (the record id is unique, so a match is the same change).
-     */
-    private function recordNewOnce(string $relationship, string $type, string $id, string $previous, string $new): void
-    {
-        $existing = $this->entityManager->getRDBRepository(IdentityPolicy::AUDIT_ENTITY)->where([
-            'relationship' => $relationship,
-            'recordType' => $type,
-            'recordId' => $id,
-            'previousValue' => $previous,
-            'newValue' => $new,
-        ])->count();
-
-        if ($existing === 0) {
-            $this->auditor->record($relationship, $type, $id, $previous, $new);
-        }
-    }
-
-    /** Removes the firm link rows written for a contact whose create is being undone. */
-    private function deleteLinkRows(Entity $entity): void
-    {
-        if ($entity->getEntityType() !== 'Contact') {
-            return;
-        }
-
-        $this->entityManager->getQueryExecutor()->execute(
-            DeleteBuilder::create()->from('AccountContact')->where(['contactId' => (string) $entity->getId()])->build()
-        );
-    }
-
-    /**
      * Runs $write; if the audit cannot be stored and the record is one this request
-     * is creating, the record is removed again so the create leaves nothing behind.
+     * is creating, the record and its firm link rows are removed again so the create
+     * leaves nothing behind.
      */
     private function undoCreateOnFailure(Entity $entity, callable $write): void
     {
@@ -383,22 +528,39 @@ class IdentityGuard
             $write();
         } catch (Forbidden $e) {
             if ($entity->isNew() && !IdentityPolicy::isEmpty($entity->getId())) {
-                try {
-                    $this->deleteLinkRows($entity);
-                } catch (Throwable) {
-                    // The link rows of an undone create may remain; see docs/IDENTITY-INTEGRITY.md.
-                }
-
-                try {
-                    $this->entityManager
-                        ->getRDBRepository($entity->getEntityType())
-                        ->deleteFromDb((string) $entity->getId());
-                } catch (Throwable) {
-                    // Nothing more can be done here; the refusal below still stops the request.
-                }
+                $this->deleteRows($entity);
             }
 
             throw $e;
+        }
+    }
+
+    private function deleteRows(Entity $entity): void
+    {
+        $executor = $this->entityManager->getQueryExecutor();
+
+        if ($entity->getEntityType() === 'Contact') {
+            try {
+                $executor->execute(
+                    DeleteBuilder::create()
+                        ->from(IdentityPolicy::JUNCTION)
+                        ->where(['contactId' => (string) $entity->getId()])
+                        ->build()
+                );
+            } catch (Throwable) {
+                // The link rows of an undone create may remain; see docs/IDENTITY-INTEGRITY.md.
+            }
+        }
+
+        try {
+            $executor->execute(
+                DeleteBuilder::create()
+                    ->from($entity->getEntityType())
+                    ->where(['id' => (string) $entity->getId()])
+                    ->build()
+            );
+        } catch (Throwable) {
+            // Nothing more can be done here; the refusal that follows still stops the request.
         }
     }
 }

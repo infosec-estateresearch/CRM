@@ -48,32 +48,64 @@ final class IdentityPolicy
     public const STATUS_ENTITIES = ['Account', 'Contact'];
 
     /**
-     * Link changes (relate or unrelate) that carry an identity relationship.
+     * Link changes (relate or unrelate) that carry an identity relationship, by the
+     * entity type whose after-relate / after-unrelate hook sees them.
      * [entityType][link] => [relationship, which side is the changed record,
-     *                        which side carries the firm]
-     * 'self' is the record the hook runs for; 'foreign' is the other end.
+     *                        which side carries the firm, link kind,
+     *                        foreign-key attribute on the changed record or null]
+     * 'self' is the record the hook runs for; 'foreign' is the other end. The kind is
+     * how the platform stores the link: 'manyMany' is a row of the AccountContact
+     * junction, 'hasMany' a foreign key on the foreign record, 'belongsTo' a foreign key
+     * on the record itself.
      */
     public const LINKS = [
         'Account' => [
-            'branches' => [self::REL_PARENT_FIRM, 'foreign', 'self'],
-            'parent' => [self::REL_PARENT_FIRM, 'self', 'foreign'],
-            'contacts' => [self::REL_CONTACT_FIRM_LINK, 'foreign', 'self'],
-            'contactsPrimary' => [self::REL_PRIMARY_FIRM, 'foreign', 'self'],
-            'opportunities' => [self::REL_ENQUIRY_FIRM, 'foreign', 'self'],
+            'branches' => [self::REL_PARENT_FIRM, 'foreign', 'self', self::KIND_HAS_MANY, 'parentId'],
+            'parent' => [self::REL_PARENT_FIRM, 'self', 'foreign', self::KIND_BELONGS_TO, 'parentId'],
+            'contacts' => [self::REL_CONTACT_FIRM_LINK, 'foreign', 'self', self::KIND_MANY_MANY, null],
+            'contactsPrimary' => [self::REL_PRIMARY_FIRM, 'foreign', 'self', self::KIND_HAS_MANY, 'accountId'],
+            'opportunities' => [self::REL_ENQUIRY_FIRM, 'foreign', 'self', self::KIND_HAS_MANY, 'accountId'],
         ],
         'Contact' => [
-            'accounts' => [self::REL_CONTACT_FIRM_LINK, 'self', 'foreign'],
-            'account' => [self::REL_PRIMARY_FIRM, 'self', 'foreign'],
+            'accounts' => [self::REL_CONTACT_FIRM_LINK, 'self', 'foreign', self::KIND_MANY_MANY, null],
+            'account' => [self::REL_PRIMARY_FIRM, 'self', 'foreign', self::KIND_BELONGS_TO, 'accountId'],
         ],
         'Opportunity' => [
-            'account' => [self::REL_ENQUIRY_FIRM, 'self', 'foreign'],
+            'account' => [self::REL_ENQUIRY_FIRM, 'self', 'foreign', self::KIND_BELONGS_TO, 'accountId'],
         ],
     ];
 
-    /** Links that may never be changed through a link or unlink: use the record edit. */
+    public const KIND_MANY_MANY = 'manyMany';
+    public const KIND_HAS_MANY = 'hasMany';
+    public const KIND_BELONGS_TO = 'belongsTo';
+
+    /** The junction entity of a contact's firm links (EspoCRM Crm module). */
+    public const JUNCTION = 'AccountContact';
+
+    /**
+     * Links that may never be changed through a link or unlink: use the record edit.
+     * [entityType][link] => [which side is the changed record, link kind, foreign-key attribute]
+     */
     public const EDIT_ONLY_LINKS = [
-        'Account' => ['successor', 'predecessors'],
-        'Contact' => ['successor', 'predecessors'],
+        'Account' => [
+            'successor' => ['self', self::KIND_BELONGS_TO, 'successorId'],
+            'predecessors' => ['foreign', self::KIND_HAS_MANY, 'successorId'],
+        ],
+        'Contact' => [
+            'successor' => ['self', self::KIND_BELONGS_TO, 'successorId'],
+            'predecessors' => ['foreign', self::KIND_HAS_MANY, 'successorId'],
+        ],
+    ];
+
+    /**
+     * Link-multiple attributes whose input is refused on create and edit: a firm's
+     * branches and every record's predecessors are changed through the link routes
+     * (or, for a successor, through the status workflow), so the change is audited with
+     * the identifier it replaces.
+     */
+    public const REFUSED_INPUT_ATTRIBUTES = [
+        'Account' => ['branchesIds', 'predecessorsIds'],
+        'Contact' => ['predecessorsIds'],
     ];
 
     /** Links where a bulk link (mass relate) is refused. */
@@ -89,20 +121,6 @@ final class IdentityPolicy
 
     /** Save option only server code sets, so no API caller can create an audit record. */
     public const AUDIT_WRITE_OPTION = 'identityAuditWrite';
-
-    /** A save or remove option, read tolerantly (the option object's API is not pinned here). */
-    public static function option(object $options, string $name): mixed
-    {
-        if (method_exists($options, 'get')) {
-            return $options->get($name);
-        }
-
-        if (method_exists($options, 'toAssoc')) {
-            return $options->toAssoc()[$name] ?? null;
-        }
-
-        return null;
-    }
 
     public static function isEmpty(mixed $value): bool
     {
