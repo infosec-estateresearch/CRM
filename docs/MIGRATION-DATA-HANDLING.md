@@ -28,6 +28,7 @@
 - Host backup jobs do **not** include `/srv/CRM` (checked on 2026-11-10), so no uncontrolled copies of the snapshots are made.
 - Raw snapshots are **not** replicated further. If one is lost, it is re-extracted from Salesforce, which is still the system of record. This keeps the number of copies to a minimum.
 - The beta database is backed up daily to `/srv/CRM/runtime/beta/backups` (root `0700`). Restore is tested (PBI-011).
+- From 2026-11-26 a nightly operator job makes that backup and also keeps an encrypted copy off the host (database, application files and configuration); no schedule was installed before that date. Off-host retention is report-only until enabled. A full application restore from an off-host copy was proven on 2026-11-26.
 
 ## 4. Retention and disposal
 - **Superseded snapshots:** keep at most the **two** most recent `RECONCILED` snapshots. Older ones are deleted once a newer one has been loaded and reconciled.

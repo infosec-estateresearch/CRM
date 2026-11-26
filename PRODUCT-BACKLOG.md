@@ -89,7 +89,7 @@ Recorded facts only. The **State** column above shows refinement readiness and i
 | 003 | CRM-005 | DELIVERED; activities loaded on beta |
 | 004 | CRM-004 | DELIVERED; enquiries loaded on beta. R8 (phone enquiry under 60 s) is not yet measured |
 | 005 | CRM-002 (+S to W), CRM-006R/006S, CRM-008 (+F, G), CRM-009-H, CRM-009-I | Extractor and loader DELIVERED. The real extract reconciled with drift (1 accepted EmailMessage). No pseudonymised-sample run is evidenced in this repository; real extraction proceeded under the PO priority override (Issue #9) |
-| 011 | CRM-007/007R, CRM-009 (+F, G) | Beta in **UAT mode** (plain HTTP, LAN-only, PO risk acceptance). TLS/production mode is retained as the default but **not** in use; named logins; the common UAT password used at first load was replaced with unique passwords on 2026-11-26 |
+| 011 | CRM-007/007R, CRM-009 (+F, G) | Beta in **UAT mode** (plain HTTP, LAN-only, PO risk acceptance). TLS/production mode is retained as the default but **not** in use; named logins exist with a common UAT password |
 | 012 | Operator load (CRM-009 direction) | BETA_POPULATED reported on Issue #9; 160 write rejections (0.08%) and 1 recurring Contact update are open. Full-volume p95 search (R6) is not measured. Reconciliation with "every mismatch explained" is incomplete: the rejection field reasons are not captured |
 | 013 | — | UAT in progress (Matt) |
 | 016, 017 | CRM-007/007R | Release bundles built reproducibly (`scripts/release.sh`); clean-host deploy evidence is per CRM-007R. **Deviation to review:** beta runs the pinned upstream image with `custom/` deployed into the runtime, not a baked `crm-espocrm` image (PBI-016 text, CRM-D017) |
@@ -129,6 +129,10 @@ Items for the direction in [Issue #91](https://github.com/infosec-estateresearch
 | CRM-PBI-041 | PROVISIONAL | **P0.** **Non-destructive source delta, rejected records and historical Notes** | No overwritten ERm changes; originals preserved; Salesforce Notes handled; reconciliation and rollback | 005, 035 |
 | CRM-PBI-042 | PROVISIONAL | **P0.** **Production target and identity-preserving cutover** | Rehearsed promotion, recorded identity start date, rollback criteria; Outlook filing (014) unless deferred | 014, 039, 041 |
 | CRM-PBI-043 | PROVISIONAL | **P1.** **Transitional Salesforce Sync (administrator only)** | CRM-D050; on the existing extractor and loader; synthetic proof first; removable | 036, 041 |
+
+### Correction to the 2026-11-13 evidence (row for PBI-011)
+
+The common UAT password used at first load was replaced with unique passwords on 2026-11-26.
 
 ### Changes of state, 2026-11-26 (rows above are not rewritten)
 
