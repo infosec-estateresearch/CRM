@@ -12,7 +12,7 @@ BROWSER: yes
 
 | Item | Value |
 |---|---|
-| Version | v0.2 **PREPARED TEXT**, 2026-11-26. **Not approved. Cannot be dispatched:** the base is unbound. Dispatch needs a later version that names the base and its Issue, approved at that exact path and commit |
+| Version | v0.3 **PREPARED TEXT**, 2026-11-26. **Not approved. Cannot be dispatched:** the base is unbound. Dispatch needs a later version that names the base and its Issue, approved at that exact path and commit |
 | Issue | https://github.com/infosec-estateresearch/CRM/issues/95 (package); this order's own Issue is opened when the base is bound |
 | Priority and parent item | P1. CRM-PBI-041, CRM-PBI-043 |
 | Product outcome | Salesforce changes reach ERm until phase-out without losing identifiers or staff work |
@@ -29,6 +29,7 @@ BROWSER: yes
 | Base | Unbound. Predecessor: **CRM-002-INT; technically also CRM-ACC-001 and CRM-AUDIT-001**. The base will be a commit held by the Project Lead repository that contains the predecessor's accepted result and differs from GitHub `main` only by documents and delivery records, proved by a compare |
 | Branch and worktree | `forge/CRM-LOAD-001`, `/srv/CRM/worktrees/CRM-LOAD-001`, created by the engine |
 | Execution host and route | `DOCKER1:/srv/CRM/main`; the Orchestrator runs on another host and starts the Project Lead on DOCKER1 over its established administrative route |
+| Platform reference | `/srv/CRM/wo/CRM-LOAD-001/reference/espocrm/`: `application/` and `vendor/`, and `client/` where the order changes browser code, extracted from the image pinned at the bound base. Read-only, outside the repository, never committed; digests are recorded in the bound version. **It is the authority for every platform name, signature, route and setting** |
 | Protected | ForgeV2 and Foundry installations; every existing ledger, branch, candidate and pull request; live runtimes; the checkout `ROOT` except as the engine itself writes it |
 
 ## 3. Outcome and required behaviour
@@ -90,6 +91,8 @@ The order is complete only when A1 to A11 hold. A closed ledger alone is not acc
 
 **Browser gate.** The sandbox has no network, Docker, browser or EspoCRM, and PHP is not assumed. Under the engine's browser gate the Tester reports browser behaviour `inconclusive`, never as passed, and, when everything else passes, the Project Lead closes the ledger **ESCALATED** with that reason without a further Tester execution. Under CRM-D013 this is an acceptable intermediate result and **never final acceptance**: that needs section 8. Approval of this order approves this assignment.
 
+**Platform fidelity (binding).** Every platform interface, class, signature, metadata key, route and setting relied on is cited by file from the platform reference, and each reviewer checks it there. Unit-test stand-ins declare no platform symbol that is absent from the reference, and match its signatures. Where the order adds or changes server code, a test loads every custom class against the reference with PHP and `CRM_PLATFORM_REFERENCE` set; the Engineer and Tester run it, and a skip is a blocking finding. A refusal is proven only by the control's own refusal on a route that exists.
+
 ## 7. Budget and stop conditions
 
 - At most **3** executions each for Engineer, Auditor, Tester and DevSecOps. Any Engineer change restarts the three reviews. **Where the Tester reports inconclusive, the effective ceiling is two review rounds**, because the engine closes a ledger when one reviewer is inconclusive twice in a row, so a second round can end ESCALATED with findings open.
@@ -100,6 +103,8 @@ The order is complete only when A1 to A11 hold. A closed ledger alone is not acc
 
 On a disposable runtime of the pinned images (own project name, internal network, synthetic data only), with the unchanged candidate: synthetic source through extractor, preview, approval, apply, rerun and rollback; browser run of the administrator screen; refusal for other accounts. Evidence holds no credential or personal data.
 
+**Early runtime check.** Before the first candidate commit, the Orchestrator runs the first Engineer round on a disposable runtime of the pinned image; a failure goes to the second Engineer execution. The final candidate passes on that runtime with no diagnostic bypass or patch.
+
 ## 9. Entry gates
 
 | Gate | Requirement |
@@ -108,7 +113,7 @@ On a disposable runtime of the pinned images (own project name, internal network
 | E1 | Exact-version approval: path, commit, file SHA-256, bound base, budget, and the decisions of section 11 |
 | E2 | Base resolves in the Project Lead repository and satisfies section 2; `forge-start` accepts it, proved on a scratch copy |
 | E3 | Engine and plugin as pinned; no `CRM-LOAD-001` branch, worktree, ledger or record exists |
-| E4 | Runner isolation established for this engine immediately before dispatch: hardened mount and PID namespace launcher, clean environment, in-context denial of sensitive paths, positive control and process sentinel; execution identity and CLI version recorded. Any adverse result blocks dispatch |
+| E4 | Runner isolation established for this engine immediately before dispatch: hardened mount and PID namespace launcher, clean environment, in-context denial of sensitive paths, positive control and process sentinel; execution identity and CLI version recorded. Any adverse result blocks dispatch; a specialist can read the platform reference and cannot write it, and its digests match |
 | E5 | No other open ledger or Project Lead session for this project; coordinated with other users of the engine |
 | E6 | The order given to the Project Lead is read-only and byte-identical to the approved file |
 | E7 | Size check: if the Project Lead judges the outcome cannot fit the budget, it stops before Engineer dispatch and proposes the split |
