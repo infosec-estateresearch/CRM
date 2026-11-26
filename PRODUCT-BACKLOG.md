@@ -116,7 +116,7 @@ Nothing is deleted. "Replacement" names where the intent now lives.
 
 ## Delivery direction (2026-11-26)
 
-Items for the direction in [Issue #91](https://github.com/infosec-estateresearch/CRM/issues/91) and decisions CRM-D044 to CRM-D054. Listing an item grants no dispatch.
+Items for the direction in [Issue #91](https://github.com/infosec-estateresearch/CRM/issues/91) and decisions CRM-D044 to CRM-D062. Listing an item grants no dispatch.
 
 | ID | State | Item | Value / acceptance outline | Depends on |
 |---|---|---|---|---|
@@ -129,10 +129,6 @@ Items for the direction in [Issue #91](https://github.com/infosec-estateresearch
 | CRM-PBI-041 | PROVISIONAL | **P0.** **Non-destructive source delta, rejected records and historical Notes** | No overwritten ERm changes; originals preserved; Salesforce Notes handled; reconciliation and rollback | 005, 035 |
 | CRM-PBI-042 | PROVISIONAL | **P0.** **Production target and identity-preserving cutover** | Rehearsed promotion, recorded identity start date, rollback criteria; Outlook filing (014) unless deferred | 014, 039, 041 |
 | CRM-PBI-043 | PROVISIONAL | **P1.** **Transitional Salesforce Sync (administrator only)** | CRM-D050; on the existing extractor and loader; synthetic proof first; removable | 036, 041 |
-
-### Correction to the 2026-11-13 evidence (row for PBI-011)
-
-The common UAT password used at first load was replaced with unique passwords on 2026-11-26.
 
 ### Changes of state, 2026-11-26 (rows above are not rewritten)
 
