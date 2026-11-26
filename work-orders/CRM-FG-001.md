@@ -1,0 +1,130 @@
+WO: CRM-FG-001
+REPO: infosec-estateresearch/CRM
+HOST: DOCKER1
+ROOT: /srv/CRM/main
+WORKTREES: /srv/CRM/worktrees
+BASE: BOUND-AT-ENTRY
+BROWSER: yes
+
+# CRM-FG-001: FirmGroup
+
+## 1. Identity, purpose and authority
+
+| Item | Value |
+|---|---|
+| Version | v1.4 **PREPARED TEXT**, 2026-11-26. **Not approved. Cannot be dispatched:** the base is unbound. Dispatch needs a later version that names the base and its Issue, approved at that exact path and commit. Replaces v1.3 conditional draft (commit `7ed92dd63fbe8be355ecba491d8808c8b40b63d0`, pull request 62), whose source preflight remains a non-binding reference |
+| Issue | https://github.com/infosec-estateresearch/CRM/issues/61 |
+| Priority and parent item | P0. CRM-PBI-018 |
+| Product outcome | Firm groups are independent identities that staff manage safely before other systems rely on them |
+| Direction and decisions | Issue https://github.com/infosec-estateresearch/CRM/issues/91; CRM-D045, CRM-D046; CRM-D031 (parent and branch kept); `PROJECT-INITIATION-MANDATE.md` |
+| Governing FOUNDRY | `maff0000/foundry@39cc45c25aa5305b60f4c4af1557bee8cec0bf20`: `standards/work-order-contract.md`, `standards/secure-engineering.md`, `standards/product-records.md` |
+| Engine | ForgeV2 plugin 0.3.0, `63b6b8ab6c6d3c12d1ef3f0aeabe2ca22fbefb82`, at `/srv/forgev2`, unmodified |
+| Assignment | The Orchestrator (Rogue) dispatches one Project Lead (`forgev2-pl` on DOCKER1). Roles: Engineer, Auditor, Tester, DevSecOps |
+| Delivery autonomy | This order fixes outcomes, acceptance, boundaries and budget. Design, order of work and routine corrections belong to the Project Lead and specialists |
+
+## 2. Repository and workspace
+
+| Item | Value |
+|---|---|
+| Base | Unbound. Predecessor: **CRM-OPS-001; technically CRM-IDINT-001, CRM-BROWSER-001 and CRM-ACC-001**. The base will be a commit held by the Project Lead repository that contains the predecessor's accepted result and differs from GitHub `main` only by documents and delivery records, proved by a compare |
+| Branch and worktree | `forge/CRM-FG-001`, `/srv/CRM/worktrees/CRM-FG-001`, created by the engine |
+| Execution host and route | `DOCKER1:/srv/CRM/main`; the Orchestrator runs on another host and starts the Project Lead on DOCKER1 over its established administrative route |
+| Protected | ForgeV2 and Foundry installations; every existing ledger, branch, candidate and pull request; live runtimes; the checkout `ROOT` except as the engine itself writes it |
+
+## 3. Outcome and required behaviour
+
+A firm optionally belongs to one independent FirmGroup. Every membership and group state change is authorised on the server and audited, through every route. GroupID = `FirmGroup.id`.
+
+1. `FirmGroup`: native immutable identifier, required non-unique name, optional description, no Salesforce key, audited history. A firm has at most one group; none is valid. Parent and branch relationships are unaffected and membership is never inherited from them.
+2. Administrators and `ER User` manage groups and membership; every other account is refused.
+3. A group may be chosen **when a firm is created**, with the same authorisation and an identity audit record. Later changes (assign, unlink, move) use one guarded operation: a move is explicit, states the expected current group, and a stale expectation changes nothing.
+4. **Audit or fail:** a membership change does not succeed unless its identity audit record is stored.
+5. Every other route that could change membership or remove it is refused or equivalently guarded and audited: record edit, mass update, import, merge, relationship link and unlink from either side, formula scripts, bulk identifier attributes and cleanup.
+6. **No route deletes or merges a group.** Groups are retired or superseded under the rules of CRM-IDINT-001 section 3.5 (resolution, no cycles); a group with members cannot be retired without moving or unlinking them, and its identifier keeps resolving.
+7. A contact's GroupID is derived from its primary firm, shown read-only, and never stored on the contact.
+8. The firm page has a Group Members view listing other members with name, postcode, type and phone, paginated, with a clear empty state; the group page lists its members.
+9. No group is created or populated from Salesforce, legacy data or names.
+10. Identifiers and memberships survive backup, restore and upgrade; the identity register includes groups.
+
+## 4. Delivery boundary
+
+|  |  |
+|---|---|
+| In scope | `custom/Espo/Custom/`, `client/custom/`, `config/`, `scripts/` (seed, register, provisioning), `tests/`, `docs/` |
+| Must not change | `.forge/` of other orders unless the scope row names them, `work-orders/`, root product records, EspoCRM core, `load/`, parent and branch relationships and Salesforce key fields |
+| Excluded | group population or curated mapping (CRM-PBI-024); group reporting; any WIP link |
+| Dependencies and constraints | no new package, image, extension or vendored file; supported EspoCRM extension points only; no secret in the repository |
+| Data and systems | synthetic data only. No beta, production, real data, off-host store or Salesforce access. No deployment or merge. No WIP change (on hold) |
+
+### Existing behaviour this order supersedes
+Only the following existing expectations change. Another existing assertion may change only where it contradicts a criterion in section 5, and then it is extended or replaced with an equally strict one. Every changed existing test line is listed; the Auditor checks each. Nothing else is removed or weakened:
+
+1. Role levels and policy tests gain the `FirmGroup` scope for every role.
+2. Unit tests asserting the exact set of entities, hooks and routes are extended.
+3. The v1.3 rules that only a manager role manages groups and that an empty group may be deleted do not apply.
+
+## 5. Acceptance criteria
+
+| AC | Criterion | Evidence |
+|---|---|---|
+| A1 | Route matrix for every account kind: each cell refused-and-unchanged or performed-and-audited: **100 %** | suite; unit test for matrix completeness |
+| A2 | With audit storage unwritable, **0** membership changes succeed | suite |
+| A3 | Create-with-group works for both user types with one audit record, and is refused for others | suite, browser |
+| A4 | Two concurrent moves from the same expected group: exactly one succeeds | suite |
+| A5 | No route deletes or merges a group; retired and superseded groups resolve; cycles refused | suite |
+| A6 | The fingerprint of all parent relationships is identical before and after the full run | suite, operator report |
+| A7 | Derived GroupID matches the primary firm's group in every case, including after a move | suite |
+| A8 | Group Members view and group page behave as stated; a forced view error leaves the rest of the firm page working | operator browser run |
+| A9 | Groups and memberships identical after restore; upgrade and rollback keep every firm | operator report |
+| A10 | Every test suite present at the base, run as a non-root user as documented in the repository: **0 failures**. The only new skips allowed are tests needing PHP, gated like existing ones, each listed; the operator proof runs them with PHP present, none skipped for lack of PHP | delivery record, operator report |
+| A11 | On the same unchanged candidate commit: Auditor **PASS**, DevSecOps **PASS**, and Tester **PASS**, or **INCONCLUSIVE solely for browser and live-runtime behaviour** with every sandbox-executable criterion passing | ledger |
+| A12 | Operator proof (section 8) passes on that unchanged candidate | Orchestrator report |
+| A13 | Secret scan: 0 findings; no credential, host address, personal, customer or firm data in the change | scan |
+
+The order is complete only when A1 to A13 hold. A closed ledger alone is not acceptance.
+
+## 6. Verification by role
+
+| Role | Assigned verification and evidence |
+|---|---|
+| Engineer | implementation; automated tests for every criterion executable without a runtime; scripts for the runtime criteria that the operator proof runs; suite counts before and after; every changed existing test line listed |
+| Auditor | conformance to this order and section 4; superseded expectations limited to the list; no weakened assertion. PASS or FINDINGS with the candidate commit |
+| Tester | every criterion executable in the sandbox, including mutations showing new tests fail when a control is removed; states what was **not** executed. PASS, FINDINGS, or INCONCLUSIVE solely for browser and live-runtime behaviour |
+| DevSecOps | authorisation and bypass review of every server change; secrets, dependencies and secret scan. PASS or FINDINGS |
+
+**Browser gate.** The sandbox has no network, Docker, browser or EspoCRM, and PHP is not assumed. Under the engine's browser gate the Tester reports browser behaviour `inconclusive`, never as passed, and, when everything else passes, the Project Lead closes the ledger **ESCALATED** with that reason without a further Tester execution. Under CRM-D013 this is an acceptable intermediate result and **never final acceptance**: that needs section 8. Approval of this order approves this assignment.
+
+## 7. Budget and stop conditions
+
+- At most **3** executions each for Engineer, Auditor, Tester and DevSecOps. Any Engineer change restarts the three reviews. **Effective ceiling: two review rounds**, because the engine closes a ledger when one reviewer is inconclusive twice in a row, so a second round can end ESCALATED with findings open.
+- A corrective successor, if later needed, is a separate Work Order whose exact text is approved before dispatch; **at most 4 executions per role across both**.
+- **BLOCKED and escalated:** an exhausted budget, a failed gate, a needed change outside section 4, or a criterion that cannot be met safely.
+
+## 8. Operator proof (no specialist executions)
+
+On a disposable runtime of the pinned images (own project name, internal network, synthetic data only), with the unchanged candidate: deploy and upgrade with the real release scripts; run the suites; browser journeys for both user types; restore and rollback checks. Evidence holds no credential or personal data.
+
+## 9. Entry gates
+
+| Gate | Requirement |
+|---|---|
+| E0 | Predecessor accepted and its result on GitHub `main` |
+| E1 | Exact-version approval: path, commit, file SHA-256, bound base, budget, and the decisions of section 11 |
+| E2 | Base resolves in the Project Lead repository and satisfies section 2; `forge-start` accepts it, proved on a scratch copy |
+| E3 | Engine and plugin as pinned; no `CRM-FG-001` branch, worktree, ledger or record exists (an existing earlier ledger of another identifier is not reused) |
+| E4 | Runner isolation established for this engine immediately before dispatch: hardened mount and PID namespace launcher, clean environment, in-context denial of sensitive paths, positive control and process sentinel; execution identity and CLI version recorded. Any adverse result blocks dispatch |
+| E5 | No other open ledger or Project Lead session for this project; coordinated with other users of the engine |
+| E6 | The order given to the Project Lead is read-only and byte-identical to the approved file |
+
+## 10. Communications and completion
+
+- **Issue:** this order's Issue (named at base binding). Progress is event driven (gates, dispatch, candidate, verdicts, close, blockers). Escalation: Project Lead to Orchestrator; Orchestrator to the Architect (architecture, scope) and the Product Owner (product, permission, material risk).
+- **Logs (writer: Project Lead; readers: Orchestrator, Architect):** `/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-FG-001/` with `prompts/` and per-role `dispatch/` output; published to `.forge/CRM-FG-001/` on the branch.
+- **Completion report:** outcome, changed paths, base and candidate commits, acceptance results, the three verdicts and the candidate each assessed, execution counts, evidence locations, deviations, limitations and residual risks. The output is a candidate branch and draft pull request.
+
+## 11. Decisions the approval must state
+
+1. Dispatch of the exact bound version, with this budget.
+2. The superseded expectations of section 4 and the verification assignment of section 6.
+3. Group retire and supersede rules, including that a populated group cannot be retired.
+4. Rollback leaves the unused group table in place (as v1.3 recorded).
