@@ -1,0 +1,227 @@
+# devsecops review: CRM-IDINT-001R
+
+Worktree (read it; do not modify tracked files): /srv/CRM/worktrees/CRM-IDINT-001R
+Candidate commit: 4cb4beca2b8940d63e0706c2d3a50f81cfaee1df   Base commit: 65eab11d68583555b378dd2bff36a1d237db3d1a
+Scratch directory (yours to write): /srv/CRM/worktrees/.forge-scratch/CRM-IDINT-001R
+Assess the candidate independently against the Work Order below. Platform reference (read-only authority for every platform name, signature, route and setting): /srv/CRM/wo/CRM-IDINT-001R/reference/espocrm/ . Never copy any part of it into the worktree; never modify it. Leave no bytecode, cache or scratch file in the worktree (use PYTHONDONTWRITEBYTECODE=1 python3 -B). The repository is public: put no credential, host or exploit detail of anything running in your report.
+Unit suite command (set the variable inline; PHP at /usr/bin/php): CRM_PLATFORM_REFERENCE=/srv/CRM/wo/CRM-IDINT-001R/reference/espocrm PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests/unit
+There is no network, Docker, browser or EspoCRM runtime: state plainly what you did not execute.
+
+## Your assigned verification (Work Order section 6)
+Authorisation and bypass review of every server change; no secret, host or new dependency; secret scan (A15). PASS or FINDINGS.
+
+Final message: first line exactly one of PASS, FINDINGS or INCONCLUSIVE (with the candidate commit), then findings with short stable keys, severity (blocking/advisory) and evidence.
+
+## Work Order level direction (binding; governs the Work Order text below)
+
+## 1b. Rulings and binding terms of the approval
+
+1. Dispatch of this exact version: yes, once E0 to E6 pass.
+2. At most **two** executions per role (cumulative four with CRM-IDINT-001). **No further successor.**
+3. **All of A1 to A18 are mandatory.** Retire and supersede: **option (a)**, roles with permission to edit the record, through the controlled and audited workflow.
+4. Specialists are given the actual pinned EspoCRM source at `/srv/CRM/wo/CRM-IDINT-001R/reference/espocrm/`. It is the authority for every platform name, signature, route and setting.
+5. **A16 must really run** (Engineer and Tester), with PHP and the variable set inline: `CRM_PLATFORM_REFERENCE=/srv/CRM/wo/CRM-IDINT-001R/reference/espocrm`. A silent or reported skip is a blocking finding. This governs the "skipped only when the variable is unset" and "when PHP is present" wording of the Work Order.
+6. Required outcome: a functioning ERm that **starts successfully, permits legitimate business operations and prevents unaudited identity changes**. The final candidate must pass against the real pinned EspoCRM runtime **without diagnostic bypasses or patches**.
+7. No change to Foundry, ForgeV2, live ERm environments or third-party platform core. PR #97 stays rejected; historical evidence is preserved.
+8. Draft or approval-pending wording in the Work Order file predates this approval and is superseded; it is not a finding. A browser-only ESCALATED close is intermediate, never acceptance. Only PASS verdicts close an item.
+
+
+## Work Order (verbatim)
+
+WO: CRM-IDINT-001R
+REPO: infosec-estateresearch/CRM
+HOST: DOCKER1
+ROOT: /srv/CRM/main
+WORKTREES: /srv/CRM/worktrees
+BASE: 65eab11d68583555b378dd2bff36a1d237db3d1a
+KNOWN_COMMIT: 65eab11d68583555b378dd2bff36a1d237db3d1a
+BROWSER: yes
+
+# CRM-IDINT-001R: identity integrity, correction
+
+## 1. Identity, purpose and authority
+
+| Item | Value |
+|---|---|
+| Version | v1.0. The one corrective successor of CRM-IDINT-001 v1.1. In force only with an exact-version approval of this file on the Issue below |
+| Issue (status, evidence, approval, escalation) | https://github.com/infosec-estateresearch/CRM/issues/92 |
+| Priority and parent item | P0. CRM-PBI-035 |
+| Why | CRM-IDINT-001 closed ESCALATED with Auditor and DevSecOps PASS, then **failed the operator proof** on its candidate (section 3A). That candidate must not be merged |
+| Governing FOUNDRY | `maff0000/foundry@39cc45c25aa5305b60f4c4af1557bee8cec0bf20`: `standards/work-order-contract.md`, `standards/secure-engineering.md`, `standards/product-records.md`. The requirements needed here are stated here |
+| Engine | ForgeV2 plugin 0.3.0, `63b6b8ab6c6d3c12d1ef3f0aeabe2ca22fbefb82`, installed at `/srv/forgev2`, unmodified |
+| Assignment | The Orchestrator (Rogue) dispatches one Project Lead (`forgev2-pl` on DOCKER1). Roles: Engineer, Auditor, Tester, DevSecOps |
+| Settled rulings | Retire and supersede: option (a), roles with permission to edit the record, through the controlled and audited workflow. At most two executions per role. No further successor. The superseded expectations of section 4 stay accepted. A browser-only ESCALATED close is intermediate, never acceptance |
+| Delivery autonomy | This order fixes outcomes, acceptance, boundaries and budget. Design, order of work and routine corrections belong to the Project Lead and specialists |
+
+## 2. Repository and workspace
+
+| Item | Value |
+|---|---|
+| Base | the commit above: the final candidate of CRM-IDINT-001, held by the Project Lead repository. It carries that work; correct it, rewrite what the findings show cannot work, and keep what is sound |
+| Branch and worktree | `forge/CRM-IDINT-001R`, `/srv/CRM/worktrees/CRM-IDINT-001R`, created by the engine |
+| Execution host and route | `DOCKER1:/srv/CRM/main`; the Orchestrator runs on another host and starts the Project Lead on DOCKER1 over its established administrative route |
+| Platform reference | `/srv/CRM/wo/CRM-IDINT-001R/reference/espocrm/` (`application/`, `vendor/`): the EspoCRM sources extracted from the pinned image, read-only, outside the repository, never committed. SHA-256 of the sorted file-hash list of `application/`: `c06e7a4650db42d81f90ae2f02e8b5b75aea5631ef4a1fd51088ca9a21e1d187`. **It is the authority for every platform name, signature, route and setting** |
+| Protected | ForgeV2 and Foundry installations; every existing ledger, branch, candidate and pull request; live runtimes; the checkout `ROOT` except as the engine itself writes it |
+
+## 3. Outcome
+
+No identity relationship or identifier in ERm can be changed, removed or lost without authorisation and a durable audit record, by any user or service account, including administrators, through any application route. Legitimate changes remain available and audited.
+
+**Identifiers:** FirmID = `Account.id`; ContactID = `Contact.id`; `sfId` is a legacy cross-reference. **Identity relationships:** a firm's parent firm; a contact's primary firm; a contact's other firm links; an enquiry's firm; a successor link (3.5).
+
+### 3.0 Route matrix (the unit of acceptance)
+
+For **each relationship**, **each route** that can reach it and **each account kind**, the result is either *refused, with nothing changed* or *performed, with its identity audit record*.
+
+| Axis | Members |
+|---|---|
+| Routes | record create; record edit; link and unlink from either side, including panel selection and bulk linking; mass update; delete and mass delete; record merge; CSV import; creation with a supplied identifier; retire and supersede; the scheduled cleanup job |
+| Account kinds | administrator; every human role present at the base; the import service account |
+
+A route the product exposes and this list omits is added, not ignored.
+
+### 3.1 Audit or fail
+An identity relationship change does not succeed unless its audit record is durably stored. The record names actor, UTC time, the record changed, and previous and new identifiers (empty where none). If it cannot be stored, the change is refused and nothing changes.
+
+### 3.2 Audit protection
+No role, including administrator, can edit or delete identity audit records through the application. Host-level and database-level tampering remains possible and is documented as a residual risk.
+
+### 3.3 Primary firm
+A contact's primary firm is always one of its linked firms. Removing that link is refused unless the same change sets another linked firm as primary or deliberately clears the primary. Existing exceptions are **not repaired and no primary firm is invented**: a read-only report lists them (counts and identifiers).
+
+### 3.4 No loss of identity records
+Deleting and merging firms and contacts is refused for every account. Automatic removal of deleted records and of audit history is off.
+
+### 3.5 Retire and supersede
+Every issued firm and contact identifier resolves to `active`, `retired`, or `superseded` with a successor. Roles with permission to edit the record may retire or supersede it, through the controlled and audited workflow (ruled: option (a)). A successor is an existing record of the same kind, never itself, and cycles are refused; resolution follows the chain to its end. Retired and superseded records stay readable. State changes are audited under 3.1. **Interim rule:** a mistaken or test record is retired or superseded, never deleted; removal of test records before identity genesis is decided in CRM-CUT-001.
+
+### 3.6 Settings travel with the release
+The release applies and reads back: deleted-record cleanup off, audit cleanup off, user action history 6 months, sign-in records 13 months. A deployment fails if they are not in force. `bin/command config:set` is the setting mechanism the release already uses.
+
+### 3.7 Identifiers are issued only by ERm
+No create route accepts a supplied identifier; CSV import is unavailable for firms, contacts and enquiries.
+
+### 3.8 Clean refusal
+Input longer than a stored field allows (contact job title is the known case) is refused as a validation error and creates or changes nothing.
+
+### 3.9 Preserved behaviour and the scope guard
+The loader and synthetic seed work as before. The Account "Open WIP / Revenue" item and its handler are unchanged (WIP is on hold). `tests/unit/test_wip_link.py` measures changed paths from an earlier Work Order's base, so it fails on any later change outside that order's list (it fails on `main` today): bind it to the delivery it was written to protect, keeping that protection, with a test showing it still detects an out-of-scope change.
+
+Configuration-only controls may be built first and server controls added after. There is no partial acceptance.
+
+## 3A. Operator proof findings on `65eab11d68583555b378dd2bff36a1d237db3d1a` (all blocking)
+
+Run on a disposable stack of the pinned images with synthetic data. P1 and P4 stop the product before any other behaviour can be reached; later items were observed on a diagnostic copy with those two bypassed, or read in the platform sources. The Engineer corrects every item; each reviewer verifies each item against the platform reference.
+
+| # | Finding | Required correction |
+|---|---|---|
+| P1 | A clean installation does not start: the application restarts in a loop with a fatal error, because custom hooks implement `Espo\Core\Hook\Hook\BeforeMassRelate`; `BeforeRelate` and `BeforeUnrelate` do not exist either | The candidate installs and starts. No custom code names a platform symbol that does not exist |
+| P2 | The platform dispatches **no** before-relation hook to custom code: `Core/ORM/Repository/HookMediator` overrides only the after-relate, after-unrelate and after-mass-relate methods. The refusal design therefore cannot take effect, and with the unloadable files removed the live identity suite fails on the relation routes (A1, A3, A5, A10) | Every route of 3.0 is refused or audited through extension points the platform really calls |
+| P3 | The live suite tests merge only on a controller route the candidate itself defines, never on the platform's merge route. On that route merge is refused today only incidentally, by the removal control (observed: refused, links unchanged) | Merge is refused deliberately, and the suite exercises the platform's merge route |
+| P4 | Every create of a firm or contact, by every account including the administrator, is refused as a supplied identifier: the platform has assigned the identifier before the before-save hook runs. Observed separately: at the API the platform discards a client-supplied identifier on create | Ordinary creation works for every permitted account. A supplied identifier is never used; each supplied-identifier cell proves it, and is refused unchanged or performed with its audit record |
+| P5 | Release settings are wrong: the audit-history cleanup switch is `cleanupAudit` (default on, and still on after the candidate's settings are applied), not `cleanupAuditLog`; `cleanupAuthLogPeriod` is read by the platform but absent from `defaults/config.php`, so the "known setting" check refuses it. The A7 evidence counts no audit-history entry | 3.6 and 3.4 hold on the real platform, the release still fails on an unknown or wrong setting, and A7 shows audit history survives the cleanup job |
+| P6 | `tests/unit/test_identity.py` asserts that `docs/IDENTITY.md` and `docs/LOGGING.md` do not exist. Both are on `main`, so the unit suite fails once merged | Remove those two assertions; keep the WIP assertions |
+
+Stages that passed on a diagnostic copy and must keep passing: the existing live suites, the synthetic load (same relationship totals as the base run, second load writes nothing), over-length refusal, and legitimate edits in a real browser for every human account kind. The repair of 3.9 is already in the base; keep it.
+
+## 3B. Platform facts (verify each in the reference; they are inputs, not a design)
+
+- Before hooks available to custom code include `BeforeSave` and `BeforeRemove`; relation hooks are after-hooks only (`application/Espo/Core/Hook/Hook/`).
+- Single link and unlink through the record service call record link hooks (`Core/Record/Hook/LinkHook`, `UnlinkHook`; metadata `recordDefs.<Entity>.beforeLinkHookClassNameList` and `beforeUnlinkHookClassNameList`).
+- Mass link (`Core/Record/Service::massLink`) relates without those record hooks and is available only where `recordDefs.<Entity>.relationships.<link>.massLink` is set.
+- Other code relates through the ORM repository directly; it reaches no record hook.
+- Merge is a record action: `POST /api/v1/Action` (`Core/Action/`), run in a transaction; `recordDefs.<Entity>.actions.merge.disabled` disables it (`Core/Action/ActionFactory`).
+- The contact and firm junction entity is `AccountContact`.
+- Cleanup settings are read in `Classes/Jobs/Cleanup.php` and `Classes/Cleanup/Audit.php`.
+
+## 3C. Rules that stop a repeat
+
+1. Every platform interface, class, method signature, metadata key, route and setting the change relies on is cited by file in the delivery record, from the reference.
+2. Unit-test stand-ins declare no platform symbol that is absent from the reference, and match its signatures.
+3. A refusal is proven only by the control's own refusal on a route that exists. A 404, a 405, an install failure or a refusal of the set-up step is a test failure, never a pass.
+
+## 4. Delivery boundary
+
+| | |
+|---|---|
+| In scope | `custom/Espo/Custom/`, `config/`, `scripts/`, `tests/`, existing and new files under `docs/` |
+| Must not change | `deploy/`, `load/`, `client/custom/`, `.forge/` of other orders, `work-orders/`, root product records, EspoCRM core. Do **not** create `docs/IDENTITY.md` or `docs/LOGGING.md`: the records change adds them on `main` |
+| Excluded | FirmGroup (CRM-FG-001); the independent identity register and restore reconciliation (CRM-OPS-001); user types, sign-in security and menus (CRM-ACC-001) beyond what refusal above needs; any WIP change |
+| Dependencies and constraints | no new package, image, extension or vendored file; supported EspoCRM metadata and server extension points only; no secret in the repository |
+| Data and systems | synthetic data only. No beta, production, real data, NAS or Salesforce. No deployment or merge |
+
+### Behaviour this order supersedes
+These existing expectations change with the new behaviour. Another existing assertion may change only where it contradicts a criterion in section 5, and then it is extended or replaced with an equally strict one. Every changed existing test line is listed; the Auditor checks each. Nothing else is removed or weakened:
+
+1. The acceptance suites under `tests/acceptance/`: deleting a firm or contact, including by an administrator after an enquiry is removed, becomes a refusal; setup and teardown no longer delete firms or contacts.
+2. Removal of an accepted near-duplicate in those suites uses retirement.
+3. Unit tests that assert the exact set or location of server hooks (`tests/unit/test_metadata.py` allowed hook folders; `tests/unit/test_access_policy.py` hook list) may be extended to include what this order adds, keeping their other assertions.
+4. The guard that refuses deleting a firm with enquiries may be replaced by the general refusal, with its unit tests rewritten to prove that refusal.
+5. `docs/BETA.md` and `docs/ACCESS.md` statements about deleting or removing records are updated. `scripts/uat_records.py` is read-only and keeps working.
+6. `ER Manager` may delete contacts at the base (`config/access/roles.json`). That level may become `no`, with the matching expectation in `tests/unit/access_policy.py`, its fixtures and the `docs/ACCESS.md` table. No other role level changes.
+
+Synthetic tests do not clean up by deleting firms or contacts: they use unique names and a disposable stack that is torn down.
+
+## 5. Acceptance criteria
+
+| AC | Criterion | Evidence |
+|---|---|---|
+| A1 | A suite under `tests/acceptance/` covers every cell of 3.0 and asserts refused-and-unchanged or performed-and-audited; a unit test fails if a required cell is missing | matrix report: **100 % pass** |
+| A2 | For each relationship, every human role allowed to edit it at the base can still change it by at least one supported route, with the audit record | suite |
+| A3 | With audit storage made unwritable, **0** identity relationship changes succeed on any route | suite |
+| A4 | Edit and delete of identity audit records are refused for every account | suite |
+| A5 | After the matrix run there are **0 new** contacts breaking 3.3; the report lists exactly the seeded exceptions and changes nothing | suite, before and after digests |
+| A6 | Delete, mass delete and merge of firms and contacts are refused for every account | suite |
+| A7 | The cleanup job run on data aged past every period removes **0** firm or contact records, **0** identity audit records and **0** audit-history entries; the release fails when any setting of 3.6 is wrong | suite, unit tests |
+| A8 | Supplied identifiers are never used; CSV import is refused for firms, contacts and enquiries | suite |
+| A9 | Over-length input returns a validation error; record counts unchanged | suite |
+| A10 | Every identifier created in the run resolves per 3.5; self, cycle, wrong-kind and missing successor are refused | suite |
+| A11 | Synthetic seed and loader on the candidate: no new refusal, relationship totals equal to the base run, second load writes nothing | operator report |
+| A12 | `python3 -m unittest discover -s tests/unit` as a non-root user: **0 failures**. The only new skips allowed are tests that need PHP, gated like the existing ones, and each is listed. The operator proof runs the suite **with PHP present: 0 failures, none skipped for lack of PHP**. Baseline on the base commit with PHP present: 683 tests, 0 failures | delivery record, operator report |
+| A13 | On the same unchanged candidate commit: Auditor **PASS**, DevSecOps **PASS**, and Tester **PASS**, or **INCONCLUSIVE solely for browser and live-runtime behaviour** with every sandbox-executable criterion passing (section 6) | ledger |
+| A14 | Operator runtime and browser proof (section 8) passes on that unchanged candidate | Orchestrator report |
+| A15 | Secret scan: 0 findings; no host address or credential in the change | scan |
+| A16 | A unit test, run with PHP and the reference path in `CRM_PLATFORM_REFERENCE`, loads every custom PHP class against the real platform sources and fails on any missing class or interface or incompatible signature; it also fails if a class named in custom metadata does not exist or a stand-in declares an unknown platform symbol. It is skipped only when the variable is unset; the loop and the operator proof run it with the variable set, and report it as run | delivery record, operator report |
+| A17 | The unit suite has **0 failures** on the candidate merged with `main` at `4183e25aad8343a5bcd7e320d0d1e032f6871ec9` (the one expected conflict, `tests/unit/test_wip_link.py`, resolves to the candidate's file) | operator report |
+| A18 | In the live suite every refused cell asserts the control's own refusal status and shows the route exists | suite, matrix report |
+
+The order is complete only when A1 to A18 hold. A closed ledger alone is not acceptance.
+
+## 6. Verification by role
+
+| Role | Assigned verification and evidence |
+|---|---|
+| Engineer | implementation; the suites of A1 to A10 and A18; A16 run with the reference; platform citations (3C); unit counts before and after; every changed existing test line listed |
+| Auditor | conformance to this order, section 4 and sections 3A to 3C, every platform claim checked in the reference; each superseded expectation is limited to the list; matrix completeness; no weakened assertion. PASS or FINDINGS with the candidate commit |
+| Tester | every criterion executable in the sandbox, including mutations showing the new unit tests fail when a control is removed. Runs A16 with `CRM_PLATFORM_REFERENCE=/srv/CRM/wo/CRM-IDINT-001R/reference/espocrm` when PHP is present. States plainly what was not executed; EspoCRM and a browser are not executed in the sandbox. PASS, FINDINGS, or INCONCLUSIVE solely for browser and live-runtime behaviour |
+| DevSecOps | authorisation and bypass review of every server change; no secret, host or new dependency; secret scan. PASS or FINDINGS |
+
+**Browser gate.** The sandbox has no network, Docker, browser or EspoCRM, and PHP is not assumed. Browser behaviour is material, so under the engine's browser gate the Tester reports it `inconclusive`, never as passed, and, when everything else passes, the Project Lead closes the ledger **ESCALATED** with that reason, **without a further Tester execution to retry it**. Under CRM-D013 this is an acceptable intermediate result when everything else passes, and **never final acceptance**: that needs section 8, which is mandatory. A `DELIVERED` close is therefore not expected on this host. The approval of CRM-IDINT-001 assigned browser and live-runtime verification to the operator; it applies here.
+
+## 7. Budget, correction and stop conditions
+
+- **This ledger:** at most **2** executions each for Engineer, Auditor, Tester and DevSecOps (cumulative with CRM-IDINT-001: four per role). The engine would allow more; **they are not available**. A void run counts. Any Engineer change restarts the three reviews.
+- **No further successor.** Open findings at the limit, or a failed operator proof, are escalated.
+- **BLOCKED and escalated:** an exhausted budget, a failed gate, a missing or altered platform reference, a needed change outside section 4, or a criterion that cannot be met safely.
+
+## 8. Operator runtime and browser proof (no specialist executions)
+
+On a disposable runtime of the pinned images, synthetic data only, on a host where the project names fixed by the release scripts cannot collide with a live stack (any other departure from this description is stated in the report), with the unchanged candidate: PHP syntax check; deployment with the real release scripts; the suites of A1 to A11 and A18; the A16 check against the reference; the 3.6 settings read back on the real platform; the unit suite with PHP present (A12); and a real-browser check of firm, contact and enquiry screens for each human account kind (legitimate edits work; refused actions are absent or fail with a clear message; no script error). Evidence holds no credential.
+
+## 9. Entry gates
+
+| Gate | Requirement |
+|---|---|
+| E0 | The defect of CRM-IDINT-001 was reproduced (recorded on Issue #92); the findings of section 3A are held in the Orchestrator's private evidence |
+| E1 | Exact-version approval: path, commit, file SHA-256, base and budget |
+| E2 | `BASE` and `KNOWN_COMMIT` resolve in the Project Lead repository; `forge-start` accepts the base, proved on a scratch copy; unit suite there: 0 failures |
+| E3 | Engine and plugin as pinned and unmodified; no `CRM-IDINT-001R` branch, worktree, ledger or record exists |
+| E4 | Runner isolation established immediately before dispatch, including that a specialist can read the platform reference and cannot write it; its digest matches section 2 |
+| E5 | No other open ledger or Project Lead session for this project |
+| E6 | The order given to the Project Lead is read-only and byte-identical to the approved file |
+
+## 10. Communications and completion
+
+- **Issue:** #92. Progress is event driven (gates, dispatch, candidate, verdicts, close, blockers). Escalation: Project Lead to Orchestrator; Orchestrator to the Architect (architecture, scope) and the Product Owner (product, permission, material risk).
+- **Logs (writer: Project Lead; readers: Orchestrator, Architect):** `/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-IDINT-001R/` with `prompts/` and per-role `dispatch/` output; published to `.forge/CRM-IDINT-001R/` on the branch.
+- **Completion report:** outcome, changed paths, base and candidate commits, results for A1 to A18, the three verdicts and the candidate each assessed, execution counts, evidence locations, deviations, limitations and residual risks. The output is a candidate branch and draft pull request (also on an ESCALATED close). Integration to `main` is a separate reviewed step, because the base precedes `main` by documents and one test file's history.

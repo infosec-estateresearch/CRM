@@ -1,0 +1,199 @@
+{
+  "base": "65eab11d68583555b378dd2bff36a1d237db3d1a",
+  "base_sha": "65eab11d68583555b378dd2bff36a1d237db3d1a",
+  "branch": "forge/CRM-IDINT-001R",
+  "candidate": "4cb4beca2b8940d63e0706c2d3a50f81cfaee1df",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 2,
+    "tester": 1
+  },
+  "created": "2026-11-26T16:29:24Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-26T16:29:36Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 124,
+      "output": "dispatch/0-engineer.json",
+      "reported": null,
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-26T16:59:36Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "specialist exit 124, no usable result: forge-dispatch: no result within 1800s; stopped",
+      "outcome": "void",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-26T16:59:36Z",
+      "type": "result"
+    },
+    {
+      "candidate": null,
+      "id": 3,
+      "n": 2,
+      "role": "engineer",
+      "round": 2,
+      "t": "2026-11-26T16:59:49Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/3-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 3,
+      "t": "2026-11-26T17:01:59Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "exec 2/2: unit work done (716 tests OK, A16 19 run); live suites unexecuted; test_wip_link binding and itemised changed-test list not done",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 2,
+      "spawn": 3,
+      "t": "2026-11-26T17:02:09Z",
+      "type": "result"
+    },
+    {
+      "round": 2,
+      "sha": "4cb4beca2b8940d63e0706c2d3a50f81cfaee1df",
+      "t": "2026-11-26T17:02:14Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "4cb4beca2b8940d63e0706c2d3a50f81cfaee1df",
+      "id": 7,
+      "n": 1,
+      "role": "auditor",
+      "round": 2,
+      "t": "2026-11-26T17:02:24Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "4cb4beca2b8940d63e0706c2d3a50f81cfaee1df",
+      "id": 8,
+      "n": 1,
+      "role": "tester",
+      "round": 2,
+      "t": "2026-11-26T17:02:24Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "4cb4beca2b8940d63e0706c2d3a50f81cfaee1df",
+      "id": 9,
+      "n": 1,
+      "role": "devsecops",
+      "round": 2,
+      "t": "2026-11-26T17:02:24Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/7-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 7,
+      "t": "2026-11-26T17:09:06Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/8-tester.json",
+      "reported": "inconclusive",
+      "role": "tester",
+      "spawn": 8,
+      "t": "2026-11-26T17:09:06Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/9-devsecops.json",
+      "reported": "findings",
+      "role": "devsecops",
+      "spawn": 9,
+      "t": "2026-11-26T17:09:06Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "4cb4beca2b8940d63e0706c2d3a50f81cfaee1df",
+      "findings": [],
+      "note": "PASS on 4cb4bec; 716 unit tests, A16 ran",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 2,
+      "spawn": 7,
+      "t": "2026-11-26T17:09:15Z",
+      "type": "result"
+    },
+    {
+      "candidate": "4cb4beca2b8940d63e0706c2d3a50f81cfaee1df",
+      "findings": [],
+      "note": "INCONCLUSIVE solely for browser/live-runtime (A14) and A17 (main commit absent from object store); sandbox criteria pass: 716 OK, A16 19 run, 400 matrix cells, 7 mutations fail the unit tests",
+      "outcome": "inconclusive",
+      "role": "tester",
+      "round": 2,
+      "spawn": 8,
+      "t": "2026-11-26T17:09:15Z",
+      "type": "result"
+    },
+    {
+      "candidate": "4cb4beca2b8940d63e0706c2d3a50f81cfaee1df",
+      "findings": [
+        {
+          "key": "putback-swallowed",
+          "severity": "advisory"
+        },
+        {
+          "key": "relation-after-hook-window",
+          "severity": "advisory"
+        }
+      ],
+      "note": "FINDINGS verdict (both items reviewer-rated advisory); putBack() swallows a failed compensating write, spot-check confirmed; no residual-risk note in docs",
+      "outcome": "findings",
+      "role": "devsecops",
+      "round": 2,
+      "spawn": 9,
+      "t": "2026-11-26T17:09:15Z",
+      "type": "result"
+    },
+    {
+      "note": "Tester INCONCLUSIVE solely for browser/live-runtime (WO s6, no retry); DevSecOps FINDINGS (advisory); Engineer budget (2) exhausted; operator proof s8 pending",
+      "outcome": "ESCALATED",
+      "t": "2026-11-26T17:09:30Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-IDINT-001R",
+  "host": "docker1",
+  "known_commit": "65eab11d68583555b378dd2bff36a1d237db3d1a",
+  "limit": 4,
+  "outcome": "ESCALATED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-IDINT-001R",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 2,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-IDINT-001R",
+  "wo": "CRM-IDINT-001R",
+  "worktree": "/srv/CRM/worktrees/CRM-IDINT-001R"
+}
