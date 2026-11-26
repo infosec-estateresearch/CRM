@@ -45,4 +45,4 @@
 
 ## 6. Known risks, accepted or escalated
 - **Write-capable identity (accepted by the PO, temporary).** The existing credential can write to Salesforce. It is constrained by the independently tested allowlist, an operator-only procedure and a time-limited waiver. Retire it when a dedicated read-only identity exists, or before Summer '27 at the latest.
-- **Exposure of that credential outside the CRM (escalated, not remediated here).** On 2026-11-10, a nightly host backup held a copy of the ELT env file that any local user can read. It was reported to the PO for remediation by the owner of that host job.
+- **A related credential-handling item** outside the CRM is recorded privately and is the responsibility of the owner of the system concerned (recorded 2026-11-26).
