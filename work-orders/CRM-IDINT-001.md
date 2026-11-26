@@ -13,7 +13,7 @@ BROWSER: yes
 
 | Item | Value |
 |---|---|
-| Version | v1.0 **DRAFT**, 2026-11-26. **Not approved. No dispatch.** Approval must name this path and the commit that contains it, on the Issue below |
+| Version | v1.1 **DRAFT**, 2026-11-26. Replaces v1.0 (commit `1f0ba1762e66d8589d6cb0f1d0f8ebbb887103c0`), published the same day and never approved: the review ceiling, retire permission and two verification rows are corrected. **Not approved. No dispatch.** Approval must name this path and the commit that contains it, on the Issue below |
 | Issue (status, evidence, approval, escalation) | https://github.com/infosec-estateresearch/CRM/issues/92 |
 | Priority and parent item | P0. CRM-PBI-035 (identity integrity), proposed in the records change of 2026-11-26 |
 | Product outcome | ERm can be the authoritative source of FirmID and ContactID for Estate Research's applications |
@@ -62,7 +62,7 @@ A contact's primary firm is always one of its linked firms. Removing that link i
 Deleting and merging firms and contacts is refused for every account. Automatic removal of deleted records and of audit history is off.
 
 ### 3.5 Retire and supersede
-Every issued firm and contact identifier resolves to `active`, `retired`, or `superseded` with a successor. A role that may edit the record may retire or supersede it. A successor is an existing record of the same kind, never itself, and cycles are refused; resolution follows the chain to its end. Retired and superseded records stay readable. State changes are audited under 3.1. **Interim rule:** a mistaken or test record is retired or superseded, never deleted; removal of test records before identity genesis is decided in CRM-CUT-001.
+Every issued firm and contact identifier resolves to `active`, `retired`, or `superseded` with a successor. Who may do so is decided by the approval, which states one of: **(a)** any role that may edit the record (proposed); **(b)** administrators only. No ruling has decided it. A successor is an existing record of the same kind, never itself, and cycles are refused; resolution follows the chain to its end. Retired and superseded records stay readable. State changes are audited under 3.1. **Interim rule:** a mistaken or test record is retired or superseded, never deleted; removal of test records before identity genesis is decided in CRM-CUT-001.
 
 ### 3.6 Settings travel with the release
 The release applies and reads back: deleted-record cleanup off, audit cleanup off, user action history 6 months, sign-in records 13 months. A deployment fails if they are not in force. `bin/command config:set` is the setting mechanism the release already uses.
@@ -115,7 +115,7 @@ Synthetic tests do not clean up by deleting firms or contacts: they use unique n
 | A9 | Over-length input returns a validation error; record counts unchanged | suite |
 | A10 | Every identifier created in the run resolves per 3.5; self, cycle, wrong-kind and missing successor are refused | suite |
 | A11 | Synthetic seed and loader on the candidate: no new refusal, relationship totals equal to the base run, second load writes nothing | operator report |
-| A12 | `python3 -m unittest discover -s tests/unit` as a non-root user: **0 failures**, no new skip. Baseline 2026-11-26: base 624 tests, 0 failures, 11 skipped; GitHub `main` has 1 failure, the guard of 3.9 | delivery record |
+| A12 | `python3 -m unittest discover -s tests/unit` as a non-root user: **0 failures**. The only new skips allowed are tests that need PHP, gated like the existing ones, and each is listed. The operator proof runs the suite **with PHP present: 0 failures, none skipped for lack of PHP**. Baseline 2026-11-26 without PHP: base 624 tests, 0 failures, 11 skipped; GitHub `main` has 1 failure, the guard of 3.9 | delivery record, operator report |
 | A13 | On the same unchanged candidate commit: Auditor **PASS**, DevSecOps **PASS**, and Tester **PASS**, or **INCONCLUSIVE solely for browser and live-runtime behaviour** with every sandbox-executable criterion passing (section 6) | ledger |
 | A14 | Operator runtime and browser proof (section 8) passes on that unchanged candidate | Orchestrator report |
 | A15 | Secret scan: 0 findings; no host address or credential in the change | scan |
@@ -128,27 +128,27 @@ The order is complete only when A1 to A15 hold. A closed ledger alone is not acc
 |---|---|
 | Engineer | implementation; the suites of A1 to A10; unit counts before and after; every changed existing test line listed |
 | Auditor | conformance to this order and section 4; each superseded expectation is limited to the list; matrix completeness; no weakened assertion. PASS or FINDINGS with the candidate commit |
-| Tester | every criterion executable in the sandbox, including mutations showing the new unit tests fail when a control is removed. States plainly that PHP, EspoCRM and a browser were **not** executed. PASS or FINDINGS |
+| Tester | every criterion executable in the sandbox, including mutations showing the new unit tests fail when a control is removed. States plainly that PHP, EspoCRM and a browser were **not** executed. PASS, FINDINGS, or INCONCLUSIVE solely for browser and live-runtime behaviour |
 | DevSecOps | authorisation and bypass review of every server change; no secret, host or new dependency; secret scan. PASS or FINDINGS |
 
-**Browser gate.** The sandbox has no network, Docker, browser or EspoCRM, and PHP is not assumed. Browser behaviour is material, so under the engine's browser gate the Tester reports it `inconclusive`, never as passed, and the Project Lead then closes the ledger **ESCALATED** with that reason, **without a further Tester execution to retry it**. Under CRM-D013 this is an acceptable intermediate result when everything else passes, and **never final acceptance**: that needs section 8, which is mandatory. A `DELIVERED` close is therefore not expected on this host. Approval of this order approves this assignment of browser and live-runtime verification to the operator.
+**Browser gate.** The sandbox has no network, Docker, browser or EspoCRM, and PHP is not assumed. Browser behaviour is material, so under the engine's browser gate the Tester reports it `inconclusive`, never as passed, and, when everything else passes, the Project Lead closes the ledger **ESCALATED** with that reason, **without a further Tester execution to retry it**. Under CRM-D013 this is an acceptable intermediate result when everything else passes, and **never final acceptance**: that needs section 8, which is mandatory. A `DELIVERED` close is therefore not expected on this host. Approval of this order approves this assignment of browser and live-runtime verification to the operator.
 
 ## 7. Budget, correction and stop conditions
 
-- **This ledger:** at most **3** executions each for Engineer, Auditor, Tester and DevSecOps. Any Engineer change restarts the three reviews.
-- **Standing correction authority (requested; applies only if the approval grants it):** if the operator proof finds a defect after the ledger is closed on an otherwise passing candidate, one corrective successor `CRM-IDINT-001-C` with the same outcome, boundaries and acceptance may be dispatched from that candidate **without further approval**. **Total across both: at most 4 per role**; the successor records the cumulative counts. Without that grant, such a defect is escalated.
+- **This ledger:** at most **3** executions each for Engineer, Auditor, Tester and DevSecOps. Any Engineer change restarts the three reviews. **Effective ceiling: two review rounds.** The engine closes a ledger when one reviewer is inconclusive twice in a row, before it routes any further correction, and the browser gate makes the Tester inconclusive on each otherwise passing round. A second round can therefore end **ESCALATED with findings still open**.
+- **Standing correction authority (requested; applies only if the approval grants it):** one corrective successor `CRM-IDINT-001-C` may be dispatched **without further approval** from the last candidate, with the same outcome, boundaries and acceptance, when (i) this ledger closes ESCALATED under the rule above with open findings, or (ii) the operator proof finds a defect. It carries those findings. **Total across both: at most 4 per role**, recorded cumulatively; it adds no execution beyond that limit and no further successor exists. Without the grant, either case is escalated.
 - **BLOCKED and escalated:** an exhausted budget, a failed gate, a needed change outside section 4, or a criterion that cannot be met safely.
 
 ## 8. Operator runtime and browser proof (no specialist executions)
 
-On a disposable runtime of the pinned images (own project name, internal network, synthetic data only), with the unchanged candidate: PHP syntax check; deployment with the real release scripts; the suites of A1 to A11; and a real-browser check of firm, contact and enquiry screens for each human account kind (legitimate edits work; refused actions are absent or fail with a clear message; no script error). Evidence holds no credential.
+On a disposable runtime of the pinned images (own project name, internal network, synthetic data only), with the unchanged candidate: PHP syntax check; deployment with the real release scripts; the suites of A1 to A11; the unit suite with PHP present (A12); and a real-browser check of firm, contact and enquiry screens for each human account kind (legitimate edits work; refused actions are absent or fail with a clear message; no script error). Evidence holds no credential.
 
 ## 9. Entry gates
 
 | Gate | Requirement |
 |---|---|
 | E0 | **First entry activity:** the defect this order addresses is reproduced on synthetic `crm-dev` and recorded (private evidence; counts and outcome on the Issue). If it cannot be reproduced, stop and report |
-| E1 | Exact-version approval: path, commit, file SHA-256, base, budget, and whether the correction authority of section 7 is granted |
+| E1 | Exact-version approval: path, commit, file SHA-256, base, budget, whether the correction authority of section 7 is granted, and the section 3.5 choice |
 | E2 | `BASE` and `KNOWN_COMMIT` resolve in the Project Lead repository; GitHub `main` differs from the base only by Markdown documents; `forge-start` accepts the base, proved on a scratch copy |
 | E3 | Engine and plugin as pinned and unmodified; no `CRM-IDINT-001` branch, worktree, ledger or record exists |
 | E4 | Runner isolation established for this engine immediately before dispatch: hardened mount and PID namespace launcher, clean environment, in-context denial of sensitive paths, positive control and process sentinel; execution identity and CLI version recorded. Any adverse result blocks dispatch |
