@@ -139,6 +139,55 @@ namespace {
     run('create.enquiry_with_firm', function ($em) { seed($em, 'Account', 'a1'); save($em, newOf('Opportunity', ['accountId' => 'a1'])); });
     run('create.contact_primary_not_linked', fn($em) => save($em, newOf('Contact', ['accountId' => 'a1', 'accountsIds' => ['a2']])));
     run('create.contact_primary_linked', fn($em) => save($em, newOf('Contact', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']])));
+    run('create.contact_with_links', function ($em) { save($em, newOf('Contact', ['accountId' => 'a1', 'accountsIds' => ['a1', 'a2']])); });
+    run('create.contact_links_without_primary', function ($em) { save($em, newOf('Contact', ['accountsIds' => ['a1', 'a2']])); });
+    run('create.contact_links_duplicate_ids', function ($em) { save($em, newOf('Contact', ['accountsIds' => ['a1', 'a1']])); });
+    run('create.contact_links_then_core_fires_relate', function ($em) {
+        // Core may also fire beforeRelate for each link while it writes the rows: no double record.
+        $c = newOf('Contact', ['accountsIds' => ['a1', 'a2']]);
+        save($em, $c);
+        $c->forceNew();
+        relate($em, $c, 'accounts', seed($em, 'Account', 'a1'));
+        relate($em, $c, 'accounts', seed($em, 'Account', 'a2'));
+    });
+    run('create.contact_links_relate_fires_before_after_save', function ($em) {
+        $c = newOf('Contact', ['accountsIds' => ['a1']]);
+        $o = new O\SaveOptions([]);
+        hook('Contact', 'BeforeSave', $em)->beforeSave($c, $o);
+        $em->saveEntity($c);
+        $c->forceNew();
+        relate($em, $c, 'accounts', seed($em, 'Account', 'a1'));
+        hook('Contact', 'AfterSave', $em)->afterSave($c, $o);
+    });
+    run('create.contact_links_audit_unwritable', function ($em) {
+        $em->failAudit = true;
+        try {
+            save($em, newOf('Contact', ['accountsIds' => ['a1', 'a2']]));
+        } finally {
+            echo 'link_create_contacts_left=' . count($em->store['Contact'] ?? []) . "\n";
+            echo 'link_create_link_rows_left=' . count($em->links['AccountContact'] ?? []) . "\n";
+        }
+    });
+    run('create.contact_links_audit_fails_on_second_link', function ($em) {
+        // The first link is audited, the store then fails: the create is undone, links and all.
+        $em->failAuditAfter = 2;
+        try {
+            save($em, newOf('Contact', ['accountsIds' => ['a1', 'a2']]));
+        } finally {
+            echo 'link_create2_contacts_left=' . count($em->store['Contact'] ?? []) . "\n";
+            echo 'link_create2_link_rows_left=' . count($em->links['AccountContact'] ?? []) . "\n";
+        }
+    });
+    run('create.contact_links_undo_cannot_delete_link_rows', function ($em) {
+        $em->failAudit = true;
+        $em->failLinkDelete = true;
+        try {
+            save($em, newOf('Contact', ['accountsIds' => ['a1']]));
+        } finally {
+            echo 'link_undo_fail_contacts_left=' . count($em->store['Contact'] ?? []) . "\n";
+            echo 'link_undo_fail_link_rows_left=' . count($em->links['AccountContact'] ?? []) . "\n";
+        }
+    });
     run('create.retired_new', fn($em) => save($em, newOf('Account', ['identityStatus' => 'retired'])));
     run('create.successor_new', function ($em) { seed($em, 'Account', 'a1'); save($em, newOf('Account', ['identityStatus' => 'superseded', 'successorId' => 'a1'])); });
 

@@ -14,7 +14,7 @@ This page is written for the build. It is not the identity register or the resto
 
 | Rule | Mechanism (all under `custom/Espo/Custom/`) |
 |---|---|
-| Audit or fail (3.1) | `Classes/Identity/IdentityAuditor.php` writes one `IdentityAudit` record and reads it back. On any failure it throws `Forbidden` and the change is refused. Updates and links are audited **before** the change; a create is audited right after the record gets its identifier and is **undone** (`deleteFromDb`) if the audit cannot be stored. |
+| Audit or fail (3.1) | `Classes/Identity/IdentityAuditor.php` writes one `IdentityAudit` record and reads it back. On any failure it throws `Forbidden` and the change is refused. Updates and links are audited **before** the change; a create is audited right after the record gets its identifier and is **undone** (`deleteFromDb`, and the contact's firm link rows are deleted) if the audit cannot be stored. A new contact's firm links (`accountsIds`) are each audited from the saved record, not from core's relate hooks; a link already audited by a relate hook is not recorded twice. |
 | Audit protection (3.2) | `Hooks/IdentityAudit/ProtectIdentityAudit.php`: a record is created only with a save option that only server code sets, and is never edited or deleted. Administrators bypass role ACL, not hooks. The roles give every role read access and nobody create, edit or delete. |
 | Primary firm (3.3) | `IdentityGuard`: the primary firm must be among the linked firms in the same save, and unlinking the primary firm (from either side) is refused. Setting another linked firm as primary, or clearing the primary firm, in the same change is allowed. Existing exceptions are not repaired: `scripts/identity_report.py` lists them. |
 | No loss (3.4) | `Hooks/{Account,Contact}/IdentityBeforeRemove.php` refuse every delete and mass delete; `Controllers/{Account,Contact}.php` refuse merge before it starts. `ER Manager`'s contact delete level is now `no`. |
@@ -27,7 +27,7 @@ Nothing has an administrator, service-account or option bypass. The hooks do not
 
 ### Why audit before for updates, and after for creates
 
-A new record has no identifier until it is stored, so its audit record can only be written afterwards; the create is then undone if the audit fails. For an update, the audit is written first, so that no change can succeed without its record. The cost is that an update may leave an audit record for a change that a later layer then rejected. Over-recording is accepted; under-recording is not.
+A new record has no identifier until it is stored, so its audit record can only be written afterwards; the create is then undone if the audit fails. For an update, the audit is written first, so that no change can succeed without its record. The cost is that an update may leave an audit record for a change that a later layer then rejected. Over-recording is accepted; under-recording is not. **Residual risk:** if the save then fails (a validation or database error after the audit was written), an audit record remains for a change that did not happen. Readers of the audit must treat a record as "attempted or made"; the record's actor and time still say who tried what.
 
 ## 3. The route matrix
 
@@ -70,6 +70,7 @@ The build sandbox has no EspoCRM, Docker or browser, so the following are the op
 
 ## 7. Not verified, and known limits
 
+- **Undone create.** The undo removes the record (`deleteFromDb`) and, for a contact, its rows in the firm link table (`AccountContact`) with a delete query that fires no hooks. If either removal itself fails, the refusal still stops the request, but that record or those link rows may remain, and audit records already written for the create remain (over-recording). Other link tables are not touched.
 - **EspoCRM was not run.** Hook interfaces `BeforeRelate`, `BeforeUnrelate` and `BeforeMassRelate`, the `import` save option, the identifier-on-create check and the controller override of `postActionMerge` rest on the EspoCRM sources as understood, not on the 10.0.12 image. The new hook methods declare a tolerant tail (`mixed ...$rest`) so a different parameter list does not break loading, but a different **name or behaviour** would. The operator proof is what settles them.
 - If EspoCRM assigns an identifier to a new record before the `BeforeSave` hooks run, the supplied-identifier check would refuse every create; the live suite's plain-create cells would show it at once.
 - A contact's status and successor are on the API and the firm's detail layout, not on a custom Contact layout (the core Contact layouts are not overridden, see [ACCESS.md](ACCESS.md)).

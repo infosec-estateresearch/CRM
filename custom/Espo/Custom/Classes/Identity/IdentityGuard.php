@@ -7,6 +7,7 @@ use Espo\Core\Exceptions\Forbidden;
 use Espo\Core\Utils\Metadata;
 use Espo\ORM\Entity;
 use Espo\ORM\EntityManager;
+use Espo\ORM\Query\DeleteBuilder;
 use Throwable;
 
 /**
@@ -88,6 +89,23 @@ class IdentityGuard
 
                 if (!IdentityPolicy::isEmpty($value)) {
                     $this->auditor->record($relationship, $type, (string) $entity->getId(), '', (string) $value);
+                }
+            }
+
+            // A new contact's extra firm links are audited here, from the saved record, so
+            // that this does not depend on core firing the relate hooks when it writes the
+            // link rows. A link the relate hook has already audited is not recorded twice.
+            if ($type === 'Contact') {
+                foreach (array_unique(array_map('strval', (array) $entity->get('accountsIds'))) as $firmId) {
+                    if ($firmId !== '') {
+                        $this->recordNewOnce(
+                            IdentityPolicy::REL_CONTACT_FIRM_LINK,
+                            'Contact',
+                            (string) $entity->getId(),
+                            '',
+                            $firmId
+                        );
+                    }
                 }
             }
         });
@@ -302,17 +320,15 @@ class IdentityGuard
             return;
         }
 
-        $write = function () use ($relationship, $changedType, $changed, $previous, $new): void {
-            $this->auditor->record($relationship, $changedType, (string) $changed->getId(), $previous, $new);
-        };
-
         if ($changed->isNew()) {
-            $this->undoCreateOnFailure($changed, $write);
+            $this->undoCreateOnFailure($changed, function () use ($relationship, $changedType, $changed, $previous, $new): void {
+                $this->recordNewOnce($relationship, $changedType, (string) $changed->getId(), $previous, $new);
+            });
 
             return;
         }
 
-        $write();
+        $this->auditor->record($relationship, $changedType, (string) $changed->getId(), $previous, $new);
     }
 
     // ---- remove ---------------------------------------------------------------
@@ -327,6 +343,37 @@ class IdentityGuard
     // ---- helpers --------------------------------------------------------------
 
     /**
+     * Records a change of a record that is being created, unless the identical record
+     * is already stored (the record id is unique, so a match is the same change).
+     */
+    private function recordNewOnce(string $relationship, string $type, string $id, string $previous, string $new): void
+    {
+        $existing = $this->entityManager->getRDBRepository(IdentityPolicy::AUDIT_ENTITY)->where([
+            'relationship' => $relationship,
+            'recordType' => $type,
+            'recordId' => $id,
+            'previousValue' => $previous,
+            'newValue' => $new,
+        ])->count();
+
+        if ($existing === 0) {
+            $this->auditor->record($relationship, $type, $id, $previous, $new);
+        }
+    }
+
+    /** Removes the firm link rows written for a contact whose create is being undone. */
+    private function deleteLinkRows(Entity $entity): void
+    {
+        if ($entity->getEntityType() !== 'Contact') {
+            return;
+        }
+
+        $this->entityManager->getQueryExecutor()->execute(
+            DeleteBuilder::create()->from('AccountContact')->where(['contactId' => (string) $entity->getId()])->build()
+        );
+    }
+
+    /**
      * Runs $write; if the audit cannot be stored and the record is one this request
      * is creating, the record is removed again so the create leaves nothing behind.
      */
@@ -336,6 +383,12 @@ class IdentityGuard
             $write();
         } catch (Forbidden $e) {
             if ($entity->isNew() && !IdentityPolicy::isEmpty($entity->getId())) {
+                try {
+                    $this->deleteLinkRows($entity);
+                } catch (Throwable) {
+                    // The link rows of an undone create may remain; see docs/IDENTITY-INTEGRITY.md.
+                }
+
                 try {
                     $this->entityManager
                         ->getRDBRepository($entity->getEntityType())

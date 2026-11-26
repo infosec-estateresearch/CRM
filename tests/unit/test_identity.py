@@ -301,6 +301,27 @@ class TestIdentityPhp(unittest.TestCase):
                                                            "status:Account:a1:active>superseded"])
         self.assertEqual(self.audits("edit.parent_same_value"), [])
 
+    def test_every_firm_link_of_a_new_contact_is_audited_once(self):
+        a1 = "contactFirmLink:Contact:c1:>a1"
+        a2 = "contactFirmLink:Contact:c1:>a2"
+        self.assertEqual(self.audits("create.contact_with_links"), ["primaryFirm:Contact:c1:>a1", a1, a2])
+        self.assertEqual(self.audits("create.contact_links_without_primary"), [a1, a2])
+        self.assertEqual(self.audits("create.contact_links_duplicate_ids"), [a1])
+        # core firing the relate hooks as well (before or after the after-save hook) does not double-record
+        self.assertEqual(self.audits("create.contact_links_then_core_fires_relate"), [a1, a2])
+        self.assertEqual(self.audits("create.contact_links_relate_fires_before_after_save"), [a1])
+
+    def test_a_create_with_links_whose_audit_fails_leaves_no_record_and_no_link_rows(self):
+        for name in ("create.contact_links_audit_unwritable", "create.contact_links_audit_fails_on_second_link",
+                     "create.contact_links_undo_cannot_delete_link_rows"):
+            self.assertEqual(self.outcome(name), "Forbidden", name)
+        for line in ("link_create_contacts_left=0", "link_create_link_rows_left=0",
+                     "link_create2_contacts_left=0", "link_create2_link_rows_left=0",
+                     "link_undo_fail_contacts_left=0"):
+            self.assertIn(line, self.out)
+        # the documented residual: if the link rows themselves cannot be removed they remain
+        self.assertIn("link_undo_fail_link_rows_left=1", self.out)
+
     def test_no_change_succeeds_when_the_audit_cannot_be_stored(self):
         for name in ("edit.parent_audit_unwritable", "edit.enquiry_firm_audit_unwritable", "status.audit_unwritable",
                      "link.contact_link_audit_unwritable", "link.branch_link_audit_unwritable",
@@ -409,6 +430,12 @@ MUTATIONS = {
         r"if \(in_array\(\$link, IdentityPolicy.{2}EDIT_ONLY_LINKS\[\$type\] \?\? \[\], true\)\) \{", "if (false) {"),
     "create audit not undone": (
         "Classes/Identity/IdentityGuard.php", r"->deleteFromDb\(\(string\) \$entity->getId\(\)\);", ";"),
+    "new contact firm links not audited": (
+        "Classes/Identity/IdentityGuard.php", r"if \(\$firmId !== ''\) \{", "if (false) {"),
+    "new contact link audited twice": (
+        "Classes/Identity/IdentityGuard.php", r"if \(\$existing === 0\) \{", "if (true) {"),
+    "undo leaves link rows": (
+        "Classes/Identity/IdentityGuard.php", r"\$this->deleteLinkRows\(\$entity\);", ";"),
     "update change not audited": (
         "Classes/Identity/IdentityGuard.php",
         r"foreach \(\$this->changes\(\$entity, \$type\) as \[\$relationship, \$previous, \$new\]\) \{", "foreach ([] as [$relationship, $previous, $new]) {"),

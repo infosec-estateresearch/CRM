@@ -49,12 +49,32 @@ namespace Espo\ORM {
     class Repo {
         public function __construct(private EntityManager $em, private string $type) {}
         public function deleteFromDb(string $id): void { unset($this->em->store[$this->type][$id]); }
+        public function where(array $w): object {
+            $rows = array_filter($this->em->store[$this->type] ?? [], function ($e) use ($w) {
+                foreach ($w as $k => $v) { if ((string) $e->get($k) !== (string) $v) { return false; } }
+                return true;
+            });
+            return new class(count($rows)) { public function __construct(private int $n) {} public function count(): int { return $this->n; } };
+        }
+    }
+
+    class QueryExecutor {
+        public function __construct(private EntityManager $em) {}
+        public function execute(\Espo\ORM\Query\DeleteQuery $q): void {
+            if ($this->em->failLinkDelete) { throw new \RuntimeException('cannot delete'); }
+            unset($this->em->links[$q->table][$q->where['contactId']]);
+        }
     }
 
     class EntityManager {
         public array $store = [];
         public bool $failAudit = false;
         public bool $lieOnReadBack = false;
+        public bool $failLinkDelete = false;
+        public int $failAuditAfter = 0;
+        private int $auditWrites = 0;
+        /** Link rows by junction entity and contact id, as core writes them after a save. */
+        public array $links = [];
         private int $seq = 0;
 
         public function getNewEntity(string $type): Entity { return new Entity($type, true); }
@@ -68,6 +88,8 @@ namespace Espo\ORM {
             return $e;
         }
 
+        public function getQueryExecutor(): QueryExecutor { return new QueryExecutor($this); }
+
         public function getRDBRepository(string $type): Repo { return new Repo($this, $type); }
 
         public function saveEntity(Entity $e, array $options = []): void {
@@ -75,10 +97,13 @@ namespace Espo\ORM {
             if ($type === 'IdentityAudit') {
                 (new \Espo\Custom\Hooks\IdentityAudit\ProtectIdentityAudit())
                     ->beforeSave($e, new \Espo\ORM\Repository\Option\SaveOptions($options));
-                if ($this->failAudit) { throw new \RuntimeException('storage unwritable'); }
+                if ($this->failAudit || ($this->failAuditAfter > 0 && ++$this->auditWrites >= $this->failAuditAfter)) { throw new \RuntimeException('storage unwritable'); }
             }
             if (!$e->has('id')) { $e->set('id', strtolower(substr($type, 0, 1)) . (++$this->seq)); }
             $this->store[$type][$e->getId()] = $e;
+            if ($type === 'Contact' && $e->isNew() && $e->has('accountsIds')) {
+                $this->links['AccountContact'][$e->getId()] = (array) $e->get('accountsIds');
+            }
             $e->markSaved();
         }
 
@@ -128,6 +153,18 @@ namespace Espo\Core\Hook\Hook {
     }
     interface BeforeMassRelate {
         public function beforeMassRelate(\Espo\ORM\Entity $entity, string $relationName, array $params, \Espo\ORM\Repository\Option\MassRelateOptions $options): void;
+    }
+}
+
+namespace Espo\ORM\Query {
+    class DeleteQuery { public function __construct(public string $table, public array $where) {} }
+    class DeleteBuilder {
+        private string $table = '';
+        private array $where = [];
+        public static function create(): self { return new self(); }
+        public function from(string $t): self { $this->table = $t; return $this; }
+        public function where(array $w): self { $this->where = $w; return $this; }
+        public function build(): DeleteQuery { return new DeleteQuery($this->table, $this->where); }
     }
 }
 
