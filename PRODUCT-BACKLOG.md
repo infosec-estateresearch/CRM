@@ -113,3 +113,29 @@ Nothing is deleted. "Replacement" names where the intent now lives.
 | CRM-PBI-027 Group-level reporting | HELD | Needs the CRM FirmGroup, the group view and the metric | later |
 | CRM-PBI-028 Advanced cross-firm workflow | PLACEHOLDER | Unchanged; now a WIP matter | WIP repository |
 | CRM-PBI-029 Documentation and provenance reconciliation | DEFINED, in review | Fulfilled for the reset by this document set, pending approval | this branch |
+
+## Delivery direction (2026-11-26)
+
+Items for the direction in [Issue #91](https://github.com/infosec-estateresearch/CRM/issues/91) and decisions CRM-D044 to CRM-D062. Listing an item grants no dispatch.
+
+| ID | State | Item | Value / acceptance outline | Depends on |
+|---|---|---|---|---|
+| CRM-PBI-035 | PROVISIONAL | **P0.** **Identity integrity controls** | Every identity relationship change audited or refused; identity records retired or superseded, not deleted; identity audit protected and retained (CRM-IDINT-001) | 001 |
+| CRM-PBI-036 | PROVISIONAL | **P0.** **Two user types, sign-in security and administrator user management** | One `ER User` role; Admin section with Users; native temporary passwords and resets; second factor enforced; tested by browser and API | 002, 035 |
+| CRM-PBI-037 | PROVISIONAL | **P0.** **Logging, audit and retention baseline** | Coverage, structured events, bounded storage and checks in `docs/LOGGING.md` | 035, 036 |
+| CRM-PBI-038 | PROVISIONAL | **Post-MVP.** **Forward ERm events to the existing Graylog** | Encrypted transport, search by identity, dashboards, alerts, catch-up after outage | 037 |
+| CRM-PBI-039 | PROVISIONAL | **P0.** **Backup, off-host copy, restore proof and identity register** | Scheduled encrypted copies; verified full application restore including identifiers; bounded retention; failures visible; register tests of `docs/IDENTITY.md` | 016, 035 |
+| CRM-PBI-040 | PROVISIONAL | **P0.** **Contact and firm workflow with group selection** | Create or choose firm and group without leaving the contact; browser accepted | 018, 034 |
+| CRM-PBI-041 | PROVISIONAL | **P0.** **Non-destructive source delta, rejected records and historical Notes** | No overwritten ERm changes; originals preserved; Salesforce Notes handled; reconciliation and rollback | 005, 035 |
+| CRM-PBI-042 | PROVISIONAL | **P0.** **Production target and identity-preserving cutover** | Rehearsed promotion, recorded identity start date, rollback criteria; Outlook filing (014) unless deferred | 014, 039, 041 |
+| CRM-PBI-043 | PROVISIONAL | **P1.** **Transitional Salesforce Sync (administrator only)** | CRM-D050; on the existing extractor and loader; synthetic proof first; removable | 036, 041 |
+
+### Changes of state, 2026-11-26 (rows above are not rewritten)
+
+| PBI | State from 2026-11-26 | Why |
+|---|---|---|
+| CRM-PBI-018 FirmGroup | RESUMED, before MVP | CRM-D045 |
+| CRM-PBI-006, CRM-PBI-014 Email filing | Back on the active roadmap | CRM-D054 |
+| CRM-PBI-030, 031 | ON HOLD for further WIP-specific work; merged work preserved | CRM-D051 |
+| CRM-PBI-032, 033 | ON HOLD | CRM-D051 |
+| CRM-PBI-034 Browser assurance | Re-scoped to ERm journeys without any WIP dependency | CRM-D045, CRM-D051 |
