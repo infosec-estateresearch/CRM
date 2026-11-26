@@ -92,6 +92,13 @@
                     "delete": "no",
                     "stream": "all"
                 },
+                "IdentityAudit": {
+                    "create": "no",
+                    "read": "all",
+                    "edit": "no",
+                    "delete": "no",
+                    "stream": "all"
+                },
                 "Lead": false,
                 "Campaign": false,
                 "TargetList": false,
@@ -356,6 +363,13 @@
                     "delete": "no",
                     "stream": "all"
                 },
+                "IdentityAudit": {
+                    "create": "no",
+                    "read": "all",
+                    "edit": "no",
+                    "delete": "no",
+                    "stream": "all"
+                },
                 "Lead": false,
                 "Campaign": false,
                 "TargetList": false,
@@ -530,7 +544,7 @@
         },
         {
             "name": "ER Manager",
-            "info": "Firm management: edit everything, delete contacts, enquiries and activities; never firms or emails (CRM-003).",
+            "info": "Firm management: edit everything, delete enquiries and activities; never firms, contacts or emails (CRM-003, CRM-IDINT-001).",
             "data": {
                 "Account": {
                     "create": "yes",
@@ -543,7 +557,7 @@
                     "create": "yes",
                     "read": "all",
                     "edit": "all",
-                    "delete": "all",
+                    "delete": "no",
                     "stream": "all"
                 },
                 "Opportunity": {
@@ -614,6 +628,13 @@
                     "stream": "all"
                 },
                 "ServiceType": {
+                    "create": "no",
+                    "read": "all",
+                    "edit": "no",
+                    "delete": "no",
+                    "stream": "all"
+                },
+                "IdentityAudit": {
                     "create": "no",
                     "read": "all",
                     "edit": "no",
@@ -881,6 +902,13 @@
                     "create": "yes",
                     "read": "all",
                     "edit": "all",
+                    "delete": "no",
+                    "stream": "all"
+                },
+                "IdentityAudit": {
+                    "create": "no",
+                    "read": "all",
+                    "edit": "no",
                     "delete": "no",
                     "stream": "all"
                 },

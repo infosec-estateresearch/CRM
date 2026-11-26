@@ -2133,7 +2133,7 @@ class TestDeploySteps(ShellEnv):
     def test_main_stops_at_the_first_failing_step(self):
         stubs = "; ".join(f'{f}() {{ echo "{f}" >> "$FAKE_DOCKER_LOG"; }}' for f in (
             "verify_bundle", "check_runtime_empty", "make_runtime", "start_stack",
-            "configure_site", "provision_and_accept")) + (
+            "configure_site", "apply_release_settings", "provision_and_accept")) + (
             '; unpack_release() { echo unpack_release >> "$FAKE_DOCKER_LOG"; echo ' + REPO + '; }'
             '; write_report() { echo write_report >> "$FAKE_DOCKER_LOG"; echo r; }'
             '; render_edge() { echo render_edge >> "$FAKE_DOCKER_LOG"; return ${RENDER_RC:-0}; }'
@@ -2144,7 +2144,8 @@ class TestDeploySteps(ShellEnv):
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(self.docker_calls(), [
             "verify_bundle", "check_runtime_empty", "unpack_release", "make_runtime", "render_edge",
-            "start_stack", "configure_site", "provision_and_accept", "write_report"])
+            "start_stack", "configure_site", "apply_release_settings", "provision_and_accept",
+            "write_report"])
         os.unlink(self.log)
         res = self.step(f"main beta x.tar.gz --sha256 {sha}", stubs=stubs,
                         extra={**DEPLOY_INPUTS(self.tmp), "RENDER_RC": "1"})

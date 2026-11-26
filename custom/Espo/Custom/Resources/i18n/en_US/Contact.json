@@ -1,5 +1,19 @@
 {
     "links": {
-        "opportunities": "Enquiries"
+        "opportunities": "Enquiries",
+        "successor": "Successor",
+        "predecessors": "Predecessors"
+    },
+    "fields": {
+        "identityStatus": "Identity status",
+        "successor": "Successor",
+        "predecessors": "Predecessors"
+    },
+    "options": {
+        "identityStatus": {
+            "active": "Active",
+            "retired": "Retired",
+            "superseded": "Superseded"
+        }
     }
 }

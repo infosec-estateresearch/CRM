@@ -110,7 +110,14 @@
         "Webhook": false,
         "OpenApi": false,
         "ExternalAccount": false,
-        "EmailAccountScope": false
+        "EmailAccountScope": false,
+        "IdentityAudit": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        }
       },
       "fieldData": {
         "Account": {
@@ -374,7 +381,14 @@
         "Webhook": false,
         "OpenApi": false,
         "ExternalAccount": false,
-        "EmailAccountScope": false
+        "EmailAccountScope": false,
+        "IdentityAudit": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        }
       },
       "fieldData": {
         "Account": {
@@ -543,7 +557,7 @@
           "create": "yes",
           "read": "all",
           "edit": "all",
-          "delete": "all",
+          "delete": "no",
           "stream": "all"
         },
         "Opportunity": {
@@ -638,7 +652,14 @@
         "Webhook": false,
         "OpenApi": false,
         "ExternalAccount": false,
-        "EmailAccountScope": false
+        "EmailAccountScope": false,
+        "IdentityAudit": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        }
       },
       "fieldData": {
         "Account": {
@@ -902,7 +923,14 @@
         "Webhook": false,
         "OpenApi": false,
         "ExternalAccount": false,
-        "EmailAccountScope": false
+        "EmailAccountScope": false,
+        "IdentityAudit": {
+          "create": "no",
+          "read": "all",
+          "edit": "no",
+          "delete": "no",
+          "stream": "all"
+        }
       },
       "fieldData": {
         "Account": {

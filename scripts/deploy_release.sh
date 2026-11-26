@@ -26,6 +26,12 @@
 #     bin/command config:set, then read phoneNumberInternational back: anything
 #     but exactly the PHP boolean false fails the deploy (the CRM-006S load
 #     precondition);
+#  6b. the retention settings of config/release-settings.json (CRM-IDINT-001,
+#     3.6: deleted-record cleanup off, audit cleanup off, user action history
+#     6 months, sign-in records 13 months): each is set with bin/command
+#     config:set (with its type) and read back from data/config.php with php -r +
+#     var_export. A setting that is not a known EspoCRM setting, or that does not
+#     read back exactly as required, fails the deploy;
 #  7. provision access (CRM-003) and run the beta-safe acceptance suite
 #     (read-only, GET only). Both are mandatory (CRM-007R): the script refuses
 #     to start without CRM_ADMIN_USERNAME, CRM_ADMIN_PASSWORD,
@@ -193,6 +199,36 @@ configure_site() {
     check_phone_value "$got"
 }
 
+# 6b. The retention settings that travel with the release (CRM-IDINT-001, 3.6).
+# scripts/release_settings.py (from the release itself) validates
+# config/release-settings.json and prints name, type, value, expected read-back.
+# check_setting_value <name> <expected php literal> <read-back> <known>.
+check_setting_value() {
+    [ "$4" = true ] || die "setting $1 is not a known EspoCRM setting"
+    [ "$3" = "$2" ] || die "setting $1 read back as '$3', not exactly $2"
+}
+
+apply_release_settings() {
+    local dest=$1 name kind value expect known got rows
+    # shellcheck source=lib/common.sh
+    . "$dest/scripts/lib/common.sh"
+    require_target beta
+    rows=$(python3 -I -B "$dest/scripts/release_settings.py" "$dest/config/release-settings.json") \
+        || die "release settings are invalid: $dest/config/release-settings.json"
+    [ -n "$rows" ] || die "release settings list nothing"
+    while IFS=$'\t' read -r name kind value expect; do
+        [[ "$name" =~ ^[A-Za-z][A-Za-z0-9]*$ ]] || die "bad setting name in the release settings"
+        compose exec -T -u www-data -w /var/www/html crm-app php bin/command config:set "$name" "$value" --type="$kind" \
+            || die "config:set $name failed"
+        # The key must be one EspoCRM defines, or the set would be a silent no-op.
+        known=$(compose exec -T -u www-data -w /var/www/html crm-app php -r \
+            "\$d = include 'application/Espo/Resources/defaults/config.php'; echo var_export(array_key_exists('$name', \$d), true);")
+        got=$(compose exec -T -u www-data -w /var/www/html crm-app php -r \
+            "\$c = include 'data/config.php'; echo var_export(\$c['$name'] ?? null, true);")
+        check_setting_value "$name" "$expect" "$got" "$known"
+    done <<< "$rows"
+}
+
 # run_beta_safe <release dir>: the read-only suite in-process; it must run all
 # its tests (a skip counts as a failure).
 run_beta_safe() {
@@ -344,6 +380,7 @@ main() {
     echo "crm-beta mode: $DEPLOY_MODE"
     start_stack "$dest"
     configure_site "$dest"                                   # 6
+    apply_release_settings "$dest"                           # 6b
     provision_and_accept "$dest" "$upgrade"                  # 7
     report=$(write_report "$dest" "$copy" "$upgrade")        # 8
     echo "deployed $short to crm-beta ($DEPLOY_MODE mode); report: $report"

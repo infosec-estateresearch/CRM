@@ -465,7 +465,8 @@ class TestMetadataConsistency(unittest.TestCase):
     def test_layouts_only_for_allowlisted_entities(self):
         self.assertTrue(set(os.listdir(os.path.join(RES, "layouts"))) <= {
             "User", "Account", "Contact", "Opportunity", "ServiceType",  # CRM-004 adds two
-            "Call", "Meeting", "Task"})  # CRM-005
+            "Call", "Meeting", "Task",  # CRM-005
+            "IdentityAudit"})  # CRM-IDINT-001
 
     def test_role_field_data_names_real_fields(self):
         defs = dict(self.defs, **{e: load_json(  # CRM-004 Opportunity, CRM-005 activities
@@ -510,6 +511,11 @@ class TestSettingsFile(unittest.TestCase):
         self.assertIn(mapping["currency"], settings["currencyList"])
 
 
+# CRM-IDINT-001: hook file stems under Hooks/{Account,Contact}; Opportunity has the first four.
+IDENTITY_HOOKS = ["BeforeSave", "AfterSave", "BeforeRelate", "BeforeUnrelate", "BeforeMassRelate",
+                  "BeforeRemove"]
+
+
 class TestHookFile(unittest.TestCase):
     def test_hook_lives_at_the_espocrm_custom_hook_path(self):
         rel = os.path.relpath(policy.HOOK_PATH, os.path.join(REPO, "custom"))
@@ -517,14 +523,21 @@ class TestHookFile(unittest.TestCase):
                                              "RestrictDeleteWithEnquiries.php"])
         self.assertTrue(policy.load_hook().startswith("<?php\n"))
 
-    def test_only_the_account_hook_exists(self):
+    def test_only_the_known_hooks_exist(self):
         hooks = os.path.join(REPO, "custom", "Espo", "Custom", "Hooks")
         found = [os.path.relpath(os.path.join(r, f), hooks)
                  for r, _, files in os.walk(hooks) for f in files]
-        self.assertEqual(sorted(found), [os.path.join("Account", "RestrictDeleteWithEnquiries.php"),
-                                         os.path.join("Email", "ProtectArchivedEmail.php"),
-                                         os.path.join("Opportunity", "RequireLossReason.php"),
-                                         os.path.join("Task", "PreserveSalesforceCompletedDate.php")])
+        # CRM-IDINT-001 adds the identity hooks (every other expected hook is unchanged).
+        identity = [os.path.join(entity, f"Identity{kind}.php")
+                    for entity, kinds in (("Account", IDENTITY_HOOKS), ("Contact", IDENTITY_HOOKS),
+                                          ("Opportunity", IDENTITY_HOOKS[:4]))
+                    for kind in kinds]
+        self.assertEqual(sorted(found), sorted(identity + [
+            os.path.join("Account", "RestrictDeleteWithEnquiries.php"),
+            os.path.join("Email", "ProtectArchivedEmail.php"),
+            os.path.join("IdentityAudit", "ProtectIdentityAudit.php"),
+            os.path.join("Opportunity", "RequireLossReason.php"),
+            os.path.join("Task", "PreserveSalesforceCompletedDate.php")]))
 
     def test_braces_balance(self):
         code = policy._code(policy.load_hook())
