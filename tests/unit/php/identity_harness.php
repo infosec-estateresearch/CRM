@@ -160,7 +160,7 @@ namespace {
         }
     });
     run('create.contact_links_undo_cannot_delete', function ($p) {
-        // The documented residual: if the undo itself cannot run, the create is still refused.
+        // R2: with the database refusing every write after the failure, the create still leaves nothing.
         $p->failAudit = true;
         $p->failExecutor = true;
         try {
@@ -382,7 +382,7 @@ namespace {
         try { $p->relate($c, 'accounts', $p->seedOnly('Account', 'a2')); } finally { line('links_after_refused_orm_link', firmLinks($p, 'c1')); }
     });
     run('link.put_back_cannot_run', function ($p) {
-        // The documented residual: the refusal is still raised when the change cannot be put back.
+        // R2: with the database refusing every write after the failure, the link is still not committed.
         $c = $p->seed('Contact', 'c1', ['accountId' => 'a1', 'accountsIds' => ['a1']]); $p->failAudit = true; $p->failExecutor = true;
         try { $p->relate($c, 'accounts', $p->seedOnly('Account', 'a2')); } finally { line('links_when_put_back_fails', firmLinks($p, 'c1')); }
     });
@@ -423,4 +423,61 @@ namespace {
     run('audit.delete', fn($p) => $p->remove((new FakeEntity('IdentityAudit', false))->set(['id' => 'i1'])));
     run('audit.edit_admin', function ($p) { $a = new FakeEntity('IdentityAudit', false); $a->set(['id' => 'i1']); $p->save($a); }, true);
     run('audit.delete_admin', fn($p) => $p->remove((new FakeEntity('IdentityAudit', false))->set(['id' => 'i1'])), true);
+
+    // ---- CRM-IDINT-001R2 -------------------------------------------------------------------
+    // S3: no in-request memory of an audit record survives a rolled-back change. A failure after an
+    // audited change was written rolls the change and its audit back; the same change made again in the
+    // same request must be audited again, not skipped as "already audited".
+    run('memory.relation_failed_then_changed_again', function ($p) {
+        $c = $p->seed('Contact', 'c1');
+        $p->failAuditAfter = 2;   // the link audit is stored, the primary firm audit of the platform's side effect is not
+        try {
+            $p->relate($c, 'accounts', $p->seedOnly('Account', 'a2'));
+        } catch (Forbidden) {
+            line('memory.relation.rolled_back', firmLinks($p, 'c1') === '' && $p->audits() === [] ? 'nothing-left' : 'left');
+        }
+        $p->failAuditAfter = 0;
+        $c = $p->load('Contact', 'c1');   // the rolled-back request's in-memory record is not reused
+        $p->relate($c, 'accounts', $p->seedOnly('Account', 'a2'));
+        line('memory.relation.links_after_second_change', firmLinks($p, 'c1'));
+    });
+    run('memory.save_failed_then_changed_again', function ($p) {
+        $p->seed('Account', 'a1');
+        $c = newOf('Contact', ['accountId' => 'a1', 'accountsIds' => ['a1']]);
+        $p->failAuditAfter = 2;   // the link audit is stored, the primary firm audit after the save is not
+        try {
+            $p->save($c);
+        } catch (Forbidden) {
+            line('memory.save.rolled_back', $p->count('Contact') === 0 && $p->linkRows() === 0 && $p->audits() === [] ? 'nothing-left' : 'left');
+        }
+        $p->failAuditAfter = 0;
+        $p->save($c);
+        line('memory.save.links_after_second_change', firmLinks($p, $c->getId()));
+    });
+
+    run('create.enquiry_with_firm_audit_unwritable', function ($p) {
+        $p->seed('Account', 'a1');
+        $p->failAudit = true;
+        try {
+            apiCreate($p, 'Opportunity', ['accountId' => 'a1']);
+        } finally {
+            line('enquiries_left_after_failed_create', $p->count('Opportunity'));
+        }
+    });
+
+    // S4: script functions cannot write these types (the platform's system-write restriction), and a record
+    // save carrying a link list only the link routes may change is refused.
+    foreach (['Account', 'Contact', 'Opportunity', 'AccountContact', 'Task'] as $type) {
+        run("script.may_write.$type", function ($p) use ($type) { line("script_may_write_$type", $p->scriptsMayWrite($type) ? 'yes' : 'no'); });
+    }
+    run('script.save_with_branches_on_edit', function ($p) { $a = $p->seed('Account', 'a1'); edit($a, ['branchesIds' => ['b1']]); $p->save($a); });
+    run('script.save_with_predecessors_on_edit', function ($p) { $a = $p->seed('Account', 'a1'); edit($a, ['predecessorsIds' => ['b1']]); $p->save($a); });
+    run('script.save_with_predecessors_on_edit_contact', function ($p) { $c = $p->seed('Contact', 'c1'); edit($c, ['predecessorsIds' => ['b1']]); $p->save($c); });
+    run('script.save_with_branches_on_create', fn($p) => $p->save(newOf('Account', ['name' => 'n', 'branchesIds' => ['b1']])));
+    run('script.save_with_empty_branches_on_create', fn($p) => $p->save(newOf('Account', ['name' => 'n', 'branchesIds' => []])));
+
+    // S5: enquiry merge is disabled like firm and contact merge.
+    foreach (['Account', 'Contact', 'Opportunity'] as $type) {
+        run("merge.disabled.$type", function ($p) use ($type) { line("merge_disabled_$type", $p->actionDisabled($type, 'merge') ? 'yes' : 'no'); });
+    }
 }

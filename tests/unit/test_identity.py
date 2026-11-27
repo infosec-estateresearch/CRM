@@ -245,6 +245,15 @@ class TestMetadata(unittest.TestCase):
                 elif kind.startswith("After") and kind != "AfterSave":
                     self.assertTrue(match and int(match.group(1)) < 9, f"{entity} {kind}")
 
+    def test_r2_entity_definitions_declare_the_transaction_the_repository_and_the_system_write_restriction(self):
+        for entity in ("Account", "Contact", "Opportunity"):
+            defs = load(RES, "metadata", "entityDefs", f"{entity}.json")
+            self.assertIs(defs["transactionalSave"], True, entity)
+            self.assertEqual(defs["repositoryClassName"], "Espo\\Custom\\Classes\\Identity\\IdentityRepository", entity)
+        for entity in ("Account", "Contact", "Opportunity", "AccountContact"):
+            self.assertEqual(load(RES, "metadata", "entityAcl", f"{entity}.json"), {"systemWriteForbidden": True}, entity)
+        self.assertEqual(load(RES, "metadata", "recordDefs", "Opportunity.json")["actions"]["merge"], {"disabled": True})
+
     def test_record_defs_wire_the_record_hooks_and_the_platform_switches(self):
         hooks = "Espo\\Custom\\Classes\\Identity\\RecordHooks\\"
         for entity in ("Account", "Contact"):
@@ -415,8 +424,36 @@ class TestIdentityPhp(unittest.TestCase):
                      "create_links2_contacts_left=0", "create_links2_link_rows_left=0",
                      "accounts_left_after_failed_create=1"):    # only the seeded parent remains
             self.assertIn(line, self.out)
-        # the documented residual: if the undo itself cannot run, the create is still refused
-        self.assertIn("create_undo_fail_contacts_left=1", self.out)
+        # R2: even when every compensating write would fail, nothing remains (there is none to fail)
+        self.assertIn("create_undo_fail_contacts_left=0", self.out)
+        self.assertIn("create_undo_fail_link_rows_left=0", self.out)
+        self.assertEqual(self.audits("create.contact_links_undo_cannot_delete"), [])
+
+    def test_r2_failed_changes_leave_nothing_and_the_memory_of_a_rolled_back_audit_is_forgotten(self):
+        # R2 and S3. A failed change is rolled back completely, partial audit records included; the same change
+        # made again in the same request is audited again (no in-request memory of a rolled-back audit record).
+        self.assertIn("enquiries_left_after_failed_create=0", self.out)
+        self.assertEqual(self.outcome("create.enquiry_with_firm_audit_unwritable"), "Forbidden")
+        for line in ("memory.relation.rolled_back=nothing-left", "memory.relation.links_after_second_change=a2",
+                     "memory.save.rolled_back=nothing-left", "memory.save.links_after_second_change=a1"):
+            self.assertIn(line, self.out)
+        self.assertEqual(self.audits("memory.relation_failed_then_changed_again"),
+                         ["contactFirmLink:Contact:c1:>a2", "primaryFirm:Contact:c1:>a2"])
+        self.assertEqual(self.audits("memory.save_failed_then_changed_again"),
+                         ["contactFirmLink:Contact:c1:>a1", "primaryFirm:Contact:c1:>a1"])
+
+    def test_s4_scripts_cannot_write_identity_records_and_a_record_save_refuses_link_lists_of_the_link_routes(self):
+        for type_ in ("Account", "Contact", "Opportunity", "AccountContact"):
+            self.assertIn(f"script_may_write_{type_}=no", self.out)
+        self.assertIn("script_may_write_Task=yes", self.out)   # the restriction is not wider than the identity records
+        for name in ("script.save_with_branches_on_edit", "script.save_with_predecessors_on_edit",
+                     "script.save_with_predecessors_on_edit_contact", "script.save_with_branches_on_create"):
+            self.assertEqual(self.outcome(name), "Forbidden", name)
+        self.assertEqual(self.outcome("script.save_with_empty_branches_on_create"), "ok")
+
+    def test_s5_enquiry_merge_is_disabled_like_firm_and_contact_merge(self):
+        for type_ in ("Account", "Contact", "Opportunity"):
+            self.assertIn(f"merge_disabled_{type_}=yes", self.out)
 
     def test_no_change_succeeds_when_the_audit_cannot_be_stored_and_each_is_put_back(self):
         for name in ("edit.parent_audit_unwritable", "edit.enquiry_firm_audit_unwritable", "status.audit_unwritable",
@@ -437,8 +474,9 @@ class TestIdentityPhp(unittest.TestCase):
         }
         for key, value in state.items():
             self.assertEqual(self.result[key], value, key)
-        # the documented residual: when the change cannot be put back the refusal is still raised
-        self.assertEqual(self.result["links_when_put_back_fails"], "a1,a2")
+        # R2: when every compensating write would fail the link is still not there: nothing was committed
+        self.assertEqual(self.result["links_when_put_back_fails"], "a1")
+        self.assertEqual(self.audits("link.put_back_cannot_run"), [])
         self.assertEqual(self.outcome("link.put_back_cannot_run"), "Forbidden")
 
     def test_the_primary_firm_stays_one_of_the_linked_firms(self):
@@ -546,8 +584,6 @@ MUTATIONS = {
     "bulk link allowed": (
         "Classes/Identity/IdentityGuard.php",
         r"if \(!in_array\(\$link, IdentityPolicy.{2}BULK_REFUSED_LINKS\[\$type\] \?\? \[\], true\)\) \{", "if (true) {"),
-    "bulk link not undone": (
-        "Classes/Identity/IdentityGuard.php", r"\$this->putBack\(\$kind, \$attribute, \$changed, \$firmId, true, ''\);", ";"),
     "successor cycle allowed": (
         "Classes/Identity/IdentityPolicy.php", r"\$current === \$selfId \|\| isset\(\$seen\[\$current\]\)", "false"),
     "wrong-kind successor allowed": (
@@ -559,15 +595,48 @@ MUTATIONS = {
         r"if \(isset\(IdentityPolicy[:][:]EDIT_ONLY_LINKS\[\$type\]\[\$link\]\)\) \{\s*throw new Forbidden", "if (false) {\n throw new Forbidden"),
     "successor set by linking allowed (after hook)": (
         "Classes/Identity/IdentityGuard.php", r"if \(\$editOnly !== null\) \{", "if (false) {"),
-    "create audit not undone": (
-        "Classes/Identity/IdentityGuard.php", r"\$this->deleteRows\(\$entity\);", ";"),
     "update change not audited": (
         "Classes/Identity/IdentityGuard.php",
         r"foreach \(\$this->changes\(\$entity, \$type\) as \[\$relationship, \$previous, \$new\]\) \{", "foreach ([] as [$relationship, $previous, $new]) {"),
     "link change not audited": (
         "Classes/Identity/IdentityGuard.php", r"if \(\$previous === \$new\) \{", "if (true) {"),
-    "link audit failure not put back": (
-        "Classes/Identity/IdentityGuard.php", r"(        string \$previous\n    \): void \{\n)", r"\1        return;\n"),
+    # CRM-IDINT-001R2: the compensating writes are gone; these remove what replaces them.
+    "save not one transaction (firm)": (
+        "Resources/metadata/entityDefs/Account.json", r'"transactionalSave": true', '"transactionalSave": false'),
+    "save not one transaction (contact)": (
+        "Resources/metadata/entityDefs/Contact.json", r'"transactionalSave": true', '"transactionalSave": false'),
+    "save not one transaction (enquiry)": (
+        "Resources/metadata/entityDefs/Opportunity.json", r'"transactionalSave": true', '"transactionalSave": false'),
+    "repository class not declared (contact)": (
+        "Resources/metadata/entityDefs/Contact.json", r'"repositoryClassName": "[^"]*",', ""),
+    "relate not atomic": (
+        "Classes/Identity/IdentityRelation.php",
+        r"\$this->atomically\(function \(\) use \(\$entity, \$columnData, \$options\): void \{\s*parent::relate\(\$entity, \$columnData, \$options\);\s*\}\);",
+        "parent::relate($entity, $columnData, $options);"),
+    "unrelate not atomic": (
+        "Classes/Identity/IdentityRelation.php",
+        r"\$this->atomically\(function \(\) use \(\$entity, \$options\): void \{\s*parent::unrelate\(\$entity, \$options\);\s*\}\);",
+        "parent::unrelate($entity, $options);"),
+    "mass relate not atomic": (
+        "Classes/Identity/IdentityRelation.php",
+        r"\$this->atomically\(function \(\) use \(\$query, \$options\): void \{\s*parent::massRelate\(\$query, \$options\);\s*\}\);",
+        "parent::massRelate($query, $options);"),
+    "memory of an audit survives a failed save": (
+        "Classes/Identity/IdentityRepository.php", r"IdentityGuard[:][:]resetRequestState\(\);", ""),
+    "memory of an audit survives a failed relation change": (
+        "Classes/Identity/IdentityRelation.php", r"IdentityGuard[:][:]resetRequestState\(\);", ""),
+    "script may write firms": (
+        "Resources/metadata/entityAcl/Account.json", r'"systemWriteForbidden": true', '"systemWriteForbidden": false'),
+    "script may write contacts": (
+        "Resources/metadata/entityAcl/Contact.json", r'"systemWriteForbidden": true', '"systemWriteForbidden": false'),
+    "script may write enquiries": (
+        "Resources/metadata/entityAcl/Opportunity.json", r'"systemWriteForbidden": true', '"systemWriteForbidden": false'),
+    "script may write firm links": (
+        "Resources/metadata/entityAcl/AccountContact.json", r'"systemWriteForbidden": true', '"systemWriteForbidden": false'),
+    "link list accepted in a record save": (
+        "Classes/Identity/IdentityGuard.php", r"if \(\$carried\) \{", "if (false) {"),
+    "enquiry merge enabled": (
+        "Resources/metadata/recordDefs/Opportunity.json", r'"disabled": true', '"disabled": false'),
     "repeated link change audited twice": (
         "Classes/Identity/IdentityGuard.php", r"if \(\(self[:][:]\$linkState\[\$ledgerKey\] \?\? null\) === \$state\) \{", "if (false) {"),
     "link-list input accepted": (
@@ -667,6 +736,7 @@ class TestReleaseSettings(unittest.TestCase):
 
 
 FAKE_SETTINGS_DOCKER = r"""#!/usr/bin/env bash
+cat > /dev/null  # `docker compose exec -T` forwards, and so consumes, its standard input
 echo "$*" >> "$FAKE_DOCKER_LOG"
 name=""
 if [[ "$*" =~ array_key_exists\(\'([A-Za-z0-9]+)\' ]]; then name=${BASH_REMATCH[1]}
@@ -708,7 +778,8 @@ class TestApplyReleaseSettings(tb.ShellEnv):
                "FAKE_ROOT_DIR": os.path.join(self.tmp, "runtime"), "FAKE_DOCKER_LOG": self.log,
                "HOME": self.tmp, "TMPDIR": self.tmp}
         env.update(extra or {})
-        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env, timeout=60)
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env, timeout=60,
+                              stdin=subprocess.DEVNULL)
 
     def test_each_setting_is_set_with_its_type_and_read_back(self):
         res = self.step(f"apply_release_settings {REPO}")
@@ -803,7 +874,7 @@ class TestAcceptanceSuiteLogic(unittest.TestCase):
             self.assertIn(name, str(ctx.exception))
 
     def test_a_refusal_must_come_from_a_control_on_a_route_that_exists(self):
-        """A18: a 404, a 405 or a server error is never a refusal; an import counts only as an error with nothing created."""
+        """A18: a 404, a 405 or a server error is never a refusal; only a refusal status proves a refusal, an import that answers success included (F-4)."""
         proved = self.ti.refusal_proved
         self.assertTrue(proved([("status", 403)]))
         self.assertTrue(proved([("status", 400), ("status", 403)]))
@@ -812,8 +883,10 @@ class TestAcceptanceSuiteLogic(unittest.TestCase):
         self.assertFalse(proved([("status", 403), ("status", 404)]))
         self.assertFalse(proved([("ok", {"id": "x"})]))
         self.assertFalse(proved([]))
-        self.assertTrue(proved([("ok", {"importRefused": True})]))
+        self.assertFalse(proved([("ok", {"importRefused": True})]))   # F-4: a success answer is never a refusal
         self.assertFalse(proved([("ok", {"importRefused": False})]))
+        self.assertFalse(proved([("ok", {"countError": 1, "countCreated": 0})]))
+        self.assertTrue(proved([("status", 403), ("status", 400)]))
 
     def test_an_unchanged_cell_refused_by_a_missing_route_fails_the_verdict(self):
         ev = self.ti.evaluate

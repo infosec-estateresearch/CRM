@@ -13,6 +13,12 @@
  *   a foreign key on the foreign record, or on the record itself), then the hook runs;
  * - the record link route runs the record link hooks, then relates (Core/Record/Service.php, link);
  * - link-multiple values are saved by relating and unrelating (LinkMultipleSaver);
+ * - CRM-IDINT-001R2: a save is one transaction when entityDefs.<Entity>.transactionalSave says so
+ *   (ORM/Repository/RDBRepository::save, ORM/TransactionManager: nested starts are savepoints), and the
+ *   repository named by entityDefs.<Entity>.repositoryClassName is used when declared
+ *   (Core/ORM/ClassNameProvider); every relate, unrelate and mass relate goes through the relation
+ *   object that repository returns from getRelation (ORM/Repository/RDBRelation). A rollback restores
+ *   every row, so a failed change leaves nothing;
  * - the platform's own Contact hook (Modules/Crm/Hooks/Contact/Accounts) is reproduced in
  *   reduced form because it changes the primary firm and the links as a side effect.
  */
@@ -119,11 +125,19 @@ namespace CrmTest {
 
     class FakeMetadata extends \Espo\Core\Utils\Metadata
     {
-        public function __construct()
+        public function __construct(private ?string $customDir = null)
         {}
 
         public function get($key = null, $default = null)
         {
+            // Dotted keys, as the platform's SystemRestriction asks: the custom metadata under test.
+            if (is_string($key) && $this->customDir !== null && preg_match('/^(entityAcl)\.(\w+)\.(\w+)$/', $key, $m)) {
+                $file = $this->customDir . "/Resources/metadata/{$m[1]}/{$m[2]}.json";
+                $data = is_file($file) ? json_decode((string) file_get_contents($file), true) : [];
+
+                return $data[$m[3]] ?? $default;
+            }
+
             if ($key === ['entityDefs', 'Contact', 'fields']) {
                 return ['title' => ['type' => 'varchar', 'maxLength' => 255], 'description' => ['type' => 'text'],
                     'sfId' => ['type' => 'varchar', 'maxLength' => 18], 'emailAddress' => ['type' => 'email']];
@@ -172,6 +186,51 @@ namespace CrmTest {
         }
     }
 
+    /** The ORM transaction manager over the fake rows: a snapshot per level, restored on rollback. */
+    class FakeTransactionManager extends \Espo\ORM\TransactionManager
+    {
+        private array $snapshots = [];
+
+        public function __construct(private FakePlatform $platform)
+        {}
+
+        public function isStarted(): bool
+        {
+            return $this->snapshots !== [];
+        }
+
+        public function run(\Closure $function)
+        {
+            $this->start();
+
+            try {
+                $result = $function();
+                $this->commit();
+            } catch (\Throwable $e) {
+                $this->rollback();
+
+                throw $e;
+            }
+
+            return $result;
+        }
+
+        public function start(): void
+        {
+            $this->snapshots[] = [$this->platform->rows, $this->platform->junction];
+        }
+
+        public function commit(): void
+        {
+            array_pop($this->snapshots);
+        }
+
+        public function rollback(): void
+        {
+            [$this->platform->rows, $this->platform->junction] = array_pop($this->snapshots);
+        }
+    }
+
     /** The persistence layer: rows, link rows, hooks and the audit store, with failure switches. */
     class FakePlatform extends \Espo\ORM\EntityManager
     {
@@ -215,10 +274,14 @@ namespace CrmTest {
         private GeneralInvoker $invoker;
         private array $hookCache = [];
         private string $customDir;
+        private FakeTransactionManager $transactions;
+        private array $entityDefs = [];
 
         public function __construct(string $customDir, bool $admin = false)
         {
             $this->customDir = $customDir;
+            $this->transactions = new FakeTransactionManager($this);
+            Link::$platform = $this;
             call_user_func(['\\Espo\\Custom\\Classes\\Identity\\IdentityGuard', 'resetRequestState']);
             $this->user = new FakeUser($admin);
             $this->invoker = new GeneralInvoker();
@@ -231,6 +294,29 @@ namespace CrmTest {
                 new \Espo\Custom\Classes\Identity\IdentityAuditor($this, $this->user),
                 new FakeMetadata()
             );
+        }
+
+        /**
+         * Core/Acl/SystemRestriction (method checkEntityTypeWrite), the platform's own class, over the custom
+         * entityAcl metadata under test: false means script functions and CSV import cannot write the type.
+         */
+        public function scriptsMayWrite(string $type): bool
+        {
+            $restriction = new \Espo\Core\Acl\SystemRestriction(
+                new FakeMetadata($this->customDir),
+                (new \ReflectionClass('Espo\\Core\\Acl\\GlobalRestriction'))->newInstanceWithoutConstructor()
+            );
+
+            return $restriction->checkEntityTypeWrite($type);
+        }
+
+        /** Core/Action/ActionFactory: recordDefs.<type>.actions.<action>.disabled over the custom metadata under test. */
+        public function actionDisabled(string $type, string $action): bool
+        {
+            $file = $this->customDir . "/Resources/metadata/recordDefs/$type.json";
+            $defs = is_file($file) ? (json_decode((string) file_get_contents($file), true) ?: []) : [];
+
+            return (bool) ($defs['actions'][$action]['disabled'] ?? false);
         }
 
         // ---- the part of EntityManager the custom code uses ----------------------------------
@@ -248,6 +334,42 @@ namespace CrmTest {
         public function getQueryExecutor(): \Espo\ORM\Executor\QueryExecutor
         {
             return new FakeExecutor($this);
+        }
+
+        public function getTransactionManager(): \Espo\ORM\TransactionManager
+        {
+            return $this->transactions;
+        }
+
+        /** entityDefs.<type>.<key> from the custom metadata under test. */
+        private function entityDef(string $type, string $key): mixed
+        {
+            if (!isset($this->entityDefs[$type])) {
+                $file = $this->customDir . "/Resources/metadata/entityDefs/$type.json";
+                $this->entityDefs[$type] = is_file($file) ? (json_decode((string) file_get_contents($file), true) ?: []) : [];
+            }
+
+            return $this->entityDefs[$type][$key] ?? null;
+        }
+
+        /** The repository the entity definition declares (ClassNameProvider), or null for the platform's own. */
+        private function declaredRepository(string $type): ?object
+        {
+            $class = $this->entityDef($type, 'repositoryClassName');
+
+            if (!is_string($class) || !class_exists($class)) {
+                return null;
+            }
+
+            $repository = (new \ReflectionClass($class))->newInstanceWithoutConstructor();
+            $set = function (string $name, mixed $value) use ($repository): void {
+                $property = new \ReflectionProperty('Espo\\Core\\Repositories\\Database', $name);
+                $property->setValue($repository, $value);
+            };
+            $set('entityManager', $this);
+            $set('hookMediator', new \Espo\ORM\Repository\EmptyHookMediator());
+
+            return $repository;
         }
 
         public function getRDBRepository(string $entityType): \Espo\ORM\Repository\RDBRepository
@@ -416,6 +538,35 @@ namespace CrmTest {
                 return;
             }
 
+            $repository = $this->declaredRepository($type);
+
+            if ($repository !== null) {
+                $repository->save($entity, $options);
+
+                return;
+            }
+
+            $this->saveWithinPlatformTransaction($entity, $options);
+        }
+
+        /** RDBRepository::save: one transaction when entityDefs.<type>.transactionalSave, then the save. */
+        public function saveWithinPlatformTransaction(Entity $entity, array $options): void
+        {
+            if ($this->entityDef($entity->getEntityType(), 'transactionalSave')) {
+                $this->transactions->run(function () use ($entity, $options): void {
+                    $this->saveInternal($entity, $options);
+                });
+
+                return;
+            }
+
+            $this->saveInternal($entity, $options);
+        }
+
+        private function saveInternal(FakeEntity $entity, array $options): void
+        {
+            $type = $entity->getEntityType();
+
             if ($entity->isNew() && !$entity->has('id')) {
                 $entity->set('id', strtolower(substr($type, 0, 1)) . (++$this->seq));
             }
@@ -486,13 +637,54 @@ namespace CrmTest {
 
         public function relate(Entity $entity, string $link, Entity $foreign, array $options = []): void
         {
+            $repository = $this->declaredRepository($entity->getEntityType());
+
+            if ($repository !== null) {
+                $repository->getRelation($entity, $link)->relate($foreign, null, $options);
+
+                return;
+            }
+
+            $this->relateWithinPlatform($entity, $link, $foreign, $options);
+        }
+
+        public function unrelate(Entity $entity, string $link, Entity $foreign, array $options = []): void
+        {
+            $repository = $this->declaredRepository($entity->getEntityType());
+
+            if ($repository !== null) {
+                $repository->getRelation($entity, $link)->unrelate($foreign, $options);
+
+                return;
+            }
+
+            $this->unrelateWithinPlatform($entity, $link, $foreign, $options);
+        }
+
+        public function massRelate(Entity $entity, string $link, string $foreignType, array $ids, array $options = []): void
+        {
+            $query = (new \Espo\ORM\Query\SelectBuilder())->from($foreignType)->where(['id' => $ids])->build();
+            $repository = $this->declaredRepository($entity->getEntityType());
+
+            if ($repository !== null) {
+                $repository->getRelation($entity, $link)->massRelate($query, $options);
+
+                return;
+            }
+
+            $this->massRelateWithinPlatform($entity, $link, $query, $options);
+        }
+
+        /** RDBRelation::relate: the mapper changes the relation, then the after hooks run. */
+        public function relateWithinPlatform(Entity $entity, string $link, Entity $foreign, array $options): void
+        {
             $this->mapper($entity, $link, $foreign, true);
             $this->runHooks($entity->getEntityType(), 'afterRelate', $entity, $options, [
                 'relationName' => $link, 'foreignEntity' => $foreign, 'foreignId' => $foreign->getId(), 'relationData' => [],
             ]);
         }
 
-        public function unrelate(Entity $entity, string $link, Entity $foreign, array $options = []): void
+        public function unrelateWithinPlatform(Entity $entity, string $link, Entity $foreign, array $options): void
         {
             $this->mapper($entity, $link, $foreign, false);
             $this->runHooks($entity->getEntityType(), 'afterUnrelate', $entity, $options, [
@@ -500,13 +692,12 @@ namespace CrmTest {
             ]);
         }
 
-        public function massRelate(Entity $entity, string $link, string $foreignType, array $ids, array $options = []): void
+        public function massRelateWithinPlatform(Entity $entity, string $link, Select $query, array $options): void
         {
-            foreach ($ids as $id) {
-                $this->mapper($entity, $link, $this->seedOnly($foreignType, $id), true);
+            foreach ((array) ($query->getRaw()['whereClause']['id'] ?? []) as $id) {
+                $this->mapper($entity, $link, $this->seedOnly($query->getFrom(), (string) $id), true);
             }
 
-            $query = (new \Espo\ORM\Query\SelectBuilder())->from($foreignType)->where(['id' => $ids])->build();
             $this->runHooks($entity->getEntityType(), 'afterMassRelate', $entity, $options, [
                 'relationName' => $link, 'query' => $query,
             ]);
@@ -805,10 +996,13 @@ namespace CrmTest {
 
             $foreign = $data['foreignEntity'];
 
+            // As the platform does (Modules/Crm/Hooks/Account/Contacts, afterUnrelate): it changes and saves
+            // the very entity it was handed, so a hook that runs after it sees the primary firm already cleared.
             if ($foreign->get('accountId') && $foreign->get('accountId') === $entity->getId()) {
-                $contact = $this->platform->load('Contact', $foreign->getId());
-                $contact->set('accountId', null);
-                $this->platform->save($contact);
+                // A record the relation route loads does not carry its link-multiple identifiers.
+                unset($foreign->f['accountsIds'], $foreign->fetched['accountsIds']);
+                $foreign->set('accountId', null);
+                $this->platform->save($foreign);
             }
         }
     }

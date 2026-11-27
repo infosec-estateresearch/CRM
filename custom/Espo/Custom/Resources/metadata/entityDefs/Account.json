@@ -1,4 +1,6 @@
 {
+    "transactionalSave": true,
+    "repositoryClassName": "Espo\\Custom\\Classes\\Identity\\IdentityRepository",
     "fields": {
         "name": {
             "audited": true

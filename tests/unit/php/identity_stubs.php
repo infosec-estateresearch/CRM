@@ -13,6 +13,15 @@
  * else; behaviour lives in identity_fake.php, in the CrmTest namespace.
  */
 
+namespace CrmTest {
+    /** Where the stand-ins find the fake platform (a test double, not a platform symbol). */
+    class Link
+    {
+        /** @var object|null */
+        public static $platform = null;
+    }
+}
+
 namespace Espo\ORM {
     interface Entity
     {
@@ -59,6 +68,59 @@ namespace Espo\ORM {
         {
             throw new \LogicException('stand-in: overridden by the fake platform');
         }
+
+        public function getTransactionManager(): TransactionManager
+        {
+            throw new \LogicException('stand-in: overridden by the fake platform');
+        }
+    }
+
+    /** CRM-IDINT-001R2: the transaction manager (ORM/TransactionManager.php; nested starts are savepoints). */
+    class TransactionManager
+    {
+        public function isStarted(): bool
+        {
+            throw new \LogicException('stand-in: overridden by the fake platform');
+        }
+
+        public function run(\Closure $function)
+        {
+            throw new \LogicException('stand-in: overridden by the fake platform');
+        }
+
+        public function start(): void
+        {
+            throw new \LogicException('stand-in: overridden by the fake platform');
+        }
+
+        public function commit(): void
+        {
+            throw new \LogicException('stand-in: overridden by the fake platform');
+        }
+
+        public function rollback(): void
+        {
+            throw new \LogicException('stand-in: overridden by the fake platform');
+        }
+    }
+}
+
+namespace Espo\Core\Repositories {
+    /**
+     * CRM-IDINT-001R2: the platform's repository base class. The product's repository extends it;
+     * save() hands over to the fake platform, which runs the platform's save (transaction when the
+     * entity definition asks for one, then the hooks). The properties are the platform's own
+     * protected ones, set by the fake because the real constructor needs the whole platform.
+     */
+    class Database
+    {
+        protected \Espo\ORM\EntityManager $entityManager;
+        protected \Espo\ORM\Repository\HookMediator $hookMediator;
+
+        public function save(\Espo\ORM\Entity $entity, array $options = []): void
+        {
+            \CrmTest\Link::$platform->saveWithinPlatformTransaction($entity, $options);
+        }
     }
 }
 
@@ -76,6 +138,44 @@ namespace Espo\ORM\Repository {
         public function find(): \Espo\ORM\EntityCollection|\Espo\ORM\SthCollection
         {
             throw new \LogicException('stand-in: overridden by the fake platform');
+        }
+    }
+}
+
+namespace Espo\ORM\Repository {
+    /**
+     * CRM-IDINT-001R2: the relation object (ORM/Repository/RDBRelation.php), not final. The product's
+     * relation class extends it; each operation hands over to the fake platform, which changes the
+     * relation (mapper) and runs the after hooks, as the platform does.
+     */
+    class RDBRelation
+    {
+        private \Espo\ORM\Entity $subject;
+        private string $relationName;
+
+        public function __construct(
+            \Espo\ORM\EntityManager $entityManager,
+            \Espo\ORM\Entity $entity,
+            string $relationName,
+            HookMediator $hookMediator
+        ) {
+            $this->subject = $entity;
+            $this->relationName = $relationName;
+        }
+
+        public function relate(\Espo\ORM\Entity $entity, ?array $columnData = null, array $options = []): void
+        {
+            \CrmTest\Link::$platform->relateWithinPlatform($this->subject, $this->relationName, $entity, $options);
+        }
+
+        public function unrelate(\Espo\ORM\Entity $entity, array $options = []): void
+        {
+            \CrmTest\Link::$platform->unrelateWithinPlatform($this->subject, $this->relationName, $entity, $options);
+        }
+
+        public function massRelate(\Espo\ORM\Query\Select $query, array $options = []): void
+        {
+            \CrmTest\Link::$platform->massRelateWithinPlatform($this->subject, $this->relationName, $query, $options);
         }
     }
 }

@@ -23,8 +23,9 @@ afterwards. The whole matrix of tests/acceptance/identity_matrix.py is driven:
 every (relationship, route, kind) cell must be refused-and-unchanged, or
 performed-and-audited, as the matrix says. A18: a refused cell must also show the
 control's own refusal on a route that exists: every call answers 400 or 403 (never 404,
-405 or a server error), or, for CSV import, is counted as an import error with nothing
-created. Missing configuration fails loudly.
+405 or a server error); CSV import too is refused by the platform with such a status (the
+system-write restriction of CRM-IDINT-001R2), and an import that answers success is never a refusal.
+Missing configuration fails loudly.
 """
 
 import base64
@@ -246,15 +247,12 @@ def observe(fn):
 
 
 def refusal_proved(observations):
-    """A18: every call was refused by a control on a route that exists. An import that
-    answers 200 counts as refused only if it reports an error and created nothing."""
+    """A18: every call was refused by a control on a route that exists. Only a refusal status
+    proves a refusal: a call that answers success, an import included, never does (CRM-IDINT-001R2, F-4)."""
     if not observations:
         return False
     for kind, value in observations:
-        if kind == "status":
-            if value not in REFUSAL_STATUSES:
-                return False
-        elif not (isinstance(value, dict) and value.get("importRefused") is True):
+        if kind != "status" or value not in REFUSAL_STATUSES:
             return False
     return True
 
@@ -341,8 +339,8 @@ def payload_for_create(w):
 def import_csv(client, w, include_id=False):
     """Upload a one-row CSV (POST Import/file) and import it (POST Import) as the world's record kind.
 
-    Returns the import result with "importRefused": True when the platform reports an error and
-    nothing was created. A refusal of the route itself (no Import access) is an ApiError.
+    Returns the platform's import result. A refusal (no Import access, or the platform's own import
+    check) is an ApiError carrying the refusal status.
     """
     entity, data = payload_for_create(w)
     columns = [k for k in data if not isinstance(data[k], list)]
@@ -361,11 +359,7 @@ def import_csv(client, w, include_id=False):
         "dateFormat": "YYYY-MM-DD", "timeFormat": "HH:mm", "personNameFormat": "f l", "decimalMark": ".",
         "currency": "GBP", "defaultValues": {}, "skipDuplicateChecking": False, "manualMode": False,
         "timezone": "UTC", "updateBy": []}) or {}
-    result = dict(result)
-    created = int(result.get("countCreated") or 0) + int(result.get("countUpdated") or 0)
-    errors = int(result.get("countError") or 0)
-    result["importRefused"] = created == 0 and errors >= 1
-    return result
+    return dict(result)
 
 
 def link_routes(w):
@@ -438,6 +432,10 @@ def act(w, route, client):
         # The platform's own merge route: POST /api/v1/Action (Core/Action/Api/PostProcess).
         if E == "Contact":
             other = mk_contact(w.p1, [w.p1])
+            target = w.record
+        elif E == "Opportunity":
+            # An enquiry merge names enquiries (F-5): the record and a second enquiry of the same firm.
+            other = mk_enquiry(w.p1, w.actor)
             target = w.record
         else:
             other = w.succ if rel == "successor" else w.p2

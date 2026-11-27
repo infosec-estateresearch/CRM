@@ -232,12 +232,12 @@ apply_release_settings() {
     [ -n "$rows" ] || die "release settings list nothing"
     while IFS=$'\t' read -r name kind value expect; do
         [[ "$name" =~ ^[A-Za-z][A-Za-z0-9]*$ ]] || die "bad setting name in the release settings"
-        compose exec -T -u www-data -w /var/www/html crm-app php bin/command config:set "$name" "$value" --type="$kind" \
+        compose exec -T -u www-data -w /var/www/html crm-app php bin/command config:set "$name" "$value" --type="$kind" </dev/null \
             || die "config:set $name failed"
         # The key must be one EspoCRM defines or reads, or the set would be a silent no-op.
-        known=$(compose exec -T -u www-data -w /var/www/html crm-app php -r "$(known_setting_php "$name")")
+        known=$(compose exec -T -u www-data -w /var/www/html crm-app php -r "$(known_setting_php "$name")" </dev/null)
         got=$(compose exec -T -u www-data -w /var/www/html crm-app php -r \
-            "\$c = include 'data/config.php'; echo var_export(\$c['$name'] ?? null, true);")
+            "\$c = include 'data/config.php'; echo var_export(\$c['$name'] ?? null, true);" </dev/null)
         check_setting_value "$name" "$expect" "$got" "$known"
     done <<< "$rows"
 }
