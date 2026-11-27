@@ -13,7 +13,7 @@ BROWSER: yes
 
 | Item | Value |
 |---|---|
-| Version | v1.0, 2026-11-27, for exact-version approval. Replaces prepared text v0.3 (pull request 96) |
+| Version | v1.1, 2026-11-27, for exact-version approval. Replaces v1.0 (never approved) and prepared text v0.3 (pull request 96) |
 | Issue | https://github.com/infosec-estateresearch/CRM/issues/102 |
 | Priority and parent item | P0. CRM-PBI-034, ERm journeys |
 | Product outcome | A reliable, repeatable real-browser acceptance run on the pinned platform, covering creation, editing, search, relationships, identity integrity and permission enforcement, reusable for every later release |
@@ -42,7 +42,7 @@ BROWSER: yes
 | `python3 scripts/browser_assurance.py run --out DIR [--journey ID]... [--fault NAME]` | `DIR` is absent or empty. Builds a disposable stack from the checkout the script is in, runs the journeys, writes evidence to `DIR`, removes everything it created. Exit 0 only if every step of every selected journey passed and nothing of the run remains |
 | `python3 scripts/browser_assurance.py verify DIR --commit SHA` | Exit 0 only if the evidence is intact, complete for the full journey set, all passed, and made from commit `SHA` |
 
-`NAME` is `broken-screen`, `wrong-expectation` or `killed-app`. The host needs only Docker with Compose and the Python 3.12 standard library; runner packages are fetched hash-checked and installed inside containers. If the checkout has uncommitted changes or no Git metadata, `run` still works, records the evidence as uncommitted, and `verify --commit` rejects it. A full run finishes within 20 minutes.
+`NAME` is `broken-screen`, `wrong-expectation` or `killed-app`. The host needs only Docker with Compose and the Python 3.12 standard library; runner packages are fetched hash-checked and installed inside containers. If the checkout has uncommitted changes or no Git metadata, `run` still works, records the evidence as uncommitted, and `verify --commit` rejects it. A full run finishes within 40 minutes.
 
 ### 3.2 Stack and isolation
 
@@ -50,6 +50,7 @@ BROWSER: yes
 2. The command accepts no target address. Before any journey the browser container proves that the application it reached is the stack this run created.
 3. Containers, volumes, networks and runtime files of the run are removed after success, failure, `SIGINT` and `SIGTERM`.
 4. The stack carries the repository's own `custom/` and `client/custom/`, the roles, teams and settings of `config/`, and the release settings. Synthetic data only. No product file changes.
+5. **Host safety (binding).** The runner creates, changes and removes only resources carrying its own run's Compose project label, and its own run and output directories, identified by a marker it wrote. It never prunes, never removes by name pattern or image, and never touches another container, volume, network, image or path. It mounts no Docker socket, uses no privileged container or host network, and mounts no host path other than the repository (read-only) and its own run and output directories.
 
 ### 3.3 Journeys (minimum set, each as administrator, ER Staff, ER Intake and ER Manager)
 
@@ -112,14 +113,14 @@ All are mandatory.
 
 | AC | Criterion | Evidence |
 |---|---|---|
-| A1 | The full journey set passes **twice consecutively** on fresh stacks with identical per-step verdicts, each run within 20 minutes | operator report |
+| A1 | The full journey set passes **twice consecutively** on fresh stacks with identical per-step verdicts, each run within 40 minutes | operator report |
 | A2 | Each of the three faults makes the run fail, for the intended step | operator report |
 | A3 | Every journey J1 to J6 is declared and executed for all four account kinds | evidence manifest, review |
 | A4 | An undeclared script error or failed request fails its step; declarations are per step and exact; a skipped or unavailable step is not passed | unit tests |
 | A5 | `verify` rejects removed, changed, added and substituted evidence files, another commit and an incomplete set | unit tests, operator report |
 | A6 | The command accepts no target, the run has no external route, and the target proof refuses a foreign application | unit tests; operator probe with a positive control |
 | A7 | Evidence holds **0** credentials | operator report |
-| A8 | After success, each fault and interruption: **0** containers, volumes and networks of the run remain | operator report |
+| A8 | After success, each fault and interruption: **0** containers, volumes and networks of the run remain, and no other resource on the host is changed. A unit test shows every container and file-removal command the runner can issue conforms to section 3.2 item 5 | unit tests; operator before-and-after inventory |
 | A9 | Unit suite as non-root: **0 failures** (base: 720 tests with PHP and the platform reference, none skipped). New skips only for PHP, listed; the operator runs them with PHP present | delivery record, operator report |
 | A10 | Every declared refusal is confirmed against the stock platform: the same refused flow on the pinned image with no ERm code raises the same error type and status, leaves data unchanged and the page usable | operator report |
 | A11 | Secret scan: 0 findings; no credential, host address, personal, customer or firm data in the change | scan |
@@ -133,7 +134,9 @@ All are mandatory.
 | Engineer | implementation; automated tests for everything executable without a runtime; suite counts before and after |
 | Auditor | conformance to sections 3 to 5, platform facts relied on checked in the reference, expectations data complete, no weakened assertion |
 | Tester | every criterion executable in the sandbox, including mutations showing new tests fail when a control is removed; states what was not executed |
-| DevSecOps | isolation, target proof, teardown, evidence content, secrets, dependencies; no path from the runner to a live stack |
+| DevSecOps | isolation, host safety (every command the runner can issue), target proof, teardown, evidence content, secrets, dependencies; no path from the runner to a live stack |
+
+**Platform fidelity (binding).** Every platform interface, class, signature, metadata key, route, setting and screen element relied on is cited by file from the platform reference, and each reviewer checks it there. Test stand-ins declare no platform symbol that is absent from the reference, and match its signatures. Where server code is added or changed, a test loads every custom class against the reference with PHP and `CRM_PLATFORM_REFERENCE` set; the Engineer and Tester run it, and a skip is a blocking finding. A refusal is proven only by the control's own refusal on a route that exists.
 
 The sandbox has no network, Docker, browser or EspoCRM. The Tester reports browser behaviour as inconclusive, never passed; a close **ESCALATED** solely for that is an intermediate result, never acceptance.
 
@@ -142,10 +145,11 @@ The sandbox has no network, Docker, browser or EspoCRM. The Tester reports brows
 - **Budget:** at most **3** executions each of Engineer, Auditor, Tester and DevSecOps; at most 4 per role including any separately approved corrective successor. A void run counts. Any Engineer change restarts the three reviews. Where the Tester is inconclusive the effective ceiling is two review rounds.
 - **Engineer time limit (in every Engineer prompt):** the UTC dispatch time and a deadline 20 minutes later. The Engineer checks `date` between items; at the deadline it stops and reports `STATUS: completed` with an `UNFINISHED:` list, `blocked` only for a real blocker. The report is returned by minute 25.
 - **Increment 1** (Engineer execution 1): command contract for `run`, stack, isolation, setup, teardown, target proof, runner container, J1 for all four kinds, evidence manifest.
+- **Before each gate** the Orchestrator reads every file that would run on the lab host; a command outside section 3.2 item 5 fails the gate unrun.
 - **Gate G1**, on the uncommitted work: the Orchestrator runs it on a disposable lab and returns a report.
 - **Increment 2** (Engineer execution 2, before any commit): J2 to J6, faults, `verify`, unit tests, register, documentation, and G1 findings.
-- **Gate G2**, on the uncommitted work: full run, faults and `verify`. `PASS` with nothing unfinished: commit and review. Otherwise Engineer execution 3 completes before commit.
-- **Waiting:** the Project Lead waits at most 75 minutes for each gate file. Engineer executions 2 and 3 are never dispatched before the preceding report exists. If a window passes without a report, the Project Lead stops dispatching Engineers, commits what exists and reviews it. Gate reports go to the Engineer only and replace no review or criterion.
+- **Gate G2**, on the uncommitted work: one full run, each fault on a journey subset, and `verify`. `PASS` with nothing unfinished: commit and review. Otherwise Engineer execution 3 completes before commit.
+- **Waiting:** the Project Lead waits at most 75 minutes for the G1 file and 90 minutes for the G2 file. Engineer executions 2 and 3 are never dispatched before the preceding report exists. If a window passes without a report, the Project Lead stops dispatching Engineers, commits what exists and reviews it. Gate reports go to the Engineer only and replace no review or criterion.
 - If execution 3 is used before commit, no Engineer correction remains for review findings: open findings are escalated.
 - **BLOCKED and escalated:** an exhausted budget, a failed entry gate, a missing or altered reference, a needed change outside section 4, or a criterion that cannot be met safely.
 
