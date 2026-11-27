@@ -1,0 +1,263 @@
+{
+  "base": "abd1b04dd7d91f809ca3bf29fb29c15cf19c449a",
+  "base_sha": "abd1b04dd7d91f809ca3bf29fb29c15cf19c449a",
+  "branch": "forge/CRM-BROWSER-001",
+  "candidate": "f7dd4d2eb79b3bc82308efb0190f377988e81c46",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 3,
+    "tester": 1
+  },
+  "created": "2026-11-27T16:35:37Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-27T16:35:51Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-27T16:45:28Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "Increment 1 checkpoint. UNFINISHED: verify stub (exit 2); J2-J6 not implemented (--journey accepts only J1); faults broken-screen/wrong-expectation/killed-app not implemented; docs/BUILD.md, security/EXTERNAL_CODE_REGISTER.yaml, register-expectation test updates, J2-J6 expectation data; crm-daemon service omitted. Unit suite 751 tests OK (720+31). No runtime executed. No criterion depending on these is claimed.",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-27T16:45:31Z",
+      "type": "result"
+    },
+    {
+      "candidate": null,
+      "id": 3,
+      "n": 2,
+      "role": "engineer",
+      "round": 2,
+      "t": "2026-11-27T16:53:18Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/3-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 3,
+      "t": "2026-11-27T17:05:02Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "Increment 2 checkpoint. UNFINISHED: non-vacuity mutation checks not run; J2-J6 untested in a browser; declared refusal texts are guesses pending gate evidence; selectors unverifiable in reference (client/src absent): Contact account clearLink, removeRelated/selectRelated, actions-button/merge visibility, Espo.Ajax global for J6; J5 expectations are base-behaviour guesses; crm-daemon omitted. Unit suite 769 OK. No runtime executed.",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 2,
+      "spawn": 3,
+      "t": "2026-11-27T17:05:05Z",
+      "type": "result"
+    },
+    {
+      "candidate": null,
+      "id": 6,
+      "n": 3,
+      "role": "engineer",
+      "round": 3,
+      "t": "2026-11-27T17:50:03Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 6,
+      "t": "2026-11-27T17:56:16Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "Execution 3 (final). UNFINISHED (all runtime-unverified, none claimed): new selectors/steps rest on gate-2 report, not executed in a browser; audit-edit fills .field[data-name=name] input (guess from entityDefs); adminPanelIframeDisabled config:set not run; ER Staff contact/enquiry list menus not observed. Unit suite 779 OK (769+10), 0 skips. Mutation checks: 8 mutations each failed tests, files restored.",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 3,
+      "spawn": 6,
+      "t": "2026-11-27T17:56:20Z",
+      "type": "result"
+    },
+    {
+      "round": 3,
+      "sha": "f7dd4d2eb79b3bc82308efb0190f377988e81c46",
+      "t": "2026-11-27T17:56:23Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "f7dd4d2eb79b3bc82308efb0190f377988e81c46",
+      "id": 10,
+      "n": 1,
+      "role": "auditor",
+      "round": 3,
+      "t": "2026-11-27T17:56:35Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "f7dd4d2eb79b3bc82308efb0190f377988e81c46",
+      "id": 11,
+      "n": 1,
+      "role": "tester",
+      "round": 3,
+      "t": "2026-11-27T17:56:35Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "f7dd4d2eb79b3bc82308efb0190f377988e81c46",
+      "id": 12,
+      "n": 1,
+      "role": "devsecops",
+      "round": 3,
+      "t": "2026-11-27T17:56:35Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/10-auditor.json",
+      "reported": "findings",
+      "role": "auditor",
+      "spawn": 10,
+      "t": "2026-11-27T17:59:23Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/11-tester.json",
+      "reported": null,
+      "role": "tester",
+      "spawn": 11,
+      "t": "2026-11-27T17:59:23Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/12-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 12,
+      "t": "2026-11-27T17:59:23Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "f7dd4d2eb79b3bc82308efb0190f377988e81c46",
+      "findings": [
+        {
+          "key": "policy-run-allowlist-gaps",
+          "severity": "blocking"
+        },
+        {
+          "key": "killed-app-needs-j1",
+          "severity": "blocking"
+        },
+        {
+          "key": "partial-failure-unnamed",
+          "severity": "advisory"
+        },
+        {
+          "key": "late-events-dropped",
+          "severity": "advisory"
+        }
+      ],
+      "note": "Auditor reported findings (4, each marked advisory by Auditor). PL spot-check verified the policy and fault-subset gaps in code and holds them blocking per Tester evidence; A8/A2 depend on them.",
+      "outcome": "findings",
+      "role": "auditor",
+      "round": 3,
+      "spawn": 10,
+      "t": "2026-11-27T17:59:35Z",
+      "type": "result"
+    },
+    {
+      "candidate": "f7dd4d2eb79b3bc82308efb0190f377988e81c46",
+      "findings": [
+        {
+          "key": "fault-subset-silent-pass",
+          "severity": "blocking"
+        },
+        {
+          "key": "policy-run-allowlist-gaps",
+          "severity": "blocking"
+        },
+        {
+          "key": "weak-tests-surviving-mutants",
+          "severity": "advisory"
+        }
+      ],
+      "note": "Tester findings; A1,A2,A7,A8(runtime),A9(PHP),A10,A13 not executed (operator). Browser behaviour not executed.",
+      "outcome": "findings",
+      "role": "tester",
+      "round": 3,
+      "spawn": 11,
+      "t": "2026-11-27T17:59:35Z",
+      "type": "result"
+    },
+    {
+      "candidate": "f7dd4d2eb79b3bc82308efb0190f377988e81c46",
+      "findings": [
+        {
+          "key": "policy-run-allowlist-gaps",
+          "severity": "advisory"
+        },
+        {
+          "key": "subnet-host-route",
+          "severity": "advisory"
+        },
+        {
+          "key": "verify-symlinked-dir",
+          "severity": "advisory"
+        }
+      ],
+      "note": "DevSecOps reported PASS on sandbox-executable scope with these advisories. PL note: the policy-run-allowlist-gaps defect is recorded blocking via Auditor and Tester (same key); ledger forbids blocking on a pass record.",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 3,
+      "spawn": 12,
+      "t": "2026-11-27T17:59:38Z",
+      "type": "result"
+    },
+    {
+      "note": "Engineer budget (3) exhausted; open blocking findings policy-run-allowlist-gaps and fault-subset-silent-pass need an Engineer correction that is not available. Gate-2 FAIL items addressed in execution 3 are unverified at runtime.",
+      "outcome": "ESCALATED",
+      "t": "2026-11-27T17:59:55Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-BROWSER-001",
+  "host": "docker1",
+  "known_commit": "abd1b04dd7d91f809ca3bf29fb29c15cf19c449a",
+  "limit": 4,
+  "outcome": "ESCALATED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-BROWSER-001",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 3,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-BROWSER-001",
+  "wo": "CRM-BROWSER-001",
+  "worktree": "/srv/CRM/worktrees/CRM-BROWSER-001"
+}
