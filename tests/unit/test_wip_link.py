@@ -257,17 +257,27 @@ class TestClientDefs(unittest.TestCase):
         self.assertNotEqual(check_metadata(json.loads(raw), raw), [])
 
 
+# CRM-IDINT-001 (3.9): the scope guard measures the delivery it was written to
+# protect (CRM-WIP-LINK-001, from BASE to its last commit), not "BASE to whatever
+# is checked out", which failed on every later change outside that order's list.
+# Later orders are bounded by their own work orders.
+DELIVERY_HEAD = "5c56fcd8c1fe7b6257e11aae2276ce0878f9be20"
+
+
+def delivery_changed_paths(repo, base, head):
+    """Paths changed between two commits, or None when git or either commit is absent."""
+    if not shutil.which("git"):
+        return None
+    res = subprocess.run(["git", "-C", repo, "diff", "--name-only", base, head],
+                         capture_output=True, text=True)
+    if res.returncode != 0:
+        return None
+    return set(res.stdout.split())
+
+
 class TestDiffScope(unittest.TestCase):
     def changed_paths(self):
-        if not shutil.which("git"):
-            return None
-        tracked = subprocess.run(["git", "-C", REPO, "diff", "--name-only", BASE],
-                                 capture_output=True, text=True)
-        if tracked.returncode != 0:
-            return None
-        untracked = subprocess.run(["git", "-C", REPO, "ls-files", "-o", "--exclude-standard"],
-                                   capture_output=True, text=True)
-        return set(tracked.stdout.split()) | set(untracked.stdout.split())
+        return delivery_changed_paths(REPO, BASE, DELIVERY_HEAD)
 
     def test_only_allowlisted_paths_changed_and_no_php_added(self):
         paths = self.changed_paths()
@@ -275,6 +285,48 @@ class TestDiffScope(unittest.TestCase):
             paths = set()
         self.assertEqual(sorted(paths - ALLOWED_PATHS), [])
         self.assertFalse([p for p in paths if p.endswith(".php")])
+
+    @unittest.skipUnless(shutil.which("git"), "git not installed")
+    def test_the_guard_still_detects_an_out_of_scope_change_in_the_delivery(self):
+        """Same function, a throw-away repository: a delivery that touches a path outside
+        the allowlist, or adds PHP, is reported; later commits are not part of it."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            def git(*args):
+                res = subprocess.run(["git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                                      "-c", "commit.gpgsign=false", *args], capture_output=True, text=True)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                return res.stdout.strip()
+
+            def write(rel, text):
+                path = os.path.join(tmp, rel)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+
+            git("init", "-q")
+            write("README.md", "base\n")
+            git("add", "-A")
+            git("commit", "-q", "-m", "base")
+            base = git("rev-parse", "HEAD")
+            write("docs/WIP-LINK.md", "in scope\n")
+            write("custom/Espo/Custom/Hooks/X.php", "<?php\n")
+            git("add", "-A")
+            git("commit", "-q", "-m", "delivery")
+            head = git("rev-parse", "HEAD")
+            write("deploy/later.txt", "a later order\n")
+            git("add", "-A")
+            git("commit", "-q", "-m", "later")
+            later = git("rev-parse", "HEAD")
+
+            paths = delivery_changed_paths(tmp, base, head)
+            self.assertEqual(sorted(paths - ALLOWED_PATHS), ["custom/Espo/Custom/Hooks/X.php"])
+            self.assertTrue([p for p in paths if p.endswith(".php")])
+            # A later commit is outside the delivery and is not measured against this list.
+            self.assertEqual(delivery_changed_paths(tmp, base, later) - paths, {"deploy/later.txt"})
+            self.assertEqual(delivery_changed_paths(tmp, base, head), paths)
+            # An unknown commit is not silently treated as "nothing changed" by the helper.
+            self.assertIsNone(delivery_changed_paths(tmp, base, "0" * 40))
 
     def test_no_php_or_other_asset_under_client(self):
         found = []

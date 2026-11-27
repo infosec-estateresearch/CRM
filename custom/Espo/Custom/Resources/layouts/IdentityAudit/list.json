@@ -1,0 +1,24 @@
+[
+    {
+        "name": "occurredAt",
+        "link": true
+    },
+    {
+        "name": "actorName"
+    },
+    {
+        "name": "relationship"
+    },
+    {
+        "name": "recordType"
+    },
+    {
+        "name": "recordId"
+    },
+    {
+        "name": "previousValue"
+    },
+    {
+        "name": "newValue"
+    }
+]

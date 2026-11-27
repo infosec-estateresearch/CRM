@@ -1,0 +1,37 @@
+[
+    {
+        "label": "Identity audit record",
+        "rows": [
+            [
+                {
+                    "name": "occurredAt"
+                },
+                {
+                    "name": "actorName"
+                }
+            ],
+            [
+                {
+                    "name": "relationship"
+                },
+                {
+                    "name": "recordType"
+                }
+            ],
+            [
+                {
+                    "name": "recordId"
+                },
+                false
+            ],
+            [
+                {
+                    "name": "previousValue"
+                },
+                {
+                    "name": "newValue"
+                }
+            ]
+        ]
+    }
+]

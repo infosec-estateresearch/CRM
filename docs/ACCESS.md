@@ -9,7 +9,7 @@ Named EspoCRM logins with Estate Research roles and teams. The roles and teams a
 | The importer's API user | `config/access/api_users.json` |
 | Provisioning | `scripts/provision_access.py`, `scripts/provision_users.py` |
 | Salesforce keys and field history | `custom/Espo/Custom/Resources/metadata/entityDefs/{User,Account,Contact}.json` |
-| Firm deletion guard | `custom/Espo/Custom/Hooks/Account/RestrictDeleteWithEnquiries.php` |
+| Firm deletion guard | `custom/Espo/Custom/Hooks/Account/RestrictDeleteWithEnquiries.php` (kept; the general refusal of CRM-IDINT-001 is in [IDENTITY-INTEGRITY.md](IDENTITY-INTEGRITY.md)) |
 | Policy tests | `tests/unit/access_policy.py`, `tests/unit/test_access_policy.py`, `tests/unit/test_provision.py` |
 | Live acceptance tests (AC3–AC8) | `tests/acceptance/test_access.py` |
 
@@ -25,7 +25,7 @@ Levels follow EspoCRM's role table. `create` is yes or no; `read`, `edit`, `dele
 |---|---|---|---|---|---|---|
 | `ER Staff` | create; read all; edit all; **delete no** | create; read all; edit all; delete no | create; read all; **edit own**; delete no | create; read all; edit own; delete own | create; read all; edit own; delete no | see §2.1 |
 | `ER Intake` | as Staff | as Staff | create; read all; **edit all**; delete no | as Staff | as Staff | see §2.1 |
-| `ER Manager` | create; read all; edit all; delete no | create; read all; edit all; delete all | create; read all; edit all; delete all | create; read all; edit all; delete all | create; read all; edit all; delete no | see §2.1 |
+| `ER Manager` | create; read all; edit all; delete no | create; read all; edit all; **delete no** (CRM-IDINT-001; was delete all) | create; read all; edit all; delete all | create; read all; edit all; delete all | create; read all; edit all; delete no | see §2.1 |
 | `ER Import` (API only) | create; read all; edit all; delete no | the same | the same | the same | the same | see §2.1 |
 
 ### 2.1 Every ACL scope is explicit
@@ -62,7 +62,8 @@ Administration stays with EspoCRM **admin** users, the user type `admin`. No rol
 `tests/unit/test_access_policy.py` enforces these rules:
 - roles.json equals the tables above;
 - every role sets every verified ACL scope explicitly, unused CRM scopes are `false`, reference scopes are read-only and boolean scopes are as in §2.1;
-- no role deletes an Account;
+- no role deletes an Account or a Contact (CRM-IDINT-001: `ER Manager` could delete contacts before; it cannot now);
+- every role reads `IdentityAudit` and none creates, edits or deletes it (the server writes it);
 - Staff edits only its own Opportunities, and Intake edits all of them;
 - Import never deletes, and only API users hold it;
 - stream equals read, and every level is valid; a level-based scope (Currency) uses only its own actions (`read`, `edit`) and levels (`yes`, `no`);
@@ -159,15 +160,17 @@ Why not `readOnly`: in EspoCRM 10.0.12 a field's `readOnly` becomes a global ACL
 Points for the operator stage and the importer:
 - **Admins are not limited by role field access.** An admin can still change `sfOwnerId` and `sfCreatedAt`, through the API or in the firm edit form, which uses the detail layout. Only admins can do it, and only deliberately.
 - **AC8** also checks that an update cannot change `sfId` and that a Staff user cannot change `sfOwnerId`.
-- **Soft-deleted records.** EspoCRM soft-deletes records, so a deleted record keeps its sfId in the unique index. Re-importing that sfId then fails until the deleted record is purged.
+- **Soft-deleted records.** EspoCRM soft-deletes records, so a deleted record keeps its sfId in the unique index. Re-importing that sfId then fails until the deleted record is purged. Since CRM-IDINT-001 firms and contacts are never deleted and deleted-record cleanup is off, so this cannot arise from the product; a record that is wrong or a test is retired, or superseded by its successor ([IDENTITY-INTEGRITY.md](IDENTITY-INTEGRITY.md)).
 - **Labels.** The fields have no i18n labels, which are outside the CRM-003 allowlist. EspoCRM shows its generated labels.
 
 ## 6. Firm deletion guard
 
+**CRM-IDINT-001R extends this.** No firm and no contact is deleted, mass deleted or merged, by any account including an administrator; the refusal is general and does not depend on enquiries (the record delete hook and the ORM remove hook, `massActions.delete.disabled` and `actions.merge.disabled`). See [IDENTITY-INTEGRITY.md](IDENTITY-INTEGRITY.md). The guard below stays in place.
+
 Before an Account is removed, `RestrictDeleteWithEnquiries` (a `beforeRemove` hook) counts its related Opportunities. If there are any, it throws `Forbidden`, which the API returns as HTTP 403.
 - There is no exception for admins, or for any option.
-- To remove such a firm, move or delete its enquiries first. The clean-up must be deliberate.
-- The roles already deny Account delete to every non-admin, so the hook is what stops admins.
+- Removing the enquiries first no longer lets the firm go: the general refusal of CRM-IDINT-001R applies. Retire the firm, or supersede it with a successor.
+- The roles already deny Account delete to every non-admin, so the hooks are what stop admins.
 
 ## 7. Audit: where an admin finds it
 
@@ -199,4 +202,4 @@ Action history and the auth log stay at EspoCRM's defaults (enabled). CRM-003 ch
     python3 -m unittest discover -s tests/acceptance -p test_access.py -v )
   ```
 
-  The tests provision four synthetic users: `acc.staff`, `acc.intake`, `acc.former` and `acc.leaver`, at `@example.test`. If this run creates the `ER Import` API user, its key file also lands in `CRM_ACCESS_OUTPUT_DIR`. Delete that directory afterwards. Without the four variables, the module is skipped.
+  The tests provision four synthetic users: `acc.staff`, `acc.intake`, `acc.former` and `acc.leaver`, at `@example.test`. They no longer delete firms: the firms they create are retired when each test ends (CRM-IDINT-001), so run them on a disposable stack. If this run creates the `ER Import` API user, its key file also lands in `CRM_ACCESS_OUTPUT_DIR`. Delete that directory afterwards. Without the four variables, the module is skipped.

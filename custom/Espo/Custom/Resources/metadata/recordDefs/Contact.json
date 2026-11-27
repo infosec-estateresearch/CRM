@@ -1,3 +1,42 @@
 {
-    "duplicateWhereBuilderClassName": "Espo\\Custom\\Classes\\DuplicateWhereBuilders\\Contact"
+    "duplicateWhereBuilderClassName": "Espo\\Custom\\Classes\\DuplicateWhereBuilders\\Contact",
+    "actions": {
+        "merge": {
+            "disabled": true
+        }
+    },
+    "massActions": {
+        "delete": {
+            "disabled": true
+        }
+    },
+    "beforeCreateHookClassNameList": [
+        "Espo\\Custom\\Classes\\Identity\\RecordHooks\\BeforeCreateInput"
+    ],
+    "beforeUpdateHookClassNameList": [
+        "Espo\\Custom\\Classes\\Identity\\RecordHooks\\BeforeUpdateInput"
+    ],
+    "beforeDeleteHookClassNameList": [
+        "Espo\\Custom\\Classes\\Identity\\RecordHooks\\BeforeDelete"
+    ],
+    "beforeLinkHookClassNameList": [
+        "Espo\\Custom\\Classes\\Identity\\RecordHooks\\BeforeLink"
+    ],
+    "beforeUnlinkHookClassNameList": [
+        "Espo\\Custom\\Classes\\Identity\\RecordHooks\\BeforeUnlink"
+    ],
+    "relationships": {
+        "accounts": {
+            "massLink": false
+        },
+        "account": {
+            "massLink": false
+        },
+        "successor": {
+            "massLink": false
+        },
+        "predecessors": {
+            "massLink": false
+        }
+    }
 }

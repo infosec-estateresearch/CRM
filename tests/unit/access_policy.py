@@ -36,6 +36,7 @@ ACL_ENTITY_SCOPES = [
     "KnowledgeBaseCategory", "Lead", "Meeting", "Opportunity", "TargetList",
     "TargetListCategory", "Task", "Team", "Template", "User",
     "ServiceType",  # added by CRM-004 (custom reference entity)
+    "IdentityAudit",  # added by CRM-IDINT-001 (custom entity; written by the server only)
 ]
 ACL_BOOLEAN_SCOPES = [
     "Activities", "Calendar", "EmailAccountScope", "ExternalAccount", "GlobalStream", "Import",
@@ -47,7 +48,8 @@ UNUSED_SCOPES = ["Lead", "Campaign", "TargetList", "TargetListCategory", "Knowle
                  "KnowledgeBaseCategory", "Template", "EmailTemplate", "EmailTemplateCategory",
                  "Case"]
 # Reference scopes: read all, never create, edit or delete.
-READ_ONLY_SCOPES = ["Currency", "Document", "DocumentFolder", "User", "Team"]
+# CRM-IDINT-001 adds IdentityAudit: every role reads it and nobody changes it (the server writes it).
+READ_ONLY_SCOPES = ["Currency", "Document", "DocumentFolder", "User", "Team", "IdentityAudit"]
 # CRM-003-F: entity scopes whose ACL is level-based, not the five-action table. Verified
 # by the PL live in espocrm 10.0.12 (scopes.<scope>.aclActionList / aclLevelList): the
 # server refuses (HTTP 400) any other action or level, e.g. Currency read "all".
@@ -117,7 +119,7 @@ EXPECTED_DATA = {
     INTAKE: dict({"Account": _row("yes", "all", "no"), "Contact": _row("yes", "all", "no"),
                   "Opportunity": _row("yes", "all", "no"), "Email": _row("yes", "no", "no")},
                  **{a: _row("yes", "own", "own") for a in ACTIVITIES}, **_HUMAN),
-    MANAGER: dict({"Account": _row("yes", "all", "no"), "Contact": _row("yes", "all", "all"),
+    MANAGER: dict({"Account": _row("yes", "all", "no"), "Contact": _row("yes", "all", "no"),
                    "Opportunity": _row("yes", "all", "all"), "Email": _row("yes", "all", "no")},
                   **{a: _row("yes", "all", "all") for a in ACTIVITIES}, **_HUMAN),
     IMPORT: dict({s: _row("yes", "all", "no") for s in MAIN_SCOPES}, **_FIXED, **IMPORT_BOOLEAN,

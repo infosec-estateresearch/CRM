@@ -1,4 +1,6 @@
 {
+    "transactionalSave": true,
+    "repositoryClassName": "Espo\\Custom\\Classes\\Identity\\IdentityRepository",
     "fields": {
         "account": {
             "audited": true
@@ -11,6 +13,26 @@
         },
         "opportunityRole": {
             "options": ["", "Business User", "Decision Maker", "Economic Buyer", "Economic Decision Maker", "Evaluator", "Executive Sponsor", "Influencer", "Technical Buyer", "Other"]
+        },
+        "identityStatus": {
+            "type": "enum",
+            "options": ["active", "retired", "superseded"],
+            "default": "active",
+            "isSorted": false,
+            "isCustom": true
+        },
+        "successor": {
+            "type": "link",
+            "isCustom": true
+        },
+        "predecessors": {
+            "type": "linkMultiple",
+            "layoutDetailDisabled": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true,
+            "noLoad": true,
+            "importDisabled": true,
+            "isCustom": true
         },
         "sfId": {
             "type": "varchar",
@@ -35,6 +57,20 @@
             "isCustom": true,
             "layoutListDisabled": true,
             "layoutMassUpdateDisabled": true
+        }
+    },
+    "links": {
+        "successor": {
+            "type": "belongsTo",
+            "entity": "Contact",
+            "foreign": "predecessors",
+            "isCustom": true
+        },
+        "predecessors": {
+            "type": "hasMany",
+            "entity": "Contact",
+            "foreign": "successor",
+            "isCustom": true
         }
     },
     "collection": {
