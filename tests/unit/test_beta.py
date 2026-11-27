@@ -1015,7 +1015,7 @@ class TestReleaseBundle(unittest.TestCase):
         self.assertEqual(os.path.basename(a), f"crm-release-{self.commit[:12]}.tar.gz")
         got = release.verify(a)
         self.assertEqual(got["commit"], self.commit)
-        self.assertEqual(set(got["images"]), {"espocrm", "mariadb", "haproxy"})
+        self.assertEqual(set(got["images"]), {"espocrm", "mariadb", "haproxy", "playwright-python-image", "playwright", "greenlet"})
         self.assertIsNotNone(got["delivery_records"]["CRM-003"])
         self.assertIn("scripts/release.py", got["files"])
 

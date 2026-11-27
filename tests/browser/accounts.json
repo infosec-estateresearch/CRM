@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "note": "Account kinds of the browser assurance run. Passwords are generated per run inside the runner container; none is stored here.",
+  "kinds": [
+    {"kind": "administrator", "userName": "br-admin", "roles": [], "teams": []},
+    {"kind": "er-staff", "userName": "br-staff", "roles": ["ER Staff"], "teams": ["Enquiries"]},
+    {"kind": "er-intake", "userName": "br-intake", "roles": ["ER Intake"], "teams": ["Ancillary intake"]},
+    {"kind": "er-manager", "userName": "br-manager", "roles": ["ER Manager"], "teams": ["Firm management"]}
+  ]
+}

@@ -1,0 +1,804 @@
+{
+  "version": 2,
+  "note": "Declared expectation of every step per account kind (performed | not offered | refused); the runner never derives an expectation from what it observes. 'declarations' is per account kind: the only error declarations a step may carry (WO 3.4); a kind without an entry has none, so any script error or failed request fails its step. Each server refusal logs the browser's 'Failed to load resource ... 403' line and the platform's 'Server side error 403: <message>' line (both declared, as observed on the pinned image). Base behaviour declared, not hidden: the administrator is offered Remove on firm and contact records, lists and the contacts panel, Merge on lists, and Edit and Remove on identity audit records, and the server refuses each; the firm screen has no branches related panel at the base (J4 'see them on the related panels' is unmet for branches); the contacts-panel Unlink of a primary firm is offered to every kind and refused; removing the primary firm on the contact edit form is accepted by the platform, which makes another linked firm primary in the same save.",
+  "results": [
+    "performed",
+    "not offered",
+    "refused"
+  ],
+  "journeys": {
+    "J1": {
+      "title": "create",
+      "steps": [
+        {
+          "id": "create-firm",
+          "entity": "Account",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "create-branch",
+          "entity": "Account",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "create-contact",
+          "entity": "Contact",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "create-enquiry",
+          "entity": "Opportunity",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        }
+      ]
+    },
+    "J2": {
+      "title": "edit",
+      "steps": [
+        {
+          "id": "edit-firm",
+          "entity": "Account",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "edit-contact",
+          "entity": "Contact",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "edit-enquiry",
+          "entity": "Opportunity",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        }
+      ]
+    },
+    "J3": {
+      "title": "search",
+      "steps": [
+        {
+          "id": "search-firm",
+          "entity": "Account",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "search-contact",
+          "entity": "Contact",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "search-enquiry",
+          "entity": "Opportunity",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        }
+      ]
+    },
+    "J4": {
+      "title": "relationships",
+      "steps": [
+        {
+          "id": "set-branch-parent",
+          "entity": "Account",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "change-branch-parent",
+          "entity": "Account",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "link-second-firm",
+          "entity": "Contact",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "switch-primary-firm",
+          "entity": "Contact",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "change-enquiry-firm",
+          "entity": "Opportunity",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "related-panels",
+          "entity": "Account",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "branch-parent-screen",
+          "entity": "Account",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "performed",
+            "er-intake": "performed",
+            "er-manager": "performed"
+          },
+          "declarations": {}
+        },
+        {
+          "id": "branches-panel",
+          "entity": "Account",
+          "expect": {
+            "administrator": "not offered",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {}
+        }
+      ]
+    },
+    "J5": {
+      "title": "identity integrity",
+      "steps": [
+        {
+          "id": "delete-firm-record",
+          "entity": "Account",
+          "expect": {
+            "administrator": "refused",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {
+            "administrator": [
+              {
+                "type": "server-refusal",
+                "method": "DELETE",
+                "status": 403,
+                "path_template": "Account/{id}",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: Identity records (firms, contacts and their audit history) are never deleted. Retire a firm or contact, or supersede it with a successor."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "delete-contact-record",
+          "entity": "Contact",
+          "expect": {
+            "administrator": "refused",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {
+            "administrator": [
+              {
+                "type": "server-refusal",
+                "method": "DELETE",
+                "status": 403,
+                "path_template": "Contact/{id}",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: Identity records (firms, contacts and their audit history) are never deleted. Retire a firm or contact, or supersede it with a successor."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "delete-firm-list",
+          "entity": "Account",
+          "expect": {
+            "administrator": "refused",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {
+            "administrator": [
+              {
+                "type": "server-refusal",
+                "method": "POST",
+                "status": 403,
+                "path_template": "MassAction",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: Mass action 'delete' is disabled for 'Account'."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "delete-contact-list",
+          "entity": "Contact",
+          "expect": {
+            "administrator": "refused",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {
+            "administrator": [
+              {
+                "type": "server-refusal",
+                "method": "POST",
+                "status": 403,
+                "path_template": "MassAction",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: Mass action 'delete' is disabled for 'Contact'."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "delete-contact-related",
+          "entity": "Contact",
+          "expect": {
+            "administrator": "refused",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {
+            "administrator": [
+              {
+                "type": "server-refusal",
+                "method": "DELETE",
+                "status": 403,
+                "path_template": "Contact/{id}",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: Identity records (firms, contacts and their audit history) are never deleted. Retire a firm or contact, or supersede it with a successor."
+                ],
+                "pageerrors": []
+              }
+            ]
+          }
+        },
+        {
+          "id": "merge-firm",
+          "entity": "Account",
+          "expect": {
+            "administrator": "refused",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {
+            "administrator": [
+              {
+                "type": "server-refusal",
+                "method": "POST",
+                "status": 403,
+                "path_template": "Action",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: Action 'merge' is disabled for 'Account'."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "merge-contact",
+          "entity": "Contact",
+          "expect": {
+            "administrator": "refused",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {
+            "administrator": [
+              {
+                "type": "server-refusal",
+                "method": "POST",
+                "status": 403,
+                "path_template": "Action",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: Action 'merge' is disabled for 'Contact'."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "merge-enquiry",
+          "entity": "Opportunity",
+          "expect": {
+            "administrator": "refused",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "refused"
+          },
+          "declarations": {
+            "administrator": [
+              {
+                "type": "server-refusal",
+                "method": "POST",
+                "status": 403,
+                "path_template": "Action",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: Action 'merge' is disabled for 'Opportunity'."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ],
+            "er-manager": [
+              {
+                "type": "server-refusal",
+                "method": "POST",
+                "status": 403,
+                "path_template": "Action",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: Action 'merge' is disabled for 'Opportunity'."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "unlink-primary-firm",
+          "entity": "Contact",
+          "expect": {
+            "administrator": "refused",
+            "er-staff": "refused",
+            "er-intake": "refused",
+            "er-manager": "refused"
+          },
+          "declarations": {
+            "administrator": [
+              {
+                "type": "server-refusal",
+                "method": "DELETE",
+                "status": 403,
+                "path_template": "Account/{id}/contacts",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: This firm is the contact's primary firm. Set another linked firm as primary, or clear the primary firm, before removing the link."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ],
+            "er-staff": [
+              {
+                "type": "server-refusal",
+                "method": "DELETE",
+                "status": 403,
+                "path_template": "Account/{id}/contacts",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: This firm is the contact's primary firm. Set another linked firm as primary, or clear the primary firm, before removing the link."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ],
+            "er-intake": [
+              {
+                "type": "server-refusal",
+                "method": "DELETE",
+                "status": 403,
+                "path_template": "Account/{id}/contacts",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: This firm is the contact's primary firm. Set another linked firm as primary, or clear the primary firm, before removing the link."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ],
+            "er-manager": [
+              {
+                "type": "server-refusal",
+                "method": "DELETE",
+                "status": 403,
+                "path_template": "Account/{id}/contacts",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: This firm is the contact's primary firm. Set another linked firm as primary, or clear the primary firm, before removing the link."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "audit-edit",
+          "entity": "IdentityAudit",
+          "expect": {
+            "administrator": "refused",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {
+            "administrator": [
+              {
+                "type": "server-refusal",
+                "method": "PUT",
+                "status": 403,
+                "path_template": "IdentityAudit/{id}",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: Identity audit records cannot be changed."
+                ],
+                "pageerrors": [
+                  "error"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "audit-remove",
+          "entity": "IdentityAudit",
+          "expect": {
+            "administrator": "refused",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {
+            "administrator": [
+              {
+                "type": "server-refusal",
+                "method": "DELETE",
+                "status": 403,
+                "path_template": "IdentityAudit/{id}",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: Identity records (firms, contacts and their audit history) are never deleted. Retire a firm or contact, or supersede it with a successor."
+                ],
+                "pageerrors": [
+                  "i"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "J6": {
+      "title": "permissions",
+      "steps": [
+        {
+          "id": "administration-area",
+          "entity": "Admin",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {
+            "er-staff": [
+              {
+                "type": "client-access-denied",
+                "console": [
+                  "Espo.Exceptions.AccessDenied"
+                ]
+              }
+            ],
+            "er-intake": [
+              {
+                "type": "client-access-denied",
+                "console": [
+                  "Espo.Exceptions.AccessDenied"
+                ]
+              }
+            ],
+            "er-manager": [
+              {
+                "type": "client-access-denied",
+                "console": [
+                  "Espo.Exceptions.AccessDenied"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "import-area",
+          "entity": "Import",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {
+            "er-staff": [
+              {
+                "type": "client-access-denied",
+                "console": [
+                  "Espo.Exceptions.AccessDenied"
+                ]
+              }
+            ],
+            "er-intake": [
+              {
+                "type": "client-access-denied",
+                "console": [
+                  "Espo.Exceptions.AccessDenied"
+                ]
+              }
+            ],
+            "er-manager": [
+              {
+                "type": "client-access-denied",
+                "console": [
+                  "Espo.Exceptions.AccessDenied"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "user-create-screen",
+          "entity": "User",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "not offered",
+            "er-intake": "not offered",
+            "er-manager": "not offered"
+          },
+          "declarations": {
+            "er-staff": [
+              {
+                "type": "client-access-denied",
+                "console": [
+                  "Espo.Exceptions.AccessDenied"
+                ]
+              }
+            ],
+            "er-intake": [
+              {
+                "type": "client-access-denied",
+                "console": [
+                  "Espo.Exceptions.AccessDenied"
+                ]
+              }
+            ],
+            "er-manager": [
+              {
+                "type": "client-access-denied",
+                "console": [
+                  "Espo.Exceptions.AccessDenied"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "request-create-user",
+          "entity": "User",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "refused",
+            "er-intake": "refused",
+            "er-manager": "refused"
+          },
+          "declarations": {
+            "er-staff": [
+              {
+                "type": "server-refusal",
+                "method": "POST",
+                "status": 403,
+                "path_template": "User",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: No create access."
+                ],
+                "pageerrors": []
+              }
+            ],
+            "er-intake": [
+              {
+                "type": "server-refusal",
+                "method": "POST",
+                "status": 403,
+                "path_template": "User",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: No create access."
+                ],
+                "pageerrors": []
+              }
+            ],
+            "er-manager": [
+              {
+                "type": "server-refusal",
+                "method": "POST",
+                "status": 403,
+                "path_template": "User",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: No create access."
+                ],
+                "pageerrors": []
+              }
+            ]
+          }
+        },
+        {
+          "id": "request-edit-user",
+          "entity": "User",
+          "expect": {
+            "administrator": "performed",
+            "er-staff": "refused",
+            "er-intake": "refused",
+            "er-manager": "refused"
+          },
+          "declarations": {
+            "er-staff": [
+              {
+                "type": "server-refusal",
+                "method": "PUT",
+                "status": 403,
+                "path_template": "User/{id}",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: No edit access."
+                ],
+                "pageerrors": []
+              }
+            ],
+            "er-intake": [
+              {
+                "type": "server-refusal",
+                "method": "PUT",
+                "status": 403,
+                "path_template": "User/{id}",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: No edit access."
+                ],
+                "pageerrors": []
+              }
+            ],
+            "er-manager": [
+              {
+                "type": "server-refusal",
+                "method": "PUT",
+                "status": 403,
+                "path_template": "User/{id}",
+                "console": [
+                  "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+                  "Server side error 403: No edit access."
+                ],
+                "pageerrors": []
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

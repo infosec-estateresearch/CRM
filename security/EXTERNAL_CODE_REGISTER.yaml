@@ -42,6 +42,33 @@ candidates:
     usage_confirmed: "deploy/beta/compose.json service crm-beta-edge, pinned to this digest, network_mode host, read-only, cap_drop ALL, no-new-privileges, user haproxy; checked by tests/unit/test_beta.py (CRM-007)."
     approval: none
     incorporated: true
+  - name: playwright-python-image
+    origin: https://mcr.microsoft.com/en-us/product/playwright/python/about   # image: mcr.microsoft.com/playwright/python
+    version: "v1.65.1-noble (bundled Chromium 158.0.8127.18)"
+    digest: "sha256:ce84a3d75a47e81657d2ec2c0a949e6e0ef790abdc32ce6819220a3df987ff9a"   # linux/amd64 manifest
+    licence: Apache-2.0 (Playwright); Chromium BSD-3-Clause and component licences
+    usage: browser assurance runner container, test use only, on the run's own internal network with no external route, CRM-BROWSER-001
+    usage_confirmed: "scripts/browser_assurance.py RUNNER_IMAGE pinned by digest; started only by the run with its own project label, read-only repository mount, cap_drop ALL, no-new-privileges, no Docker socket; checked by tests/unit/test_browser_assurance.py (CRM-BROWSER-001)."
+    approval: "CRM-BROWSER-001 v1.1 approval record, decision 3 (bundled Chromium)"
+    incorporated: true
+  - name: playwright
+    origin: https://pypi.org/project/playwright/   # Python package, installed inside the runner container only
+    version: "1.65.1"
+    digest: "sha256:5660e0b050a5bd5672bf8e366ed2580288a3d3640ff9444436ed2d890d3dc442"   # wheel hash in tests/browser/requirements.lock
+    licence: Apache-2.0
+    usage: browser assurance runner (journeys driven in a real browser), CRM-BROWSER-001
+    usage_confirmed: "tests/browser/requirements.lock (hash-checked, --require-hashes, --only-binary); fetched on a helper network and installed offline inside containers; never on the host."
+    approval: "CRM-BROWSER-001 v1.1 approval record"
+    incorporated: true
+  - name: greenlet
+    origin: https://pypi.org/project/greenlet/   # Python package, dependency of playwright
+    version: "3.5.6"
+    digest: "sha256:975736b002ed080d124cf81a79cb7e05cb26d6b3f5c7a7b651c0fcce70353aa1"   # wheel hash in tests/browser/requirements.lock
+    licence: MIT AND PSF-2.0
+    usage: dependency of playwright in the browser assurance runner, CRM-BROWSER-001
+    usage_confirmed: "tests/browser/requirements.lock (hash-checked); installed inside containers only."
+    approval: "CRM-BROWSER-001 v1.1 approval record"
+    incorporated: true
 # Not incorporated: legacy WIP (infosec-estateresearch/WIP@91b2af19877b498ed307ee9f1218b3243b2b60ba) dependencies,
 # recorded so they are not mistaken for CRM components. Any future reuse needs its own WO with ownership,
 # licence and provenance assessment and exact-commit pinning (CRM-D022).
