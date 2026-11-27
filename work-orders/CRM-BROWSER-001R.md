@@ -75,8 +75,8 @@ Also recorded, with no change to the parent text: the create screen leaves an en
 | F-3 | `partial-failure-unnamed` | a run that stops midway names the failing step and records it as failed in the results and the manifest (parent 3.6) |
 | F-4 | `late-events-dropped` | a step is judged only after the page is idle (item S-1); an error or failed request that arrives afterwards fails that step; none is discarded (parent 3.4) |
 | F-5 | `weak-tests-surviving-mutants` | tests fail when the step-record check of `verify` or the Docker socket check is removed |
-| F-6 | `subnet-host-route` | the run's subnet overlaps no route in the host's route table (read from the host, without inspecting other Docker resources); Docker's refusal of an overlapping network is still retried; the range is documented |
-| F-7 | `verify-symlinked-dir` | `verify` rejects any link or non-regular entry in the evidence, and requires the target proof recorded as matched |
+| F-6 | `subnet-host-route` | the run's subnet overlaps no route in the host's route table other than a default route (read from the host, without inspecting other Docker resources); if no free subnet is found the run fails saying so; Docker's refusal of an overlapping network is still retried; the range is documented |
+| F-7 | `verify-symlinked-dir` | `verify` rejects any link in the evidence and any entry that is neither a directory nor a regular file, and requires the target proof recorded as matched |
 
 ## 3C. Runtime findings on the base (operator observation, synthetic data, disposable lab; all required)
 
