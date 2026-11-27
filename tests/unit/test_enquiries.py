@@ -211,14 +211,16 @@ class TestRepository(unittest.TestCase):
         self.assertEqual(contact["fields"]["title"], {"maxLength": 255})
         self.assertEqual(set(contact["fields"]),
                          {"account", "emailAddress", "opportunityRole", "sfId", "sfOwnerId",
-                          "sfCreatedAt", "title"})
+                          "sfCreatedAt", "title",
+                          # CRM-IDINT-001: identity status and successor (3.5)
+                          "identityStatus", "successor", "predecessors"})
 
     def test_every_new_json_file_names_only_opportunity_or_service_type(self):
         for kind in ("entityDefs", "clientDefs", "logicDefs", "selectDefs", "scopes"):
             for name in os.listdir(os.path.join(policy.RES, "metadata", kind)):
                 self.assertIn(name[:-5], {"Account", "Contact", "User", "Opportunity",
                                           "ServiceType", "Call", "Meeting", "Task",
-                                          "Email"},  # CRM-005
+                                          "Email", "IdentityAudit"},  # CRM-005; CRM-IDINT-001
                               f"{kind}/{name}")
 
 

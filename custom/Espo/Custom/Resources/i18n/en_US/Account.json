@@ -6,12 +6,17 @@
         "learningPlatformAccess": "Learning Platform Access",
         "parent": "Head Office",
         "branches": "Branches",
-        "billingAddress": "Firm Address"
+        "billingAddress": "Firm Address",
+        "identityStatus": "Identity status",
+        "successor": "Successor",
+        "predecessors": "Predecessors"
     },
     "links": {
         "parent": "Head Office",
         "branches": "Branches",
-        "opportunities": "Enquiries"
+        "opportunities": "Enquiries",
+        "successor": "Successor",
+        "predecessors": "Predecessors"
     },
     "options": {
         "type": {
@@ -38,6 +43,11 @@
             "TLP": "TLP",
             "Full Access": "Full Access",
             "E-Course": "E-Course"
+        },
+        "identityStatus": {
+            "active": "Active",
+            "retired": "Retired",
+            "superseded": "Superseded"
         }
     }
 }

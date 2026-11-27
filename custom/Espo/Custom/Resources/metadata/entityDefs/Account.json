@@ -1,4 +1,6 @@
 {
+    "transactionalSave": true,
+    "repositoryClassName": "Espo\\Custom\\Classes\\Identity\\IdentityRepository",
     "fields": {
         "name": {
             "audited": true
@@ -47,6 +49,26 @@
             "importDisabled": true,
             "isCustom": true
         },
+        "identityStatus": {
+            "type": "enum",
+            "options": ["active", "retired", "superseded"],
+            "default": "active",
+            "isSorted": false,
+            "isCustom": true
+        },
+        "successor": {
+            "type": "link",
+            "isCustom": true
+        },
+        "predecessors": {
+            "type": "linkMultiple",
+            "layoutDetailDisabled": true,
+            "layoutListDisabled": true,
+            "layoutMassUpdateDisabled": true,
+            "noLoad": true,
+            "importDisabled": true,
+            "isCustom": true
+        },
         "sfId": {
             "type": "varchar",
             "maxLength": 18,
@@ -83,6 +105,18 @@
             "type": "hasMany",
             "entity": "Account",
             "foreign": "parent",
+            "isCustom": true
+        },
+        "successor": {
+            "type": "belongsTo",
+            "entity": "Account",
+            "foreign": "predecessors",
+            "isCustom": true
+        },
+        "predecessors": {
+            "type": "hasMany",
+            "entity": "Account",
+            "foreign": "successor",
             "isCustom": true
         }
     },

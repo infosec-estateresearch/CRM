@@ -14,7 +14,8 @@ sfIds starting ZZZACC) with scripts/provision_access.py and
 scripts/provision_users.py. Every key and password file it makes is a new 0600
 file in CRM_ACCESS_OUTPUT_DIR. That includes the ER Import API key, if this run
 is the one that creates the API user. Nothing secret is printed. The firms and
-enquiries the tests create are deleted again; the synthetic users stay
+enquiries the tests create are deleted again, the firms are retired (firms and
+contacts are never deleted, CRM-IDINT-001); the synthetic users stay
 (re-runs reuse them and reset their passwords).
 """
 
@@ -188,12 +189,15 @@ def synthetic_sf_id():
 
 class TestAccessAcceptance(unittest.TestCase):
     def setUp(self):
-        self.cleanup = []  # (entity, id), deleted in reverse order as admin
+        self.cleanup = []  # (entity, id): enquiries deleted, firms and contacts retired, as admin
 
     def tearDown(self):
         for entity, record_id in reversed(self.cleanup):
             try:
-                ADMIN.delete(entity, record_id)
+                if entity in ("Account", "Contact"):  # CRM-IDINT-001: never deleted, retired
+                    ADMIN.call("PUT", f"{entity}/{record_id}", data={"identityStatus": "retired"})
+                else:
+                    ADMIN.delete(entity, record_id)
             except crm_api.ApiError:
                 pass
 
@@ -255,10 +259,12 @@ class TestAccessAcceptance(unittest.TestCase):
             ADMIN.delete("Account", firm["id"])
         self.assertEqual(ctx.exception.status, 403)
         self.assertEqual(ADMIN.call("GET", f"Account/{firm['id']}")["id"], firm["id"])
-        # Deliberate clean-up: remove the enquiry first, then the firm can go.
+        # CRM-IDINT-001: removing the enquiry no longer lets the firm go; an admin is refused too.
         ADMIN.delete("Opportunity", enquiry["id"])
-        ADMIN.delete("Account", firm["id"])
-        self.cleanup.clear()
+        with self.assertRaises(crm_api.ApiError) as ctx:
+            ADMIN.delete("Account", firm["id"])
+        self.assertEqual(ctx.exception.status, 403)
+        self.assertEqual(ADMIN.call("GET", f"Account/{firm['id']}")["id"], firm["id"])
 
     def test_ac7_audited_field_edit_appears_in_the_stream_with_user_and_time(self):
         me = ADMIN.call("GET", "App/user")["user"]

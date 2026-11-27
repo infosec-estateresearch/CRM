@@ -232,7 +232,8 @@ class TestDuplicateChecks(unittest.TestCase):
                     self.assertTrue(re.search(r"[\\/]Classes[\\/]", root)
                                     or root == CONTROLLERS  # CRM-008
                                     or re.search(
-                                        r"[\\/]Hooks[\\/](Account|Opportunity|Email|Task)$",
+                                        r"[\\/]Hooks[\\/](Account|Contact|Opportunity|Email|Task|"
+                                        r"IdentityAudit)$",  # CRM-IDINT-001: Contact, IdentityAudit
                                         root), root)
 
 
@@ -269,7 +270,9 @@ class TestControllers(unittest.TestCase):
 
     def test_controllers_are_only_for_custom_entity_scopes(self):
         names = sorted(f[:-4] for f in os.listdir(CONTROLLERS) if f.endswith(".php"))
-        self.assertEqual(names, self.custom_entity_scopes())
+        # CRM-IDINT-001R: merge is refused by recordDefs actions.merge.disabled, so the Account and
+        # Contact merge controllers of CRM-IDINT-001 are gone again.
+        self.assertEqual(names, sorted(self.custom_entity_scopes()))
 
     @unittest.skipUnless(shutil.which("php"), "php not installed")
     def test_controllers_lint(self):

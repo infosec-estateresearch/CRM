@@ -12,7 +12,7 @@ Run against a freshly deployed and seeded crm-dev stack, from the repository roo
 Expected values are recomputed from the deterministic seeder, so nothing about
 the dataset is stored. The counts assume the stack holds only the seeded data.
 AC7 tries to create each held-back near-duplicate; if one is wrongly accepted it
-is deleted again and the test fails.
+is retired (firms and contacts are never deleted, CRM-IDINT-001) and the test fails.
 
 AC9's expected host IP comes from CRM_EXPECTED_BIND_IP, never from Git. It is a
 different name from the env file's CRM_BIND_IP on purpose: Compose prefers the
@@ -129,7 +129,8 @@ class TestAcceptance(unittest.TestCase):
                 except crm_api.ApiError as err:
                     self.assertEqual(err.status, 409, err.body)
                     continue
-                CLIENT.delete(h["entityType"], created["id"])
+                # CRM-IDINT-001: firms and contacts are never deleted; a mistaken record is retired.
+                CLIENT.call("PUT", f"{h['entityType']}/{created['id']}", data={"identityStatus": "retired"})
                 self.fail("near-duplicate was accepted without a duplicate warning")
 
     def test_ac8_records_after_restore_and_csv_export_complete(self):

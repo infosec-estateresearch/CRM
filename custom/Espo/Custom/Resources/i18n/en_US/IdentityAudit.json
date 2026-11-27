@@ -1,0 +1,28 @@
+{
+    "fields": {
+        "name": "Name",
+        "occurredAt": "Time (UTC)",
+        "actorId": "Actor ID",
+        "actorName": "Actor",
+        "relationship": "Relationship",
+        "recordType": "Record type",
+        "recordId": "Record ID",
+        "previousValue": "Previous",
+        "newValue": "New"
+    },
+    "options": {
+        "relationship": {
+            "parentFirm": "Parent firm",
+            "primaryFirm": "Primary firm",
+            "contactFirmLink": "Contact firm link",
+            "enquiryFirm": "Enquiry firm",
+            "successor": "Successor",
+            "status": "Identity status"
+        },
+        "recordType": {
+            "Account": "Firm",
+            "Contact": "Contact",
+            "Opportunity": "Enquiry"
+        }
+    }
+}

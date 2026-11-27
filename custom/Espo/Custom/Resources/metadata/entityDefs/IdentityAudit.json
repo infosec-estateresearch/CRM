@@ -1,0 +1,101 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "maxLength": 150
+        },
+        "occurredAt": {
+            "type": "datetime",
+            "required": true
+        },
+        "actorId": {
+            "type": "varchar",
+            "maxLength": 64
+        },
+        "actorName": {
+            "type": "varchar",
+            "maxLength": 255
+        },
+        "relationship": {
+            "type": "enum",
+            "options": [
+                "parentFirm",
+                "primaryFirm",
+                "contactFirmLink",
+                "enquiryFirm",
+                "successor",
+                "status"
+            ],
+            "isSorted": false
+        },
+        "recordType": {
+            "type": "enum",
+            "options": [
+                "Account",
+                "Contact",
+                "Opportunity"
+            ],
+            "isSorted": false
+        },
+        "recordId": {
+            "type": "varchar",
+            "maxLength": 64
+        },
+        "previousValue": {
+            "type": "varchar",
+            "maxLength": 255
+        },
+        "newValue": {
+            "type": "varchar",
+            "maxLength": 255
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true
+        }
+    },
+    "links": {
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        }
+    },
+    "collection": {
+        "orderBy": "occurredAt",
+        "order": "desc",
+        "textFilterFields": [
+            "recordId",
+            "previousValue",
+            "newValue",
+            "actorName"
+        ]
+    },
+    "indexes": {
+        "recordId": {
+            "columns": [
+                "recordId"
+            ]
+        },
+        "occurredAt": {
+            "columns": [
+                "occurredAt"
+            ]
+        }
+    }
+}

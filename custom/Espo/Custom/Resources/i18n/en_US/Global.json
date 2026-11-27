@@ -1,10 +1,12 @@
 {
     "scopeNames": {
         "Opportunity": "Enquiry",
-        "ServiceType": "Service Type"
+        "ServiceType": "Service Type",
+        "IdentityAudit": "Identity Audit"
     },
     "scopeNamesPlural": {
         "Opportunity": "Enquiries",
-        "ServiceType": "Service Types"
+        "ServiceType": "Service Types",
+        "IdentityAudit": "Identity Audit"
     }
 }
