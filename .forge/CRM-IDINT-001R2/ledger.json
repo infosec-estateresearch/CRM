@@ -1,0 +1,174 @@
+{
+  "base": "4cb4beca2b8940d63e0706c2d3a50f81cfaee1df",
+  "base_sha": "4cb4beca2b8940d63e0706c2d3a50f81cfaee1df",
+  "branch": "forge/CRM-IDINT-001R2",
+  "candidate": "abd1b04dd7d91f809ca3bf29fb29c15cf19c449a",
+  "common_dir": "/srv/CRM/main/.git",
+  "counts": {
+    "auditor": 1,
+    "devsecops": 1,
+    "engineer": 1,
+    "tester": 1
+  },
+  "created": "2026-11-27T12:01:19Z",
+  "events": [
+    {
+      "candidate": null,
+      "id": 0,
+      "n": 1,
+      "role": "engineer",
+      "round": 1,
+      "t": "2026-11-27T12:01:33Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/0-engineer.json",
+      "reported": "completed",
+      "role": "engineer",
+      "spawn": 0,
+      "t": "2026-11-27T12:15:27Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": null,
+      "findings": [],
+      "note": "Exec 1 completed, UNFINISHED: none. 720 unit tests OK; A16 19 run 0 skipped; S3 negative tests shown failing when reset removed (save+relation). Awaiting operator gate before commit.",
+      "outcome": "completed",
+      "role": "engineer",
+      "round": 1,
+      "spawn": 0,
+      "t": "2026-11-27T12:15:30Z",
+      "type": "result"
+    },
+    {
+      "round": 1,
+      "sha": "abd1b04dd7d91f809ca3bf29fb29c15cf19c449a",
+      "t": "2026-11-27T12:49:50Z",
+      "type": "candidate"
+    },
+    {
+      "candidate": "abd1b04dd7d91f809ca3bf29fb29c15cf19c449a",
+      "id": 4,
+      "n": 1,
+      "role": "auditor",
+      "round": 1,
+      "t": "2026-11-27T12:50:02Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "abd1b04dd7d91f809ca3bf29fb29c15cf19c449a",
+      "id": 5,
+      "n": 1,
+      "role": "tester",
+      "round": 1,
+      "t": "2026-11-27T12:50:02Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "candidate": "abd1b04dd7d91f809ca3bf29fb29c15cf19c449a",
+      "id": 6,
+      "n": 1,
+      "role": "devsecops",
+      "round": 1,
+      "t": "2026-11-27T12:50:02Z",
+      "type": "spawn",
+      "via": "forge-dispatch"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/4-auditor.json",
+      "reported": "pass",
+      "role": "auditor",
+      "spawn": 4,
+      "t": "2026-11-27T12:56:49Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/5-tester.json",
+      "reported": "pass",
+      "role": "tester",
+      "spawn": 5,
+      "t": "2026-11-27T12:56:49Z",
+      "type": "dispatched"
+    },
+    {
+      "exit": 0,
+      "output": "dispatch/6-devsecops.json",
+      "reported": "pass",
+      "role": "devsecops",
+      "spawn": 6,
+      "t": "2026-11-27T12:56:49Z",
+      "type": "dispatched"
+    },
+    {
+      "candidate": "abd1b04dd7d91f809ca3bf29fb29c15cf19c449a",
+      "findings": [
+        {
+          "key": "stale-put-back-wording",
+          "severity": "advisory"
+        }
+      ],
+      "note": "PASS; S3 satisfied (explicit); W5 regenerated and identical; advisory: stale comment wording",
+      "outcome": "pass",
+      "role": "auditor",
+      "round": 1,
+      "spawn": 4,
+      "t": "2026-11-27T12:56:54Z",
+      "type": "result"
+    },
+    {
+      "candidate": "abd1b04dd7d91f809ca3bf29fb29c15cf19c449a",
+      "findings": [],
+      "note": "PASS; S3 PASS (reset removal fails tests on save and relation paths); 720 OK, A12/A16 run, 0 skipped; live/browser/A11/A14/A17/A19-A21 not executed (operator evidence)",
+      "outcome": "pass",
+      "role": "tester",
+      "round": 1,
+      "spawn": 5,
+      "t": "2026-11-27T12:56:55Z",
+      "type": "result"
+    },
+    {
+      "candidate": "abd1b04dd7d91f809ca3bf29fb29c15cf19c449a",
+      "findings": [
+        {
+          "key": "ledger-reset-scope",
+          "severity": "advisory"
+        },
+        {
+          "key": "enquiry-restore-unaudited",
+          "severity": "advisory"
+        }
+      ],
+      "note": "PASS; S3 PASS explicit; no blocking findings",
+      "outcome": "pass",
+      "role": "devsecops",
+      "round": 1,
+      "spawn": 6,
+      "t": "2026-11-27T12:56:55Z",
+      "type": "result"
+    },
+    {
+      "note": "All three reviewers PASS on abd1b04 (S3 explicit). Escalated solely for browser and live-runtime behaviour (A11, A14, A17, A19-A21 and live parts): no specialist can observe them on this host; operator proof on the unchanged candidate is required. Early gate SMOKE-E1 PASS read before commit.",
+      "outcome": "ESCALATED",
+      "t": "2026-11-27T12:56:59Z",
+      "type": "close"
+    }
+  ],
+  "git_dir": "/srv/CRM/main/.git/worktrees/CRM-IDINT-001R2",
+  "host": "docker1",
+  "known_commit": "4cb4beca2b8940d63e0706c2d3a50f81cfaee1df",
+  "limit": 4,
+  "outcome": "ESCALATED",
+  "records": "/home/forgev2-pl/.local/state/forgev2/records/3b6369e4f8e78d83/CRM-IDINT-001R2",
+  "repo": "infosec-estateresearch/crm",
+  "root": "/srv/CRM/main",
+  "round": 1,
+  "scratch": "/srv/CRM/worktrees/.forge-scratch/CRM-IDINT-001R2",
+  "wo": "CRM-IDINT-001R2",
+  "worktree": "/srv/CRM/worktrees/CRM-IDINT-001R2"
+}
